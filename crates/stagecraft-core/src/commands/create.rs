@@ -18,6 +18,9 @@ pub(super) fn register(r: &mut Registry) {
     r.add("fixture.create", Kind::Edit, "Create a fixture, optionally hung on a parent", fixture);
     r.add("fixture.update", Kind::Edit, "Change FID, CID, mode or address of one fixture", fixture_update);
     r.add("fixture.number", Kind::Edit, "Give fixtures consecutive FIDs in the given order", fixture_number);
+    r.add("floor.update", Kind::Edit, "Change outline or thickness of one floor", floor_update);
+    r.add("wall.update", Kind::Edit, "Change path, height or thickness of one wall", wall_update);
+    r.add("truss.update", Kind::Edit, "Change length or profile of one truss piece", truss_update);
 }
 
 /// Fields every create command takes.
@@ -306,4 +309,101 @@ fn positive(what: &str, v: f64) -> Result<(), CmdError> {
     } else {
         Err(CmdError::invalid_args(format!("{what} must be a positive number of mm")))
     }
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct FloorUpdateArgs {
+    id: Id,
+    /// New outline in plan, mm, relative to the floor's placement; at least 3 points.
+    outline: Option<Vec<P2>>,
+    /// mm.
+    thickness: Option<f64>,
+}
+
+fn floor_update(ctx: &mut Ctx, a: FloorUpdateArgs) -> CmdResult {
+    if a.outline.as_ref().is_some_and(|o| o.len() < 3) {
+        return Err(CmdError::invalid_args("a floor outline needs at least 3 points"));
+    }
+    if let Some(t) = a.thickness {
+        positive("thickness", t)?;
+    }
+    let o = kind_mut(ctx, a.id, "floor")?;
+    let ObjectKind::Floor { outline, thickness } = &mut o.kind else { unreachable!() };
+    if let Some(v) = a.outline {
+        *outline = v;
+    }
+    if let Some(v) = a.thickness {
+        *thickness = v;
+    }
+    Ok(json!(o.kind))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct WallUpdateArgs {
+    id: Id,
+    /// New centre line in plan, mm, relative to the wall's placement; at least 2 points.
+    path: Option<Vec<P2>>,
+    /// mm.
+    height: Option<f64>,
+    /// mm.
+    thickness: Option<f64>,
+}
+
+fn wall_update(ctx: &mut Ctx, a: WallUpdateArgs) -> CmdResult {
+    if a.path.as_ref().is_some_and(|p| p.len() < 2) {
+        return Err(CmdError::invalid_args("a wall path needs at least 2 points"));
+    }
+    for (what, v) in [("height", a.height), ("thickness", a.thickness)] {
+        if let Some(v) = v {
+            positive(what, v)?;
+        }
+    }
+    let o = kind_mut(ctx, a.id, "wall")?;
+    let ObjectKind::Wall { path, height, thickness } = &mut o.kind else { unreachable!() };
+    if let Some(v) = a.path {
+        *path = v;
+    }
+    if let Some(v) = a.height {
+        *height = v;
+    }
+    if let Some(v) = a.thickness {
+        *thickness = v;
+    }
+    Ok(json!(o.kind))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct TrussUpdateArgs {
+    id: Id,
+    /// mm, along the piece from its start.
+    length: Option<f64>,
+    /// Profile name from the truss catalogue, e.g. F34.
+    profile: Option<String>,
+}
+
+fn truss_update(ctx: &mut Ctx, a: TrussUpdateArgs) -> CmdResult {
+    if let Some(l) = a.length {
+        positive("length", l)?;
+    }
+    if a.profile.as_ref().is_some_and(|p| p.trim().is_empty()) {
+        return Err(CmdError::invalid_args("profile is empty"));
+    }
+    let o = kind_mut(ctx, a.id, "truss")?;
+    let ObjectKind::Truss { length, profile } = &mut o.kind else { unreachable!() };
+    if let Some(v) = a.length {
+        *length = v;
+    }
+    if let Some(v) = a.profile {
+        *profile = v;
+    }
+    Ok(json!(o.kind))
+}
+
+/// The object, mutable, after checking it is of type `ty`.
+fn kind_mut<'c>(ctx: &'c mut Ctx, id: Id, ty: &str) -> Result<&'c mut Object, CmdError> {
+    let o = object(ctx.doc(), id)?;
+    if o.kind.type_name() != ty {
+        return Err(CmdError::invalid(format!("{id} is not a {ty}")));
+    }
+    Ok(ctx.doc_mut().objects.get_mut(&id).expect("checked"))
 }

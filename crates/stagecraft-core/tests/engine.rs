@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use stagecraft_core::{Engine, Id, geom, registry};
+use stagecraft_core::{Engine, Id, ObjectKind, geom, registry};
 
 fn run(e: &mut Engine, name: &str, args: Value) -> Value {
     e.execute(name, args).unwrap_or_else(|err| panic!("{name} failed: {err}"))
@@ -239,4 +239,25 @@ fn journal_records_changes_only() {
     run(&mut e, "history.undo", Value::Null);
     let names: Vec<_> = e.journal().iter().map(|j| j.command.as_str()).collect();
     assert_eq!(names, ["truss.create", "fixture.create", "fixture.create", "history.undo"]);
+}
+
+#[test]
+fn kind_updates_change_only_their_type() {
+    let mut e = Engine::new();
+    let w = id(&run(&mut e, "wall.create", json!({ "path": [[0, 0], [1000, 0]] })));
+    let t = id(&run(&mut e, "truss.create", json!({ "start": [0, 0, 0], "end": [2000, 0, 0] })));
+    let f = id(&run(&mut e, "floor.create", json!({ "outline": [[0, 0], [1, 0], [1, 1]] })));
+    run(&mut e, "wall.update", json!({ "id": w, "height": 2500, "thickness": 100 }));
+    run(&mut e, "truss.update", json!({ "id": t, "profile": "F44P", "length": 3000 }));
+    run(&mut e, "floor.update", json!({ "id": f, "thickness": 40 }));
+    assert_eq!(
+        e.doc().objects[&w].kind,
+        ObjectKind::Wall { path: vec![[0.0, 0.0], [1000.0, 0.0]], height: 2500.0, thickness: 100.0 }
+    );
+    assert_eq!(e.doc().objects[&t].kind, ObjectKind::Truss { length: 3000.0, profile: "F44P".into() });
+    assert!(matches!(e.doc().objects[&f].kind, ObjectKind::Floor { thickness: 40.0, .. }));
+    let err = e.execute("wall.update", json!({ "id": t, "height": 1 })).unwrap_err();
+    assert_eq!(err.code, "invalid");
+    let err = e.execute("truss.update", json!({ "id": t, "length": -1 })).unwrap_err();
+    assert_eq!(err.code, "invalid_args");
 }
