@@ -97,6 +97,22 @@ fn real_files_import_and_round_trip() {
             std::fs::create_dir_all(dir).unwrap();
             let stem = path.file_stem().unwrap().to_string_lossy();
             std::fs::write(dir.join(format!("{stem}.roundtrip.mvr")), &exported).unwrap();
+            // Same scene without GDTF files and GDTFSpec references: Perastage
+            // stops on a modal "GDTF conflict" dialog when fixture types match
+            // its library, which a headless check cannot answer.
+            let mut lean = first.mvr.clone();
+            lean.resources.files.retain(|n, _| ResourceKind::of(n) != ResourceKind::Gdtf);
+            fn strip(objs: &mut [Object]) {
+                for o in objs {
+                    o.gdtf_spec = None;
+                    o.gdtf_mode = None;
+                    strip(&mut o.children);
+                }
+            }
+            for l in &mut lean.scene.layers {
+                strip(&mut l.children);
+            }
+            std::fs::write(dir.join(format!("{stem}.nogdtf.mvr")), write_mvr(&lean).unwrap()).unwrap();
         }
     }
 }

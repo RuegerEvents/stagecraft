@@ -214,7 +214,7 @@ fn decode_xml(bytes: &[u8], warnings: &mut Vec<Warning>) -> String {
 }
 
 /// Write an `.mvr` archive. Deterministic: entries in name order (scene file
-/// first), fixed timestamps, already-compressed formats stored, the rest deflated.
+/// first), fixed timestamps, JPEG/PNG stored, the rest deflated.
 pub fn write_mvr(mvr: &Mvr) -> Result<Vec<u8>, MvrError> {
     write_mvr_scene(&mvr.scene, &mvr.resources)
 }
@@ -234,9 +234,9 @@ pub fn write_mvr_scene(scene: &Scene, resources: &Resources) -> Result<Vec<u8>, 
     zip.write_all(xml.as_bytes())?;
     for (name, data) in &resources.files {
         let method = match ResourceKind::of(name) {
-            // zips and compressed images gain nothing from deflate
-            ResourceKind::Gdtf | ResourceKind::GdtfTemplate => CompressionMethod::Stored,
-            ResourceKind::Image if !name.to_ascii_lowercase().ends_with(".svg") => CompressionMethod::Stored,
+            // JPEG and PNG are compressed already. GDTFs are zips too, but often
+            // with stored entries, so deflate does pay off there.
+            ResourceKind::Image if is_compressed_image(name) => CompressionMethod::Stored,
             _ => CompressionMethod::Deflated,
         };
         zip.start_file(name.as_str(), opts(method)).map_err(zerr)?;
@@ -244,6 +244,11 @@ pub fn write_mvr_scene(scene: &Scene, resources: &Resources) -> Result<Vec<u8>, 
     }
     let cursor = zip.finish().map_err(zerr)?;
     Ok(cursor.into_inner())
+}
+
+fn is_compressed_image(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    [".png", ".jpg", ".jpeg", ".webp", ".gif"].iter().any(|e| n.ends_with(e))
 }
 
 /// Write an `.mvr` file to disk.
