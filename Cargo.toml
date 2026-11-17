@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 # Developed standalone in parallel; joins the workspace when integrated.
-exclude = ["crates/stagecraft-gdtf", "crates/stagecraft-mvr", "crates/stagecraft-hlr"]
+exclude = ["crates/stagecraft-gdtf", "crates/stagecraft-mvr", "crates/stagecraft-hlr", "crates/stagecraft-sketch"]
 members = [
     "crates/stagecraft-core",
     "crates/stagecraft-geom",
