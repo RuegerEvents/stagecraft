@@ -10,10 +10,12 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use stagecraft_core::model::P2;
+use stagecraft_core::model::{P2, P3};
 use stagecraft_core::{CmdError, CmdResult, Engine};
+use stagecraft_geom::section::Plane;
 
 use crate::state::{PanelKind, PendingShot, ThemePref, Tool, UiState, View};
+use crate::view3d::{self, Camera3d, Projection, Section, StdView};
 
 /// What a `ui.*` command function gets.
 pub struct UiCtx<'a> {
@@ -86,10 +88,20 @@ pub const UI_KIND: &str = "ui";
 fn register(r: &mut UiRegistry) {
     r.add("ui.state", "Tool, view, camera, theme, panels, hidden tags, selection and status", state);
     r.add("ui.set_tool", "Pick the active tool (select, move, rotate, floor, wall, truss, fixture)", set_tool);
-    r.add("ui.set_view", "Show a view (plan; 3D and sheets come later)", set_view);
+    r.add("ui.set_view", "Show the plan, the 3D view, or both side by side (split)", set_view);
     r.add("ui.zoom", "Zoom the plan by a factor or to a scale", zoom);
     r.add("ui.pan", "Move the plan view by an offset or centre it on a point", pan);
-    r.add("ui.zoom_to_fit", "Fit the drawing (or the selection) into the plan view", zoom_to_fit);
+    r.add("ui.zoom_to_fit", "Fit the drawing (or the selection) into the views shown", zoom_to_fit);
+    r.add(
+        "ui.camera",
+        "3D camera: standard view (top, front, side, iso …), eye/target, projection, orbit, fit",
+        camera,
+    );
+    r.add(
+        "ui.section",
+        "3D section: a clip plane (axis or free) or a section box, with filled cut faces; or off",
+        section,
+    );
     r.add("ui.set_theme", "Light, dark, or follow the system", set_theme);
     r.add("ui.toggle_panel", "Show or hide a panel (layers, tags, inspector, table)", toggle_panel);
     r.add("ui.set_tag_visible", "Show or hide objects carrying a tag in the views", set_tag_visible);
@@ -111,6 +123,9 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "view": ui.view,
         "camera": { "center": cam.center, "scale": cam.scale,
                     "visible": [cam.to_world(cam.rect.left_bottom()), cam.to_world(cam.rect.right_top())] },
+        "camera3d": camera3d_json(&ui.view3d.camera),
+        "section": ui.view3d.section,
+        "section_hatch": ui.view3d.hatch,
         "theme": ui.theme,
         "panels": ui.panels,
         "hidden_tags": ui.hidden_tags,
@@ -198,10 +213,183 @@ struct FitArgs {
 fn zoom_to_fit(c: &mut UiCtx, a: FitArgs) -> CmdResult {
     let ids: Vec<_> =
         if a.selection { c.engine.selection().to_vec() } else { crate::canvas::visible_ids(c.engine.doc(), c.ui) };
-    let b = stagecraft_geom::pick::objects_bounds(c.engine.doc(), ids, &Default::default());
-    c.ui.camera.fit(b);
-    c.ui.fit_pending = false;
-    Ok(json!({ "center": c.ui.camera.center, "scale": c.ui.camera.scale }))
+    let mut out = json!({});
+    if c.ui.view.shows_plan() {
+        let b = stagecraft_geom::pick::objects_bounds(c.engine.doc(), ids.clone(), &Default::default());
+        c.ui.camera.fit(b);
+        c.ui.fit_pending = false;
+        out["center"] = json!(c.ui.camera.center);
+        out["scale"] = json!(c.ui.camera.scale);
+    }
+    if c.ui.view.shows_3d() {
+        view3d::sync_scene(c.engine, c.ui);
+        c.ui.view3d.fit(a.selection.then_some(ids.as_slice()));
+        out["camera3d"] = camera3d_json(&c.ui.view3d.camera);
+    }
+    Ok(out)
+}
+
+pub fn camera3d_json(cam: &Camera3d) -> Value {
+    let r = |v: glam::DVec3| v.to_array().map(|x| (x * 1000.0).round() / 1000.0);
+    json!({
+        "eye": r(cam.eye()),
+        "target": r(cam.target),
+        "projection": cam.projection,
+        "fov": cam.fov,
+        "yaw": cam.yaw,
+        "pitch": cam.pitch,
+        "distance": cam.distance,
+    })
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CameraArgs {
+    /// A standard view: top, front (from the audience), back, side (from stage
+    /// right, +x), left, iso (front right, above). Fits the model unless `fit` is false
+    /// or `eye`/`target` are given.
+    view: Option<StdView>,
+    /// Eye position, world mm.
+    eye: Option<P3>,
+    /// Point looked at and orbited around, world mm.
+    target: Option<P3>,
+    /// perspective or orthographic.
+    projection: Option<Projection>,
+    /// Vertical field of view in degrees (perspective), 10–120. Default 40.
+    fov: Option<f64>,
+    /// Orbit by [yaw, pitch] degrees around the target.
+    orbit: Option<[f64; 2]>,
+    /// Move closer by this factor (2 = half the distance).
+    zoom: Option<f64>,
+    /// Fit everything shown after the other changes.
+    fit: Option<bool>,
+}
+
+fn camera(c: &mut UiCtx, a: CameraArgs) -> CmdResult {
+    let placed = a.eye.is_some() || a.target.is_some();
+    let cam = &mut c.ui.view3d.camera;
+    if let Some(p) = a.projection {
+        cam.projection = p;
+    }
+    if let Some(f) = a.fov {
+        if !(10.0..=120.0).contains(&f) {
+            return Err(CmdError::invalid_args("fov must be 10–120 degrees"));
+        }
+        cam.fov = f;
+    }
+    if let Some(v) = a.view {
+        let (yaw, pitch) = v.angles();
+        cam.set_angles(yaw, pitch);
+    }
+    if placed {
+        let eye = a.eye.map_or(cam.eye(), glam::DVec3::from_array);
+        let target = a.target.map_or(cam.target, glam::DVec3::from_array);
+        if eye.distance(target) < 1.0 {
+            return Err(CmdError::invalid_args("eye and target must be apart"));
+        }
+        cam.look(eye, target);
+    }
+    if let Some([dy, dp]) = a.orbit {
+        cam.set_angles(cam.yaw + dy, cam.pitch + dp);
+    }
+    if let Some(z) = a.zoom {
+        if z <= 0.0 {
+            return Err(CmdError::invalid_args("zoom must be positive"));
+        }
+        let at = cam.rect.center();
+        cam.zoom_at(at, z);
+    }
+    let fit = a.fit.unwrap_or(a.view.is_some() && !placed);
+    if fit {
+        view3d::sync_scene(c.engine, c.ui);
+        c.ui.view3d.fit(None);
+    } else {
+        c.ui.view3d.fit_pending = false;
+    }
+    Ok(camera3d_json(&c.ui.view3d.camera))
+}
+
+#[derive(Deserialize, JsonSchema, Default)]
+struct SectionBox {
+    /// Lower corner, world mm. Default: the model's bounds, a tenth in from each side
+    /// in plan, full height.
+    min: Option<P3>,
+    /// Upper corner, world mm.
+    max: Option<P3>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SectionArgs {
+    /// Turn the section off.
+    #[serde(default)]
+    off: bool,
+    /// An axis plane: x hides what is right of `offset` (stage left), y hides what is
+    /// downstage of it (look from the audience at the cut), z hides what is above
+    /// it. `flip` hides the other side.
+    axis: Option<Axis>,
+    /// Position of an axis plane along its axis, mm. Default: the model's centre.
+    offset: Option<f64>,
+    /// Hide the other side of an axis or free plane.
+    #[serde(default)]
+    flip: bool,
+    /// A free plane: a point on it, world mm …
+    origin: Option<P3>,
+    /// … and its normal, which points to the hidden side.
+    normal: Option<P3>,
+    /// A section box: everything outside is hidden.
+    #[serde(rename = "box")]
+    section_box: Option<SectionBox>,
+    /// Hatch the cut faces (true) or fill them solid (false). Unchanged when absent.
+    hatch: Option<bool>,
+}
+
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+fn section(c: &mut UiCtx, a: SectionArgs) -> CmdResult {
+    if let Some(h) = a.hatch {
+        c.ui.view3d.hatch = h;
+    }
+    view3d::sync_scene(c.engine, c.ui);
+    let (lo, hi) = c.ui.view3d.scene.bounds().unwrap_or((glam::DVec3::ZERO, glam::DVec3::splat(1000.0)));
+    let centre = (lo + hi) / 2.0;
+    let sign = if a.flip { -1.0 } else { 1.0 };
+    let new = if a.off {
+        Section::Off
+    } else if let Some(b) = a.section_box {
+        let q = (hi - lo) / 10.0;
+        let min = b.min.unwrap_or([lo.x + q.x, lo.y + q.y, lo.z - 1.0]);
+        let max = b.max.unwrap_or([hi.x - q.x, hi.y - q.y, hi.z + 1.0]);
+        if (0..3).any(|i| min[i] >= max[i]) {
+            return Err(CmdError::invalid_args("box: min must be below max on every axis"));
+        }
+        Section::Box { min, max }
+    } else if let Some(axis) = a.axis {
+        let (i, n) = match axis {
+            Axis::X => (0, [1.0, 0.0, 0.0]),
+            Axis::Y => (1, [0.0, -1.0, 0.0]),
+            Axis::Z => (2, [0.0, 0.0, 1.0]),
+        };
+        let mut origin = [0.0; 3];
+        origin[i] = a.offset.unwrap_or(centre[i]);
+        Section::Plane { plane: Plane::new(origin, n.map(|x| x * sign)) }
+    } else if let Some(n) = a.normal {
+        if glam::DVec3::from_array(n).length() < 1e-9 {
+            return Err(CmdError::invalid_args("normal must not be zero"));
+        }
+        let origin = a.origin.unwrap_or(centre.to_array());
+        Section::Plane { plane: Plane::new(origin, n.map(|x| x * sign)) }
+    } else if a.hatch.is_some() {
+        c.ui.view3d.section
+    } else {
+        return Err(CmdError::invalid_args("give `off`, `axis`, `normal` (with `origin`) or `box`"));
+    };
+    c.ui.view3d.section = new;
+    Ok(json!({ "section": new, "hatch": c.ui.view3d.hatch }))
 }
 
 #[derive(Deserialize, JsonSchema)]

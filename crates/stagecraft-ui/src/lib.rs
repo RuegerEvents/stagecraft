@@ -22,7 +22,8 @@ pub mod state;
 pub mod table;
 pub mod theme;
 pub mod tools;
+pub mod view3d;
 pub mod widgets;
 
 pub use app::{StageApp, Studio, run};
-pub use state::{ThemePref, Tool, UiState};
+pub use state::{ThemePref, Tool, UiState, View};

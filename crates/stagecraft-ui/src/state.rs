@@ -77,9 +77,24 @@ pub enum ThemePref {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum View {
-    /// Top view of the layers. The 3D view arrives in block 3, sheets in block 7.
+    /// Top view of the layers (2D).
     #[default]
     Plan,
+    /// The 3D model.
+    #[serde(rename = "3d")]
+    ThreeD,
+    /// Plan on the left, 3D on the right.
+    Split,
+}
+
+impl View {
+    pub fn shows_plan(self) -> bool {
+        matches!(self, View::Plan | View::Split)
+    }
+
+    pub fn shows_3d(self) -> bool {
+        matches!(self, View::ThreeD | View::Split)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -228,6 +243,8 @@ pub struct UiState {
     pub tool: Tool,
     pub view: View,
     pub camera: Camera,
+    /// Camera, section and mesh cache of the 3D view.
+    pub view3d: crate::view3d::View3d,
     /// Fit the drawing on the next frame (after the canvas knows its size).
     pub fit_pending: bool,
     pub theme: ThemePref,
@@ -261,6 +278,7 @@ impl Default for UiState {
             tool: Tool::Select,
             view: View::Plan,
             camera: Camera::default(),
+            view3d: Default::default(),
             fit_pending: true,
             theme: ThemePref::System,
             panels: Panels::default(),

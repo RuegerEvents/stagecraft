@@ -6,7 +6,7 @@ use stagecraft_core::{Id, Layer};
 
 use crate::app::Studio;
 use crate::i18n::{t, tf};
-use crate::state::{FileRequest, PanelKind, ThemePref, Tool};
+use crate::state::{FileRequest, PanelKind, ThemePref, Tool, View};
 use crate::widgets::{self, Icon, button, edit_field, icon_button};
 
 pub fn new_document(s: &mut Studio) {
@@ -59,9 +59,21 @@ pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
             }
         });
         ui.menu_button(t("menu.view"), |ui| {
+            for (view, key) in [(View::Plan, "view.plan"), (View::ThreeD, "view.3d"), (View::Split, "view.split")] {
+                if ui.radio(s.ui.view == view, t(key)).clicked() {
+                    let _ = s.run("ui.set_view", json!({ "view": view }));
+                }
+            }
             if ui.button(t("menu.zoom_fit")).clicked() {
                 let _ = s.run("ui.zoom_to_fit", Value::Null);
             }
+            ui.menu_button(t("menu.standard_views"), |ui| {
+                for v in crate::view3d::StdView::ALL {
+                    if ui.button(t(v.key())).clicked() {
+                        let _ = s.run("ui.camera", json!({ "view": v }));
+                    }
+                }
+            });
             ui.separator();
             for (p, key) in [
                 (PanelKind::Layers, "panel.layers"),
@@ -105,6 +117,15 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if button(ui, t("palette.button"), "Command palette").clicked() {
                 s.ui.palette.open();
+            }
+            ui.separator();
+            for (view, key) in [(View::Split, "view.split"), (View::ThreeD, "view.3d"), (View::Plan, "view.plan")] {
+                let label = t(key);
+                let r = ui.selectable_label(s.ui.view == view, label);
+                widgets::name(&r, WidgetType::Button, tf("a11y.view", &[("view", &label)]));
+                if r.clicked() {
+                    let _ = s.run("ui.set_view", json!({ "view": view }));
+                }
             }
         });
     });

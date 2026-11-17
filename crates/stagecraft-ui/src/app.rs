@@ -12,8 +12,8 @@ use stagecraft_core::{CmdError, Engine};
 
 use crate::commands::{UiCtx, UiExtension, check_shot_path, ui_registry};
 use crate::i18n::{t, tf};
-use crate::state::{FileRequest, PendingShot, Tool, UiState};
-use crate::{canvas, palette, panels, table, theme};
+use crate::state::{FileRequest, PendingShot, Tool, UiState, View};
+use crate::{canvas, palette, panels, table, theme, view3d};
 
 pub struct Studio {
     pub engine: Engine,
@@ -42,6 +42,7 @@ impl Studio {
     pub fn after(&mut self, name: &str) {
         if matches!(name, "doc.open" | "doc.new") {
             self.ui.fit_pending = true;
+            self.ui.view3d.fit_pending = true;
             self.ui.hidden_tags.clear();
             self.ui.active_layer = None;
             self.ui.gesture = Default::default();
@@ -108,7 +109,21 @@ impl Studio {
                 egui::ScrollArea::vertical().show(ui, |ui| crate::inspector::show(ui, self));
             });
         }
-        egui::CentralPanel::no_frame().show(ui, |ui| canvas::show(ui, self));
+        egui::CentralPanel::no_frame().show(ui, |ui| match self.ui.view {
+            View::Plan => canvas::show(ui, self),
+            View::ThreeD => view3d::show(ui, self),
+            View::Split => {
+                let (left, right) = ui.max_rect().split_left_right_at_fraction(0.5);
+                ui.scope_builder(egui::UiBuilder::new().max_rect(left.shrink2(egui::vec2(0.5, 0.0))), |ui| {
+                    canvas::show(ui, self)
+                });
+                ui.scope_builder(egui::UiBuilder::new().max_rect(right.shrink2(egui::vec2(0.5, 0.0))), |ui| {
+                    view3d::show(ui, self)
+                });
+                let x = left.right();
+                ui.painter().vline(x, left.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
+            }
+        });
         palette::show(ui.ctx(), self);
     }
 }
@@ -143,6 +158,12 @@ fn shortcuts(ui: &mut Ui, s: &mut Studio) {
     }
     if pressed(ui, cmd(Key::Num0)) {
         let _ = s.run("ui.zoom_to_fit", Value::Null);
+    }
+    // ⌘1 plan, ⌘2 3D, ⌘3 split.
+    for (key, view) in [(Key::Num1, View::Plan), (Key::Num2, View::ThreeD), (Key::Num3, View::Split)] {
+        if pressed(ui, cmd(key)) {
+            let _ = s.run("ui.set_view", json!({ "view": view }));
+        }
     }
     let text_focus = ui.ctx().memory(|m| m.focused().is_some()) || s.ui.table.focused;
     if text_focus {
@@ -315,6 +336,10 @@ pub fn run(engine: Engine) -> Result<(), String> {
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
             theme::apply(&ctx);
+            match &cc.wgpu_render_state {
+                Some(rs) => view3d::gpu::install(rs),
+                None => eprintln!("stagecraft: no wgpu renderer, the 3D view stays empty"),
+            }
             let token = std::env::var("STAGECRAFT_TOKEN").unwrap_or_else(|_| discovery::new_token());
             let wake = ctx.clone();
             let (server, registration) = match Server::spawn(token.clone(), 0, move || wake.request_repaint()) {

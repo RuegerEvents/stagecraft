@@ -367,3 +367,100 @@ fn control_extension_answers_ui_commands() {
     handle_with(engine, &mut ext, "execute", json!({ "command": "ui.set_tool", "args": { "tool": "wall" } })).unwrap();
     assert_eq!(s.ui.tool, stagecraft_ui::Tool::Wall);
 }
+
+// ---- 3D view -------------------------------------------------------------------
+
+fn screen3d(h: &Harness<'static, Studio>, p: [f64; 3]) -> Pos2 {
+    h.state().ui.view3d.camera.to_screen(glam::DVec3::from_array(p)).expect("in front of the camera")
+}
+
+#[test]
+fn the_3d_view_follows_camera_commands_and_picks_like_the_plan() {
+    let mut e = Engine::new();
+    let square = json!([[0, 0], [4000, 0], [4000, 4000], [0, 4000]]);
+    let low = id(&e.execute("floor.create", json!({ "outline": square, "name": "low" })).unwrap());
+    let high = id(&e.execute("floor.create", json!({ "outline": square, "z": 2000, "name": "high" })).unwrap());
+    let mut h = harness(e);
+    run(&mut h, "ui.set_view", json!({ "view": "3d" }));
+    assert_eq!(h.state().ui.view, stagecraft_ui::View::ThreeD);
+    assert!(h.query_by_label("3D view").is_some());
+    assert!(h.query_by_label("Plan").is_none(), "the plan canvas is not shown");
+
+    // Standard view: front, fitted.
+    let cam = run(&mut h, "ui.camera", json!({ "view": "front" }));
+    assert_eq!(cam["yaw"], -90.0);
+    assert_eq!(cam["pitch"], 0.0);
+    assert!(cam["eye"][1].as_f64().unwrap() < cam["target"][1].as_f64().unwrap(), "{cam}");
+    // Eye and target, orthographic.
+    let cam = run(
+        &mut h,
+        "ui.camera",
+        json!({ "eye": [2000, 2000, 20000], "target": [2000, 2000, 0], "projection": "orthographic" }),
+    );
+    assert_eq!(cam["projection"], "orthographic");
+    assert_eq!(cam["eye"], json!([2000.0, 2000.0, 20000.0]));
+    let state = run(&mut h, "ui.state", Value::Null);
+    assert_eq!(state["camera3d"]["target"], json!([2000.0, 2000.0, 0.0]));
+    run(&mut h, "ui.camera", json!({ "orbit": [10, -5], "zoom": 2 }));
+    let cam = &h.state().ui.view3d.camera;
+    assert!((cam.distance - 10_000.0).abs() < 1e-6 && (cam.pitch - 85.0).abs() < 1e-9);
+    assert!(h.state_mut().run("ui.camera", json!({ "fov": 500 })).is_err());
+
+    // Looking down, a click on the floors selects the upper one, as in the plan.
+    run(&mut h, "ui.camera", json!({ "view": "top", "projection": "perspective" }));
+    let p = screen3d(&h, [1000.0, 1000.0, 2000.0]);
+    click_at(&mut h, p);
+    assert_eq!(h.state().engine.selection(), [high]);
+    // A horizontal section at 1 m hides the upper floor: the click reaches the lower.
+    run(&mut h, "ui.section", json!({ "axis": "z", "offset": 1000 }));
+    let s = run(&mut h, "ui.state", Value::Null);
+    assert_eq!(s["section"]["mode"], "plane");
+    click_at(&mut h, p);
+    assert_eq!(h.state().engine.selection(), [low]);
+    // A click into empty space clears the selection.
+    let outside = h.state().ui.view3d.camera.rect.left_bottom() + vec2(40.0, -40.0);
+    click_at(&mut h, outside);
+    assert!(h.state().engine.selection().is_empty());
+
+    // Section box and off; bad arguments are refused.
+    run(&mut h, "ui.section", json!({ "box": { "min": [0, 0, -100], "max": [2000, 2000, 3000] } }));
+    assert_eq!(h.state().ui.view3d.section.planes().len(), 6);
+    assert!(h.state_mut().run("ui.section", json!({ "box": { "min": [0, 0, 0], "max": [0, 1, 1] } })).is_err());
+    assert!(h.state_mut().run("ui.section", json!({})).is_err());
+    run(&mut h, "ui.section", json!({ "off": true }));
+    assert!(h.state().ui.view3d.section.planes().is_empty());
+}
+
+#[test]
+fn the_3d_scene_is_cached_and_follows_visibility() {
+    let mut e = Engine::new();
+    let t = id(&e
+        .execute("truss.create", json!({ "start": [0, 0, 6000], "end": [6000, 0, 6000], "tags": ["rigging"] }))
+        .unwrap());
+    e.execute("floor.create", json!({ "outline": [[0, 0], [4000, 0], [4000, 4000]] })).unwrap();
+    let mut h = harness(e);
+    run(&mut h, "ui.set_view", json!({ "view": "split" }));
+    assert!(h.query_by_label("3D view").is_some() && h.query_by_label("Plan").is_some());
+    let builds = h.state().ui.view3d.scene.mesh_builds;
+    assert!(builds >= 2);
+    for _ in 0..10 {
+        h.run();
+    }
+    assert_eq!(h.state().ui.view3d.scene.mesh_builds, builds, "no rebuild without a change");
+    // Hiding a tag removes the truss from the 3D view, showing it again needs no rebuild.
+    run(&mut h, "ui.set_tag_visible", json!({ "tag": "rigging", "visible": false }));
+    assert!(!h.state().ui.view3d.scene.visible().contains(&t));
+    run(&mut h, "ui.set_tag_visible", json!({ "tag": "rigging", "visible": true }));
+    assert!(h.state().ui.view3d.scene.visible().contains(&t));
+    assert_eq!(h.state().ui.view3d.scene.mesh_builds, builds);
+    // Editing the truss rebuilds only the truss.
+    run(&mut h, "truss.update", json!({ "id": t, "profile": "F44P" }));
+    assert_eq!(h.state().ui.view3d.scene.mesh_builds, builds + 1);
+    // A selection made in the plan shows in 3D (and vice versa: one selection).
+    run(&mut h, "selection.set", json!({ "ids": [t] }));
+    let v = &h.state().ui.view3d.scene.buffers;
+    assert!(v.vertices.iter().any(|v| v.flags & 1 == 1));
+    // Zoom to fit in split fits both views.
+    let out = run(&mut h, "ui.zoom_to_fit", Value::Null);
+    assert!(out.get("scale").is_some() && out.get("camera3d").is_some(), "{out}");
+}
