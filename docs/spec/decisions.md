@@ -11,3 +11,8 @@ Choices made while building, where the spec did not say. Add a row when you make
 | 2026-11-17 | Discovery | A running instance writes `instances/<pid>.json` (port, token, file) into the app data dir; MCP finds it there. | FilmCraft's control channel cannot be found from outside; we avoid that. |
 | 2026-11-17 | Async | Control server on plain `std` threads and channels, no tokio. | Small, and the engine is single-owner anyway. |
 | 2026-11-17 | Test data | Real MVRs live in `testdata/private/` and are git-ignored. | They are client projects. |
+| 2026-11-17 | UI language | English UI, i18n catalog from the start (user). | User choice. |
+| 2026-11-17 | Theme | Light and dark, follows macOS, switchable (user). Sheets always white. | User choice. |
+| 2026-11-17 | Truss 3D | Real chords and diagonals, simpler level of detail when zoomed out; 2D double line with diagonals (user). | User choice. |
+| 2026-11-17 | Overnight order | Blocks in roadmap order; parallel worktrees where independent: 2 → 3 → (4 ∥ 5 ∥ 6) → (7 ∥ 8) (user: roadmap order, parallel allowed). | User choice. |
+| 2026-11-17 | Title block | Generic with placeholders, company/logo from document settings (user). | User choice. |
