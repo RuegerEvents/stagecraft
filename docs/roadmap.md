@@ -12,6 +12,8 @@ Estimate from 2026-11-17: 14–21 active days for the whole MVP.
 | 6 | Vector views from 3D: hidden lines, section hatching; rendered viewports | 2–3 | |
 | 7 | Sheets: viewports, title block, labels (three modes), PDF | 2–3 | |
 | 8 | MVR import/export, DXF/PDF/image underlays, glTF/OBJ/3DS | 1–2 | |
+| 9 | Parametric floor-plan sketch: ezpz solver, driving + reference dimensions (docs/spec/sketch.md) | 2–3 | |
+| 10 | Acceptance: draw the Hall A venue as a parametric sketch (docs/spec/sketch.md) | 0.5 | |
 | — | Spreadsheet panel (part of 2 and 5) | | |
 
 Blocks 4, 5 and 7 can run in parallel worktrees once 1–3 stand.
