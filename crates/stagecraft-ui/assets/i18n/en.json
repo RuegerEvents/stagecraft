@@ -4,7 +4,6 @@
   "canvas.name": "Plan",
   "dialog.discard.title": "Discard changes?",
   "dialog.discard.text": "The document has unsaved changes. Discard them?",
-
   "menu.file": "File",
   "menu.new": "New",
   "menu.open": "Open…",
@@ -17,11 +16,9 @@
   "menu.palette": "Command Palette…",
   "menu.view": "View",
   "menu.zoom_fit": "Zoom to Fit",
-
   "theme.system": "Follow System",
   "theme.light": "Light",
   "theme.dark": "Dark",
-
   "tool.select": "Select",
   "tool.move": "Move",
   "tool.rotate": "Rotate",
@@ -30,7 +27,6 @@
   "tool.truss": "Truss",
   "tool.fixture": "Fixture",
   "tool.tip": "{tool} ({key})",
-
   "hint.select": "Click or drag a box to select · Shift adds · drag a selected object to move it",
   "hint.move": "Click a base point, then the target · or type a distance and Enter",
   "hint.rotate": "Click the pivot, a reference direction and the new direction · or type an angle",
@@ -38,37 +34,30 @@
   "hint.wall": "Click points · type a length (m), Tab for the angle · Enter or double-click finishes",
   "hint.truss": "Click start and end · or type a length",
   "hint.fixture": "Click to place · on a truss it hangs there",
-
   "option.profile": "Profile",
   "option.height": "Height",
   "option.thickness": "Thickness",
-
   "dim.length": "Length",
   "dim.angle": "Angle",
-
   "snap.endpoint": "Endpoint",
   "snap.midpoint": "Midpoint",
   "snap.truss": "On truss",
   "snap.grid": "Grid",
   "snap.orthogonal": "Orthogonal",
   "snap.free": "Free",
-
   "panel.layers": "Layers",
   "panel.tags": "Tags",
   "panel.inspector": "Inspector",
   "panel.table": "Table",
-
   "layers.add": "Add a layer",
   "layers.new_name": "Layer {n}",
   "layers.name": "Name",
   "layers.elevation": "Elevation (mm)",
   "layers.activate": "New objects go on this layer",
   "layers.delete": "Delete the layer; its objects move to another one",
-
   "tags.none": "No tags yet",
   "tags.new_hint": "New tag…",
   "tags.delete": "Delete the tag from the document",
-
   "type.floor": "Floor",
   "type.wall": "Wall",
   "type.truss": "Truss",
@@ -77,7 +66,6 @@
   "type.wall.plural": "Walls",
   "type.truss.plural": "Truss",
   "type.fixture.plural": "Fixtures",
-
   "inspector.nothing": "Nothing selected.",
   "inspector.document": "Document",
   "inspector.n_objects": "{n} objects",
@@ -103,12 +91,10 @@
   "inspector.add_tag": "Add tag…",
   "inspector.attached_to": "Attached to {name}",
   "inspector.detach": "Detach",
-
   "meta.project": "Project",
   "meta.venue": "Venue",
   "meta.drawn_by": "Drawn by",
   "meta.revision": "Revision",
-
   "col.name": "Name",
   "col.type": "Type",
   "col.fid": "FID",
@@ -121,7 +107,6 @@
   "col.thickness": "Thickness",
   "col.layer": "Layer",
   "col.tags": "Tags",
-
   "table.all": "All",
   "table.any_tag": "Any tag",
   "table.empty": "No objects of this kind.",
@@ -132,7 +117,6 @@
   "table.read_only": "This column cannot be edited",
   "table.bad_address": "{text} is not an address like 1.001",
   "table.paste_skipped": "{n} pasted rows did not fit and were left out",
-
   "palette.button": "⌘K Commands",
   "palette.hint": "Type to search commands…",
   "palette.run": "Run",
@@ -140,7 +124,6 @@
   "palette.ran": "{name} → {result}",
   "palette.list_hint": "a, b, c",
   "palette.json_hint": "JSON, e.g. [0, 0, 0]",
-
   "status.created": "Created {what}",
   "status.saved": "Saved",
   "status.screenshot": "Screenshot written to {path}",
@@ -150,5 +133,6 @@
   "status.bad_length": "{text} is not a length",
   "status.bad_angle": "{text} is not an angle",
   "status.bad_number": "{text} is not a number",
-  "status.too_few_points": "Not enough points"
+  "status.too_few_points": "Not enough points",
+  "layers.visible": "Show or hide the layer"
 }

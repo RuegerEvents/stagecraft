@@ -111,6 +111,7 @@ pub fn plan_order(doc: &Document, ids: &[Id]) -> Vec<Id> {
     v.into_iter().map(|x| x.2).collect()
 }
 
+/// Rows: fixtures with a FID by FID, then everything else in plan order.
 pub fn rows(doc: &Document, st: &TableState) -> Vec<Id> {
     let ids: Vec<Id> = doc
         .objects
@@ -119,7 +120,14 @@ pub fn rows(doc: &Document, st: &TableState) -> Vec<Id> {
         .filter(|o| st.tag.is_none_or(|t| o.tags.contains(&t)))
         .map(|o| o.id)
         .collect();
-    plan_order(doc, &ids)
+    let fid = |id: &Id| match doc.objects[id].kind {
+        ObjectKind::Fixture { fid: Some(f), .. } => Some(f),
+        _ => None,
+    };
+    let (mut numbered, rest): (Vec<Id>, Vec<Id>) = ids.into_iter().partition(|id| fid(id).is_some());
+    numbered.sort_by_key(fid);
+    numbered.extend(plan_order(doc, &rest));
+    numbered
 }
 
 pub fn cell_text(doc: &Document, o: &Object, col: Col) -> String {

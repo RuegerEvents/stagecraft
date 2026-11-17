@@ -2,7 +2,7 @@
 //! selected, a field shows a value when all agree, and an edit applies to all of them
 //! (one undo step through `batch`).
 
-use egui::{RichText, Ui, WidgetType};
+use egui::{RichText, Ui};
 use serde_json::{Value, json};
 use stagecraft_core::model::format_address;
 use stagecraft_core::{Id, Object, ObjectKind};
@@ -29,7 +29,8 @@ fn field(ui: &mut Ui, key: &str, salt: &str, current: Option<String>) -> Option<
     let id = egui::Id::new(("inspector", salt));
     let mixed = current.is_none();
     let hint = if mixed { t("inspector.mixed") } else { "" };
-    let out = edit_field_hint(ui, id, &current.unwrap_or_default(), 140.0, &format!("Inspector {}", t(key)), hint);
+    let w = ui.available_width().clamp(90.0, 170.0);
+    let out = edit_field_hint(ui, id, &current.unwrap_or_default(), w, &format!("Inspector {}", t(key)), hint);
     ui.end_row();
     out
 }
@@ -291,11 +292,18 @@ fn tags_field(ui: &mut Ui, s: &mut Studio, doc: &stagecraft_core::Document, objs
             let Some(tg) = doc.tags.get(tag) else { continue };
             let on_all = objs.iter().all(|o| o.tags.contains(tag));
             let text = if on_all { tg.name.clone() } else { format!("{} ({})", tg.name, t("inspector.some")) };
-            let r = ui.button(format!("{text}  ✕"));
-            widgets::name(&r, WidgetType::Button, format!("Remove tag {}", tg.name));
-            if r.on_hover_text(t("inspector.remove_tag")).clicked() {
-                let _ = s.run("object.untag", json!({ "ids": sel, "tags": [tag] }));
-            }
+            egui::Frame::new()
+                .fill(ui.visuals().faint_bg_color)
+                .corner_radius(10)
+                .inner_margin(egui::Margin { left: 8, right: 2, top: 1, bottom: 1 })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    ui.label(text);
+                    let r = widgets::icon_button(ui, widgets::Icon::Close, &format!("Remove tag {}", tg.name));
+                    if r.on_hover_text(t("inspector.remove_tag")).clicked() {
+                        let _ = s.run("object.untag", json!({ "ids": sel, "tags": [tag] }));
+                    }
+                });
         }
     });
     let id = egui::Id::new("inspector_add_tag");

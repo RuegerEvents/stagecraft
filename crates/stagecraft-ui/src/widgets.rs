@@ -61,3 +61,64 @@ pub fn select_all(ctx: &egui::Context, id: egui::Id, text: &str) {
     state.cursor.set_char_range(Some(range));
     state.store(ctx, id);
 }
+
+/// Small painted icons: Roboto lacks arrows and crosses, and painted shapes look the
+/// same in every font.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Icon {
+    Up,
+    Down,
+    Close,
+    Plus,
+    /// Filled when on: the active layer.
+    Dot(bool),
+}
+
+pub fn icon_button(ui: &mut Ui, icon: Icon, accessible: &str) -> Response {
+    let size = egui::vec2(18.0, 18.0);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    name(&resp, WidgetType::Button, accessible);
+    if ui.is_rect_visible(rect) {
+        let v = ui.style().interact(&resp);
+        let p = ui.painter();
+        if resp.hovered() {
+            p.rect_filled(rect, 3.0, v.weak_bg_fill);
+        }
+        let c = rect.center();
+        let col = v.fg_stroke.color;
+        let st = egui::Stroke::new(1.4, col);
+        let d = 4.0;
+        match icon {
+            Icon::Up => {
+                p.add(egui::Shape::convex_polygon(
+                    vec![c + egui::vec2(0.0, -d), c + egui::vec2(d, d * 0.6), c + egui::vec2(-d, d * 0.6)],
+                    col,
+                    egui::Stroke::NONE,
+                ));
+            }
+            Icon::Down => {
+                p.add(egui::Shape::convex_polygon(
+                    vec![c + egui::vec2(-d, -d * 0.6), c + egui::vec2(d, -d * 0.6), c + egui::vec2(0.0, d)],
+                    col,
+                    egui::Stroke::NONE,
+                ));
+            }
+            Icon::Close => {
+                p.line_segment([c + egui::vec2(-d, -d), c + egui::vec2(d, d)], st);
+                p.line_segment([c + egui::vec2(-d, d), c + egui::vec2(d, -d)], st);
+            }
+            Icon::Plus => {
+                p.line_segment([c + egui::vec2(-d, 0.0), c + egui::vec2(d, 0.0)], st);
+                p.line_segment([c + egui::vec2(0.0, -d), c + egui::vec2(0.0, d)], st);
+            }
+            Icon::Dot(on) => {
+                if on {
+                    p.circle_filled(c, 4.5, crate::theme::ACCENT);
+                } else {
+                    p.circle_stroke(c, 4.0, st);
+                }
+            }
+        }
+    }
+    resp
+}

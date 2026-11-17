@@ -7,7 +7,7 @@ use stagecraft_core::{Id, Layer};
 use crate::app::Studio;
 use crate::i18n::{t, tf};
 use crate::state::{FileRequest, PanelKind, ThemePref, Tool};
-use crate::widgets::{self, button, edit_field};
+use crate::widgets::{self, Icon, button, edit_field, icon_button};
 
 pub fn new_document(s: &mut Studio) {
     if s.engine.dirty() && !crate::app::confirm_discard_or_test(s) {
@@ -217,7 +217,7 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
     ui.horizontal(|ui| {
         ui.heading(t("panel.layers"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if button(ui, "+", "Add layer").on_hover_text(t("layers.add")).clicked() {
+            if icon_button(ui, Icon::Plus, "Add layer").on_hover_text(t("layers.add")).clicked() {
                 let n = s.engine.doc().layers.len() + 1;
                 let mut name = tf("layers.new_name", &[("n", &n)]);
                 let mut i = n;
@@ -231,71 +231,68 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
     });
     let layers: Vec<Layer> = s.engine.doc().layers_sorted().into_iter().cloned().collect();
     let active = s.ui.active_layer.or(layers.first().map(|l| l.id));
-    egui::Grid::new("layers").num_columns(5).spacing([6.0, 4.0]).striped(true).show(ui, |ui| {
-        ui.label("");
+    ui.horizontal(|ui| {
+        ui.add_space(46.0);
         ui.label(RichText::new(t("layers.name")).small().weak());
-        ui.label(RichText::new(t("layers.elevation")).small().weak());
-        ui.label("");
-        ui.label("");
-        ui.end_row();
-        for (i, l) in layers.iter().enumerate() {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(64.0);
+            ui.label(RichText::new(t("layers.elevation")).small().weak());
+        });
+    });
+    for (i, l) in layers.iter().enumerate() {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
             let mut vis = l.visible;
             let r = ui.checkbox(&mut vis, "");
             widgets::name(&r, WidgetType::Checkbox, format!("Visible {}", l.name));
-            if r.changed() {
+            if r.on_hover_text(t("layers.visible")).changed() {
                 let _ = s.run("layer.update", json!({ "layer": l.id, "visible": vis }));
             }
-            ui.horizontal(|ui| {
-                let is_active = active == Some(l.id);
-                let r = ui.selectable_label(is_active, if is_active { "●" } else { "○" });
-                widgets::name(&r, WidgetType::Button, format!("Activate {}", l.name));
-                if r.on_hover_text(t("layers.activate")).clicked() {
-                    let _ = s.run("ui.set_active_layer", json!({ "layer": l.id }));
-                }
-                if let Some(name) = edit_field(
-                    ui,
-                    egui::Id::new(("layer_name", l.id)),
-                    &l.name,
-                    90.0,
-                    &format!("Layer name {}", l.name),
-                ) && !name.trim().is_empty()
-                {
-                    let _ = s.run("layer.update", json!({ "layer": l.id, "name": name.trim() }));
-                }
-            });
-            ui.horizontal(|ui| {
-                if let Some(v) = edit_field(
-                    ui,
-                    egui::Id::new(("layer_elev", l.id)),
-                    &fmt_mm(l.elevation),
-                    52.0,
-                    &format!("Elevation {}", l.name),
-                ) {
-                    match parse_mm(&v) {
-                        Some(mm) => {
-                            let _ = s.run("layer.update", json!({ "layer": l.id, "elevation": mm }));
-                        }
-                        None => s.ui.error(tf("status.bad_number", &[("text", &v)])),
+            let is_active = active == Some(l.id);
+            if icon_button(ui, Icon::Dot(is_active), &format!("Activate {}", l.name))
+                .on_hover_text(t("layers.activate"))
+                .clicked()
+            {
+                let _ = s.run("ui.set_active_layer", json!({ "layer": l.id }));
+            }
+            // Name takes what the elevation field and the three buttons leave.
+            let name_w = (ui.available_width() - 56.0 - 3.0 * 22.0 - 8.0).max(50.0);
+            let id = egui::Id::new(("layer_name", l.id));
+            if let Some(name) = edit_field(ui, id, &l.name, name_w, &format!("Layer name {}", l.name))
+                && !name.trim().is_empty()
+            {
+                let _ = s.run("layer.update", json!({ "layer": l.id, "name": name.trim() }));
+            }
+            let id = egui::Id::new(("layer_elev", l.id));
+            if let Some(v) = edit_field(ui, id, &fmt_mm(l.elevation), 48.0, &format!("Elevation {}", l.name)) {
+                match parse_mm(&v) {
+                    Some(mm) => {
+                        let _ = s.run("layer.update", json!({ "layer": l.id, "elevation": mm }));
                     }
+                    None => s.ui.error(tf("status.bad_number", &[("text", &v)])),
                 }
-            });
-            ui.horizontal(|ui| {
-                if i > 0 && button(ui, "↑", &format!("Raise {}", l.name)).clicked() {
+            }
+            ui.add_enabled_ui(i > 0, |ui| {
+                if icon_button(ui, Icon::Up, &format!("Raise {}", l.name)).clicked() {
                     swap_order(s, &layers[i - 1], l);
                 }
-                if i + 1 < layers.len() && button(ui, "↓", &format!("Lower {}", l.name)).clicked() {
+            });
+            ui.add_enabled_ui(i + 1 < layers.len(), |ui| {
+                if icon_button(ui, Icon::Down, &format!("Lower {}", l.name)).clicked() {
                     swap_order(s, l, &layers[i + 1]);
                 }
             });
-            if layers.len() > 1
-                && button(ui, "✕", &format!("Delete layer {}", l.name)).on_hover_text(t("layers.delete")).clicked()
-            {
-                let other = layers.iter().find(|o| o.id != l.id).map(|o| o.id);
-                let _ = s.run("layer.delete", json!({ "layer": l.id, "move_objects_to": other }));
-            }
-            ui.end_row();
-        }
-    });
+            ui.add_enabled_ui(layers.len() > 1, |ui| {
+                if icon_button(ui, Icon::Close, &format!("Delete layer {}", l.name))
+                    .on_hover_text(t("layers.delete"))
+                    .clicked()
+                {
+                    let other = layers.iter().find(|o| o.id != l.id).map(|o| o.id);
+                    let _ = s.run("layer.delete", json!({ "layer": l.id, "move_objects_to": other }));
+                }
+            });
+        });
+    }
 }
 
 /// Swap two neighbouring layers in the list, as one undo step.
@@ -334,7 +331,8 @@ pub fn tags(ui: &mut Ui, s: &mut Studio) {
                 let _ = s.run("ui.set_tag_visible", json!({ "tag": id, "visible": vis }));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if button(ui, "✕", &format!("Delete tag {name}")).on_hover_text(t("tags.delete")).clicked() {
+                if icon_button(ui, Icon::Close, &format!("Delete tag {name}")).on_hover_text(t("tags.delete")).clicked()
+                {
                     let _ = s.run("tag.delete", json!({ "tag": id }));
                 }
             });

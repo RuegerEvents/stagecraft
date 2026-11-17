@@ -91,7 +91,7 @@ impl Studio {
                 .show(ui, |ui| table::show(ui, self));
         }
         if self.ui.panels.layers || self.ui.panels.tags {
-            egui::Panel::left("left").resizable(true).default_size(230.0).show(ui, |ui| {
+            egui::Panel::left("left").resizable(true).default_size(270.0).min_size(220.0).show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if self.ui.panels.layers {
                         panels::layers(ui, self);
@@ -104,7 +104,7 @@ impl Studio {
             });
         }
         if self.ui.panels.inspector {
-            egui::Panel::right("inspector").resizable(true).default_size(260.0).show(ui, |ui| {
+            egui::Panel::right("inspector").resizable(true).default_size(280.0).min_size(240.0).show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| crate::inspector::show(ui, self));
             });
         }

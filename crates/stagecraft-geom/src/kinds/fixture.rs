@@ -9,7 +9,7 @@ use crate::{FillClass, LineClass, Lod, MaterialClass, Mesh, PlanPrim, PlanStyle,
 
 pub const BODY_WIDTH: f64 = 260.0;
 pub const BODY_DEPTH: f64 = 340.0;
-pub const LABEL_HEIGHT: f64 = 120.0;
+pub const LABEL_HEIGHT: f64 = 90.0;
 
 pub fn plan(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
     let ObjectKind::Fixture { fid, .. } = &obj.kind else { return Vec::new() };

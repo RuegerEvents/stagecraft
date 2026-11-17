@@ -157,7 +157,9 @@ pub fn draw_prims(p: &Painter, cam: &Camera, pal: &Palette, prims: &[PlanPrim], 
         match prim {
             PlanPrim::Polygon { points, fill, line } => {
                 let sp = pts(points);
-                let fill = pal.fill(*fill).gamma_multiply(alpha);
+                // Floors let the grid show through a little.
+                let a = if *fill == stagecraft_geom::FillClass::Floor { alpha * 0.82 } else { alpha };
+                let fill = pal.fill(*fill).gamma_multiply(a);
                 fill_polygon(p, points, &sp, fill);
                 if let Some(l) = line {
                     let mut closed = sp.clone();
@@ -196,9 +198,9 @@ pub fn draw_prims(p: &Painter, cam: &Camera, pal: &Palette, prims: &[PlanPrim], 
                 p.add(Shape::line(v, stroke(*line)));
             }
             PlanPrim::Text { pos, text, height, .. } => {
-                let px = (*height * cam.scale) as f32 * 1.35;
-                if px >= 6.0 {
-                    let font = theme::proportional(px.min(40.0));
+                let px = (*height * cam.scale) as f32 * 1.3;
+                if px >= 7.0 {
+                    let font = theme::proportional(px.min(28.0));
                     p.text(cam.to_screen(*pos), Align2::CENTER_CENTER, text, font, colour.unwrap_or(pal.text));
                 }
             }

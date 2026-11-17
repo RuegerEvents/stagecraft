@@ -426,7 +426,14 @@ fn ghost(kind: ObjectKind, placement: Placement, style: &PlanStyle) -> Vec<stage
 pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style: &PlanStyle) {
     let cam = &s.ui.camera;
     let g = &s.ui.gesture;
-    let cursor = g.cursor.map(|c| c.point);
+    // A typed length moves the preview to where Enter will put the point.
+    let typed = match (s.ui.tool, &g.dim, g.points.last()) {
+        (Tool::Wall | Tool::Floor | Tool::Truss | Tool::Move, Some(d), Some(last)) => {
+            typed_point(*last, g.cursor.map(|c| c.point), d)
+        }
+        _ => None,
+    };
+    let cursor = typed.or(g.cursor.map(|c| c.point));
     let thin = Stroke::new(1.0, pal.preview);
     let doc = s.engine.doc();
     let ghosts = |prims: Vec<stagecraft_geom::PlanPrim>| draw_prims(p, cam, pal, &prims, Some(pal.preview), 0.5);
@@ -588,10 +595,14 @@ fn dim_box(ui: &Ui, at: Pos2, dim: &DimInput, angle_only: bool) {
                         ui.label(format!("{}: {}°", t("dim.angle"), dim.length));
                         return;
                     }
-                    let mark = |on: bool| if on { "▸ " } else { "" };
-                    ui.label(format!("{}{}: {}", mark(!dim.on_angle), t("dim.length"), dim.length));
+                    // The field that takes keys is strong; Tab switches.
+                    let field = |ui: &mut Ui, on: bool, text: String| {
+                        let rt = egui::RichText::new(text);
+                        ui.label(if on { rt.strong().color(crate::theme::ACCENT) } else { rt.weak() });
+                    };
+                    field(ui, !dim.on_angle, format!("{}: {} m", t("dim.length"), dim.length));
                     ui.separator();
-                    ui.label(format!("{}{}: {}", mark(dim.on_angle), t("dim.angle"), dim.angle));
+                    field(ui, dim.on_angle, format!("{}: {}°", t("dim.angle"), dim.angle));
                 });
             });
         });
