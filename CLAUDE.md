@@ -28,6 +28,17 @@ UX. Commits are GPG-signed.
   Attachment behaviour has tests in `crates/stagecraft-core/tests/engine.rs`; extend
   them when you touch it.
 - Units mm and degrees, axes as in MVR: x right from the audience, y upstage, z up.
+  y = 0 is the setting line (the proscenium's downstage face in the demo).
+- Object kinds (`model.rs`): floor, wall, truss, fixture, and from block 4 proscenium,
+  curtain, wing_set + masking, batten, platform, truss_node + truss_run, support,
+  hoist, ceiling. `wing_set` and `truss_run` are groups (children, no geometry).
+  Battens keep position and trim in their placement (y, z); things hang on them by
+  attachment. Stage commands are in `commands/stage.rs`, truss runs/nodes, load
+  report and per-object plan style in `commands/rigging.rs`.
+- Catalogues (truss profiles, platform systems, supports) are JSON in
+  `crates/stagecraft-core/catalog/`, embedded; `catalog::extend`/`load_dir` merge
+  user files (the app reads `<data dir>/StageCraft/catalog/*.json`). Load sums
+  (`load.rs`, `load.report`) need them, which is why they live in core.
 
 ## Geometry
 
@@ -40,8 +51,14 @@ cache them; `world_mesh` applies the transform. `Mesh` has builders (`quad`,
 `section.rs` cuts a mesh with a `Plane` into closed polygons in plane coordinates
 (holes by nesting) and triangulates them; a plane hides the side its normal points
 to. Hit tests, box selection, truss hits and snapping are pure functions in
-`pick.rs` and `snap.rs` with tests. Truss profiles live in
-`catalog/truss_profiles.json`. It must build for wasm too.
+`pick.rs` and `snap.rs` with tests. It must build for wasm too.
+
+Stage kinds are in `kinds/stage.rs` (plus `fabric.rs`: pleats from fullness and the
+closed cloth slab, `node.rs`: truss corners from truss stubs). `kinds::plan` applies
+the object's `style` overrides; `kinds::plan_at` draws a kind at any transform
+(tool ghosts use it). `kinds::detail_size` tells views which `Lod` matters (truss,
+pleats, pipes, legs). Cloth meshes carry a `tint` (the object's colour). Every mesh
+must stay watertight; `tests/geom.rs` checks all kinds at all levels.
 
 ## UI (`stagecraft-ui`)
 
@@ -60,6 +77,12 @@ to. Hit tests, box selection, truss hits and snapping are pure functions in
   Roboto is vendored; it has no arrows or crosses, so use `widgets::icon_button`.
 - Give clickable things an accessible name (`widgets::name`); tests find them so.
   Table cells are named `"<Column> <row>"`, e.g. `FID 1`.
+- Tools are `Tool::DRAW` then `Tool::STAGE` in the toolbar; tool options
+  (`ToolOptions`, `ui.set_tool_options`) show on the toolbar's second row. One-click
+  stage tools go through `place_stage` in `tools.rs`, with ghosts from `stage_ghost`.
+  Inspector fields for stage kinds are in `inspector::stage_fields` (helpers `num`,
+  `choice`, `flag`, `colour`), loads in `load_section`. The table's "Fly bars" view
+  (`kind = batten`) is the Zug-Liste.
 
 - 3D view in `src/view3d/`: `camera.rs` (orbit camera, pure maths), `scene.rs`
   (per-object world-mesh cache keyed on kind, `Lod` and world transform; flattened
@@ -77,8 +100,10 @@ Look at the screens after UI changes:
 STAGECRAFT_SCREENSHOTS=/some/dir cargo test -p stagecraft-ui --test screens
 ```
 
-renders the demo document (`demo.rs`) in light and dark to PNG, including 3D iso,
-front, sections, a truss close-up and split.
+renders the demo document (`demo.rs`, a small proscenium theatre with battens,
+curtains, wings, truss, platforms) in light and dark to PNG, including 3D iso,
+front, sections, a truss close-up, the stage from the house, the fly bar list and
+split. The overview shots hide the `ceiling` tag, which would cover the house.
 
 ## Test data
 
