@@ -20,14 +20,17 @@ use super::camera::{Camera3d, Ray};
 pub struct Vertex {
     pub pos: [f32; 3],
     pub normal: [f32; 3],
-    /// Index into the colour table (`MaterialClass::index`, or [`CAP_MATERIAL`]).
+    /// Index into the colour table (`MaterialClass::index`, or [`CAP_MATERIAL`]), or
+    /// [`TINT_FLAG`] with an sRGB colour.
     pub material: u32,
     /// Bit 0: selected.
     pub flags: u32,
 }
 
 /// Colour slot of cut faces.
-pub const CAP_MATERIAL: u32 = 7;
+pub const CAP_MATERIAL: u32 = 15;
+/// Set on a vertex material when the low 24 bits are the object's own sRGB colour.
+pub const TINT_FLAG: u32 = 0x8000_0000;
 pub const FLAG_SELECTED: u32 = 1;
 
 /// GPU-ready triangles with a version, so the renderer uploads only on change.
@@ -119,15 +122,15 @@ impl Scene {
             .iter()
             .map(|id| {
                 let o = &doc.objects[id];
-                if !matches!(o.kind, ObjectKind::Truss { .. }) {
-                    return Lod::Full;
-                }
-                let width = stagecraft_geom::kinds::truss::profile_of(o).width.max(1.0);
+                let Some(size) = stagecraft_geom::kinds::detail_size(o) else { return Lod::Full };
+                let is_truss = matches!(o.kind, ObjectKind::Truss { .. } | ObjectKind::TrussNode { .. });
+                let width = size.max(1.0);
                 let centre = match self.entries.get(id).and_then(|e| e.bounds) {
                     Some((lo, hi)) => (lo + hi) / 2.0,
                     None => stagecraft_core::geom::world(doc, *id).map_or(DVec3::ZERO, |w| w.translation),
                 };
-                truss_lod(cam, centre, width, truss_count)
+                // The many-truss cap applies to truss only.
+                truss_lod(cam, centre, width, if is_truss { truss_count } else { 0 })
             })
             .collect()
     }
@@ -170,7 +173,12 @@ impl Scene {
             let mut material = vec![0u32; m.positions.len()];
             for g in &m.groups {
                 for &i in &m.indices[g.start as usize..(g.start + g.count) as usize] {
-                    material[i as usize] = g.material.index();
+                    material[i as usize] = match m.tint {
+                        Some([r, gr, b]) if g.material.tintable() => {
+                            TINT_FLAG | u32::from(r) << 16 | u32::from(gr) << 8 | u32::from(b)
+                        }
+                        _ => g.material.index(),
+                    };
                 }
             }
             vertices.extend(m.positions.iter().zip(&m.normals).zip(material).map(|((p, n), material)| Vertex {

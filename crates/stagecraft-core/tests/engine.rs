@@ -261,3 +261,194 @@ fn kind_updates_change_only_their_type() {
     let err = e.execute("truss.update", json!({ "id": t, "length": -1 })).unwrap_err();
     assert_eq!(err.code, "invalid_args");
 }
+
+// ---------------------------------------------------------------- block 4: stage objects
+
+fn kind(e: &Engine, id: Id) -> ObjectKind {
+    e.doc().objects[&id].kind.clone()
+}
+
+#[test]
+fn attached_things_follow_the_batten_trim() {
+    let mut e = Engine::new();
+    let b = run(&mut e, "batten.create", json!({ "y": 1200, "trim": 8000 }));
+    assert_eq!(b["number"], 1);
+    let b = id(&b);
+    let c = id(&run(&mut e, "curtain.create", json!({ "parent": b, "width": 11000, "height": 7500 })));
+    let t = id(&run(&mut e, "truss.create", json!({ "parent": b, "start": [-3000, 0, -300], "end": [3000, 0, -300] })));
+    assert!(close(world_pos(&e, c), [0.0, 1200.0, 8000.0]));
+    run(&mut e, "batten.update", json!({ "id": b, "trim": 9500, "y": 1500 }));
+    assert!(close(world_pos(&e, c), [0.0, 1500.0, 9500.0]));
+    assert!(close(world_pos(&e, t), [-3000.0, 1500.0, 9200.0]));
+    // Numbers are unique and count on.
+    assert_eq!(run(&mut e, "batten.create", json!({ "y": 2000 }))["number"], 2);
+    assert!(e.execute("batten.create", json!({ "number": 1 })).is_err());
+    let list = run(&mut e, "batten.list", json!(null));
+    assert_eq!(list.as_array().unwrap().len(), 2);
+    assert_eq!(list[0]["number"], 1);
+    assert_eq!(list[0]["attached"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn a_wing_set_makes_legs_and_borders_as_separate_objects() {
+    let mut e = Engine::new();
+    let b1 = id(&run(&mut e, "batten.create", json!({ "y": 2100, "trim": 8000 })));
+    let out = run(&mut e, "wingset.create", json!({ "y": 2000, "count": 3, "spacing": 2000, "opening": 10000 }));
+    let set = id(&out);
+    assert_eq!(out["legs"].as_array().unwrap().len(), 6);
+    assert_eq!(out["borders"].as_array().unwrap().len(), 3);
+    // The first border found the batten 100 mm away; the others stay in the set.
+    assert_eq!(out["hung"].as_array().unwrap().len(), 1);
+    assert_eq!(e.doc().children(set).len(), 6 + 2);
+    assert_eq!(e.doc().children(b1).len(), 1);
+    let leg: Id = serde_json::from_value(out["legs"][1].clone()).unwrap();
+    // Right leg of the first wing: centre at opening/2 + width/2, top at 7000.
+    assert!(close(world_pos(&e, leg), [5750.0, 2000.0, 7000.0]), "{:?}", world_pos(&e, leg));
+    // Legs stay editable one by one.
+    run(&mut e, "masking.update", json!({ "id": leg, "width": 1200, "color": "#202040" }));
+    assert!(matches!(kind(&e, leg), ObjectKind::Masking { width: 1200.0, .. }));
+    // The border on the batten moves with it; its world height stays the trim + drop.
+    let border: Id = serde_json::from_value(out["borders"][0].clone()).unwrap();
+    assert!(close(world_pos(&e, border), [0.0, 2000.0, 8000.0]));
+    run(&mut e, "batten.update", json!({ "id": b1, "trim": 9000 }));
+    assert!(close(world_pos(&e, border), [0.0, 2000.0, 9000.0]));
+}
+
+#[test]
+fn curtain_states_and_checks() {
+    let mut e = Engine::new();
+    let c = id(&run(&mut e, "curtain.create", json!({ "state": "gathered" })));
+    let ObjectKind::Curtain { opening, gather, color, split, .. } = kind(&e, c) else { panic!() };
+    assert_eq!((opening, gather, split), (100.0, stagecraft_core::model::Gather::Italian, true));
+    assert_eq!(color, "#8b1a1a");
+    run(&mut e, "curtain.update", json!({ "id": c, "opening": 40, "gather": "greek" }));
+    assert!(matches!(
+        kind(&e, c),
+        ObjectKind::Curtain { opening: 40.0, gather: stagecraft_core::model::Gather::Tab, .. }
+    ));
+    assert!(e.execute("curtain.update", json!({ "id": c, "opening": 140 })).is_err());
+    assert!(e.execute("curtain.create", json!({ "color": "red" })).is_err());
+}
+
+#[test]
+fn platforms_presets_systems_and_stacking() {
+    let mut e = Engine::new();
+    let a = id(&run(&mut e, "platform.create", json!({ "preset": "2x1", "height": 400, "system": "Bütec" })));
+    assert!(matches!(
+        kind(&e, a),
+        ObjectKind::Platform { width: 2000.0, depth: 1000.0, under: stagecraft_core::model::Understructure::Legs, .. }
+    ));
+    let err = e.execute("platform.create", json!({ "system": "Nivoflex", "height": 1500 })).unwrap_err();
+    assert!(err.message.contains("200–1000"), "{err}");
+    let n = id(&run(&mut e, "platform.create", json!({ "system": "nivoflex", "height": 600, "preset": "2x0.5" })));
+    assert!(matches!(kind(&e, n), ObjectKind::Platform { under: stagecraft_core::model::Understructure::Scissor, .. }));
+    let top = id(&run(&mut e, "platform.create", json!({ "preset": "1x1", "height": 200, "on": a })));
+    assert!(close(world_pos(&e, top), [0.0, 0.0, 400.0]));
+}
+
+#[test]
+fn a_closed_truss_run_has_corners_and_stock_pieces() {
+    let mut e = Engine::new();
+    let out = run(
+        &mut e,
+        "truss.run",
+        json!({ "points": [[-4000, 0, 6000], [4000, 0, 6000], [4000, 6000, 6000], [-4000, 6000, 6000]], "closed": true }),
+    );
+    let r = id(&out);
+    assert_eq!(out["nodes"].as_array().unwrap().len(), 4);
+    let pieces: Vec<Id> = serde_json::from_value(out["pieces"].clone()).unwrap();
+    // 8 m minus two 290 mm corners = 7420 → 3000 + 3000 + 1000 + 420; 6 m → 5420 → 3000 + 2000 + 420.
+    let lengths: Vec<f64> = pieces
+        .iter()
+        .map(|p| match kind(&e, *p) {
+            ObjectKind::Truss { length, .. } => length,
+            _ => panic!(),
+        })
+        .collect();
+    assert_eq!(lengths.len(), 2 * 4 + 2 * 3);
+    let total: f64 = lengths.iter().sum();
+    assert!((total - 2.0 * (7420.0 + 5420.0)).abs() < 1e-6, "{total}");
+    // The first piece starts one reach right of the first corner.
+    assert!(close(world_pos(&e, pieces[0]), [-3710.0, 0.0, 6000.0]));
+    // Moving the run moves everything in it.
+    run(&mut e, "object.move", json!({ "ids": [r], "delta": [0, 1000, 0] }));
+    assert!(close(world_pos(&e, pieces[0]), [-3710.0, 1000.0, 6000.0]));
+    // Loads: 25.68 m of F34 at 5 kg/m plus four 4.5 kg corners.
+    let a =
+        id(&run(&mut e, "fixture.create", json!({ "parent": pieces[0], "position": [500, 0, -150], "weight_kg": 20 })));
+    run(&mut e, "fixture.create", json!({ "parent": pieces[1], "position": [500, 0, -150] }));
+    let rep = run(&mut e, "load.report", json!({ "ids": [r, pieces[0]] }));
+    let run_row = &rep["runs"][0];
+    assert!((run_row["own_kg"].as_f64().unwrap() - (25.68 * 5.0 + 18.0)).abs() < 0.11, "{run_row}");
+    assert_eq!(run_row["attached_kg"], 20.0);
+    assert_eq!(run_row["unknown_weights"], 1);
+    assert_eq!(rep["trusses"][0]["total_kg"], 35.0);
+    let _ = a;
+}
+
+#[test]
+fn join_makes_a_run_of_loose_pieces() {
+    let mut e = Engine::new();
+    let a = id(&run(&mut e, "truss.create", json!({ "start": [0, 0, 5000], "end": [3000, 0, 5000] })));
+    let n = id(&run(&mut e, "truss.node", json!({ "position": [3290, 0, 5000], "preset": "corner_3way" })));
+    let out = run(&mut e, "truss.join", json!({ "ids": [a, n] }));
+    let r = id(&out);
+    assert_eq!(e.doc().objects[&a].parent, Some(r));
+    assert!(close(world_pos(&e, n), [3290.0, 0.0, 5000.0]));
+    assert!(matches!(kind(&e, n), ObjectKind::TrussNode { down: true, .. }));
+    // Joining again into a new run removes the empty old one.
+    let out = run(&mut e, "truss.join", json!({ "ids": [a, n] }));
+    assert_eq!(out["removed_runs"].as_array().unwrap().len(), 1);
+    assert!(e.execute("truss.join", json!({ "ids": [r] })).is_err());
+}
+
+#[test]
+fn hoist_and_batten_loads_and_limits() {
+    let mut e = Engine::new();
+    let h =
+        id(&run(&mut e, "hoist.create", json!({ "position": [0, 3000, 9000], "capacity_kg": 250, "weight_kg": 30 })));
+    let t = id(&run(
+        &mut e,
+        "truss.create",
+        json!({ "parent": h, "start": [-5000, 0, -300], "end": [5000, 0, -300], "profile": "F34" }),
+    ));
+    for i in 0..10 {
+        run(
+            &mut e,
+            "fixture.create",
+            json!({ "parent": t, "position": [500.0 + 1000.0 * i as f64, 0, -150], "weight_kg": 21 }),
+        );
+    }
+    let b = id(&run(&mut e, "batten.create", json!({ "y": 1000, "max_load": 100, "length": 10000 })));
+    run(&mut e, "curtain.create", json!({ "parent": b, "width": 10000, "height": 8000, "fullness": 100 }));
+    let rep = run(&mut e, "load.report", json!(null));
+    let hr = &rep["hoists"][0];
+    assert_eq!(hr["own_kg"], 30.0);
+    assert_eq!(hr["attached_kg"], 260.0);
+    assert_eq!(hr["over"], true);
+    let br = &rep["battens"][0];
+    assert_eq!(br["own_kg"], 45.0);
+    // 10 m × 2 × 8 m velour at 0.55 kg/m².
+    assert_eq!(br["attached_kg"], 88.0);
+    assert_eq!(br["over"], false);
+    assert_eq!(rep["suspended_kg"], 30.0 + 260.0 + 45.0 + 88.0);
+    // object.get shows the load too.
+    let g = run(&mut e, "object.get", json!({ "id": t }));
+    assert_eq!(g["load"]["attached_kg"], 210.0);
+}
+
+#[test]
+fn every_new_kind_survives_save_and_load() {
+    let mut e = Engine::new();
+    run(&mut e, "proscenium.create", json!({ "iron": 750 }));
+    run(&mut e, "ceiling.create", json!({ "outline": [[0, 0], [1000, 0], [1000, 1000]], "show_in_plan": false }));
+    run(&mut e, "support.create", json!({ "preset": "Wind-up stand" }));
+    let p = id(&run(&mut e, "platform.create", json!({})));
+    run(&mut e, "object.set_style", json!({ "ids": [p], "line": "thick", "labels": false }));
+    assert!(e.execute("object.set_style", json!({ "ids": [p], "line": "bold" })).is_err());
+    let doc = e.doc().clone();
+    let text = serde_json::to_string(&doc).unwrap();
+    let back: stagecraft_core::Document = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, doc);
+    assert_eq!(back.objects[&p].style.line.as_deref(), Some("thick"));
+}

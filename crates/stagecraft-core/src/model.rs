@@ -134,6 +134,82 @@ pub struct Object {
     pub parent: Option<Id>,
     pub placement: Placement,
     pub kind: ObjectKind,
+    /// Per-object overrides of how the plan draws it (hybrid model: parameters draw
+    /// the symbol, this restyles it).
+    #[serde(default, skip_serializing_if = "PlanOverride::is_default")]
+    pub style: PlanOverride,
+}
+
+/// Per-object plan style. Unset fields follow the view.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct PlanOverride {
+    /// Draw every line of the symbol in this class: thin, medium, thick, hidden
+    /// (dashed) or centre (dash-dot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
+    /// Show or hide labels (FID, batten number, heights) regardless of the view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<bool>,
+    /// `low` (outline only) or `high`, regardless of zoom.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Leave the object out of the plan (it still shows in 3D).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+}
+
+impl PlanOverride {
+    pub fn is_default(&self) -> bool {
+        *self == PlanOverride::default()
+    }
+}
+
+/// How a curtain opens.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Gather {
+    /// Sideways on a traveller track (tab / Greek curtain): the panels slide to the
+    /// sides and their folds stack up there.
+    #[default]
+    #[serde(alias = "greek")]
+    Tab,
+    /// Italian: each panel is pulled up diagonally towards its upper outer corner and
+    /// bunches up there.
+    Italian,
+}
+
+/// Leg (vertical masking at the side) or border (horizontal masking above).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskingRole {
+    #[default]
+    Leg,
+    Border,
+}
+
+/// What carries a platform deck.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Understructure {
+    /// Four legs at the corners (Bütec style).
+    #[default]
+    Legs,
+    /// Scissor frames on the long sides (Nivoflex style).
+    Scissor,
+    /// The deck sits directly on what is below.
+    None,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportStyle {
+    /// A square steel plate; truss towers and stands stand on it.
+    #[default]
+    BasePlate,
+    /// A tripod (wind-up) stand with a mast; things attach at its top.
+    Stand,
+    /// A ground support base with outriggers and a sleeve; a tower rises from it.
+    GroundSupport,
 }
 
 /// What an object is. Geometry is local to the object's placement.
@@ -155,7 +231,100 @@ pub enum ObjectKind {
         mode: Option<String>,
         /// Absolute DMX address, 1-based (universe 2 address 1 = 513).
         address: Option<u32>,
+        /// kg, for load sums. Block 5 fills it from the GDTF.
+        #[serde(default)]
+        weight_kg: Option<f64>,
     },
+    /// A proscenium (portal). Origin: centre of the opening on the floor at its
+    /// downstage face; the frame reaches upstage (+y) by `depth`.
+    Proscenium {
+        /// Clear opening, mm.
+        width: f64,
+        height: f64,
+        /// Depth of the frame along y, mm.
+        depth: f64,
+        /// Width of the side pillars and height of the header, mm.
+        frame: f64,
+        /// y of the iron (fire curtain) line, local mm.
+        iron: f64,
+        show_iron: bool,
+    },
+    /// A curtain hanging from its top edge. Origin: centre of the top edge; the fabric
+    /// runs along local x and hangs down (-z).
+    Curtain {
+        width: f64,
+        height: f64,
+        /// Extra fabric in percent of the width (100 = twice the width of fabric).
+        fullness: f64,
+        /// Two panels meeting in the middle (true) or one.
+        split: bool,
+        /// 0 = closed, 100 = fully open.
+        opening: f64,
+        gather: Gather,
+        /// `#RRGGBB`.
+        color: String,
+    },
+    /// The parent of a set of legs and borders generated together; holds the values
+    /// they were made with. Draws nothing itself.
+    WingSet { count: u32, spacing: f64, opening: f64, leg_width: f64, height: f64, border_height: f64, color: String },
+    /// A leg or border. Origin: centre of the top edge, hanging down (-z).
+    Masking {
+        role: MaskingRole,
+        width: f64,
+        height: f64,
+        /// Percent extra fabric; 0 = flat.
+        fullness: f64,
+        color: String,
+    },
+    /// A fly bar (Zug). Origin: centre of the pipe; it runs along local x. Its trim
+    /// height is the placement's z, its position the placement's y.
+    Batten {
+        number: u32,
+        length: f64,
+        /// Allowed payload, kg.
+        max_load: f64,
+        /// Own weight of the bar, kg per metre.
+        kg_per_m: f64,
+    },
+    /// A stage platform (Podest). Origin: centre of the footprint at its base; the
+    /// deck top is `height` above it.
+    Platform {
+        width: f64,
+        depth: f64,
+        height: f64,
+        under: Understructure,
+        /// Platform system from the catalogue (Bütec, Nivoflex …).
+        system: Option<String>,
+    },
+    /// A truss corner or junction. Origin: the node centre; arms are truss stubs of
+    /// one profile width.
+    TrussNode {
+        profile: String,
+        /// Directions of the horizontal arms, degrees counter-clockwise from local +x.
+        arms: Vec<f64>,
+        /// An arm pointing down (towers, goal posts).
+        #[serde(default)]
+        down: bool,
+        #[serde(default)]
+        up: bool,
+    },
+    /// A run of truss: pieces and nodes as children. Draws nothing itself.
+    TrussRun { profile: String },
+    /// A base plate, stand or ground support base. Origin on the floor; attached
+    /// things go at `height`.
+    Support {
+        style: SupportStyle,
+        /// Plate edge or leg spread, mm.
+        size: f64,
+        /// Top of the mast or sleeve above the floor, mm.
+        height: f64,
+        weight_kg: f64,
+    },
+    /// A chain hoist or rigging point. Origin: the hook; the body is above it.
+    Hoist { capacity_kg: f64, weight_kg: f64 },
+    /// A ceiling: a closed outline at the placement's z (its underside), `thickness`
+    /// up from there.
+    Ceiling { outline: Vec<P2>, thickness: f64, show_in_plan: bool },
 }
 
 impl ObjectKind {
@@ -165,8 +334,53 @@ impl ObjectKind {
             ObjectKind::Wall { .. } => "wall",
             ObjectKind::Truss { .. } => "truss",
             ObjectKind::Fixture { .. } => "fixture",
+            ObjectKind::Proscenium { .. } => "proscenium",
+            ObjectKind::Curtain { .. } => "curtain",
+            ObjectKind::WingSet { .. } => "wing_set",
+            ObjectKind::Masking { .. } => "masking",
+            ObjectKind::Batten { .. } => "batten",
+            ObjectKind::Platform { .. } => "platform",
+            ObjectKind::TrussNode { .. } => "truss_node",
+            ObjectKind::TrussRun { .. } => "truss_run",
+            ObjectKind::Support { .. } => "support",
+            ObjectKind::Hoist { .. } => "hoist",
+            ObjectKind::Ceiling { .. } => "ceiling",
         }
     }
+
+    /// Every type name, for docs and filters.
+    pub const TYPE_NAMES: [&'static str; 15] = [
+        "floor",
+        "wall",
+        "truss",
+        "fixture",
+        "proscenium",
+        "curtain",
+        "wing_set",
+        "masking",
+        "batten",
+        "platform",
+        "truss_node",
+        "truss_run",
+        "support",
+        "hoist",
+        "ceiling",
+    ];
+
+    /// Groups hold children and draw nothing.
+    pub fn is_group(&self) -> bool {
+        matches!(self, ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. })
+    }
+}
+
+/// `#RRGGBB` to bytes.
+pub fn parse_color(s: &str) -> Option<[u8; 3]> {
+    let h = s.trim().strip_prefix('#')?;
+    if h.len() != 6 {
+        return None;
+    }
+    let b = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    Some([b(0)?, b(2)?, b(4)?])
 }
 
 /// `1.001` style address for an absolute 1-based DMX address.

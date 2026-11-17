@@ -20,7 +20,10 @@ pub mod prim;
 pub mod section;
 pub mod snap;
 
-pub use catalog::{TrussProfile, truss_profile, truss_profiles};
+pub use catalog::{
+    PlatformSystem, SupportPreset, TrussProfile, platform_system, platform_systems, support, supports, truss_profile,
+    truss_profile_or_fallback, truss_profiles,
+};
 pub use mesh::{Group, Lod, MaterialClass, Mesh};
 pub use prim::{Bounds, Detail, FillClass, LineClass, PlanPrim, PlanStyle, TextAnchor};
 

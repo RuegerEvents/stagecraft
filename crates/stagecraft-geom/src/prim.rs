@@ -27,6 +27,10 @@ pub enum FillClass {
     Wall,
     /// Bodies of equipment (fixtures …).
     Body,
+    /// Masking cloth (legs): dark.
+    Masking,
+    /// Platform decks.
+    Deck,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]

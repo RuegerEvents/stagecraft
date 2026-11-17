@@ -1,0 +1,9 @@
+{
+  "note": "Base plates, stands and ground support bases. size = footprint (plate edge or leg spread), height = mast or sleeve height above the floor (the attachment point), mm. Typical values, check the maker's data sheet. Users may add entries in the same shape.",
+  "supports": [
+    { "name": "Base plate 600", "style": "base_plate", "size": 600, "height": 10, "weight_kg": 22 },
+    { "name": "Base plate 800", "style": "base_plate", "size": 800, "height": 12, "weight_kg": 45 },
+    { "name": "Wind-up stand", "style": "stand", "size": 1800, "height": 3000, "weight_kg": 32 },
+    { "name": "Ground support base", "style": "ground_support", "size": 2400, "height": 1000, "weight_kg": 95 }
+  ]
+}

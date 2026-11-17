@@ -1,0 +1,8 @@
+{
+  "note": "Stage platform systems. Sizes are deck footprints (width × depth, mm); heights are deck top above the base, mm. kg_per_m2 is deck plus understructure at a typical height. Typical values, check the maker's data sheet. Users may add systems in the same shape.",
+  "systems": [
+    { "name": "Generic", "maker": "", "understructure": "legs", "sizes": [[2000, 1000], [1000, 1000], [2000, 500]], "deck": 100, "min_height": 100, "max_height": 2000, "kg_per_m2": 25 },
+    { "name": "Bütec", "maker": "Bütec", "understructure": "legs", "sizes": [[2000, 1000], [1000, 1000], [2000, 500], [1000, 500]], "deck": 120, "min_height": 200, "max_height": 2000, "kg_per_m2": 22 },
+    { "name": "Nivoflex", "maker": "Nivoflex", "understructure": "scissor", "sizes": [[2000, 1000], [1000, 1000], [2000, 500]], "deck": 100, "min_height": 200, "max_height": 1000, "kg_per_m2": 20 }
+  ]
+}

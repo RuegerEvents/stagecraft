@@ -37,7 +37,8 @@ struct ListArgs {
     layer: Option<String>,
     /// Tag id or name.
     tag: Option<String>,
-    /// Object type: floor, wall, truss, fixture.
+    /// Object type: floor, wall, truss, fixture, proscenium, curtain, wing_set, masking,
+    /// batten, platform, truss_node, truss_run, support, hoist, ceiling.
     #[serde(rename = "type")]
     kind: Option<String>,
     /// Only direct children of this object.

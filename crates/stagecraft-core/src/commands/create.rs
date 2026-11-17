@@ -16,7 +16,7 @@ pub(super) fn register(r: &mut Registry) {
     r.add("wall.create", Kind::Edit, "Create a wall along a polyline", wall);
     r.add("truss.create", Kind::Edit, "Create a straight truss piece from start to end", truss);
     r.add("fixture.create", Kind::Edit, "Create a fixture, optionally hung on a parent", fixture);
-    r.add("fixture.update", Kind::Edit, "Change FID, CID, mode or address of one fixture", fixture_update);
+    r.add("fixture.update", Kind::Edit, "Change FID, CID, mode, address or weight of one fixture", fixture_update);
     r.add("fixture.number", Kind::Edit, "Give fixtures consecutive FIDs in the given order", fixture_number);
     r.add("floor.update", Kind::Edit, "Change outline or thickness of one floor", floor_update);
     r.add("wall.update", Kind::Edit, "Change path, height or thickness of one wall", wall_update);
@@ -25,18 +25,24 @@ pub(super) fn register(r: &mut Registry) {
 
 /// Fields every create command takes.
 #[derive(Deserialize, JsonSchema, Default)]
-struct Common {
-    name: Option<String>,
+pub(super) struct Common {
+    pub name: Option<String>,
     /// Layer id or name. Default: the first layer.
-    layer: Option<String>,
+    pub layer: Option<String>,
     /// Tag ids or names; unknown names are created.
     #[serde(default)]
-    tags: Vec<String>,
+    pub tags: Vec<String>,
     /// Attach to this object. Positions are then relative to it.
-    parent: Option<Id>,
+    pub parent: Option<Id>,
 }
 
-fn insert(ctx: &mut Ctx, c: Common, default_name: &str, placement: Placement, kind: ObjectKind) -> CmdResult {
+pub(super) fn insert(
+    ctx: &mut Ctx,
+    c: Common,
+    default_name: &str,
+    placement: Placement,
+    kind: ObjectKind,
+) -> CmdResult {
     let doc = ctx.doc();
     let layer = match (c.parent, &c.layer) {
         (Some(p), None) => object(doc, p)?.layer,
@@ -55,6 +61,7 @@ fn insert(ctx: &mut Ctx, c: Common, default_name: &str, placement: Placement, ki
         parent: c.parent,
         placement,
         kind,
+        style: Default::default(),
     };
     let id = o.id;
     ctx.doc_mut().objects.insert(id, o);
@@ -139,18 +146,24 @@ fn f34() -> String {
     "F34".into()
 }
 
-fn truss(ctx: &mut Ctx, a: TrussArgs) -> CmdResult {
-    let [dx, dy, dz] = [a.end[0] - a.start[0], a.end[1] - a.start[1], a.end[2] - a.start[2]];
+/// The placement and length of a straight piece from `start` to `end`.
+pub(super) fn line_placement(start: P3, end: P3) -> (Placement, f64) {
+    let [dx, dy, dz] = [end[0] - start[0], end[1] - start[1], end[2] - start[2]];
     let horiz = dx.hypot(dy);
     let length = horiz.hypot(dz);
-    if length < 1.0 {
-        return Err(CmdError::invalid_args("truss start and end are the same point"));
-    }
     let p = Placement {
-        position: a.start,
+        position: start,
         // Pan towards the end in plan, then pitch up; Ry positive tips +x down.
         rotation: [0.0, -dz.atan2(horiz).to_degrees(), dy.atan2(dx).to_degrees()],
     };
+    (p, length)
+}
+
+fn truss(ctx: &mut Ctx, a: TrussArgs) -> CmdResult {
+    let (p, length) = line_placement(a.start, a.end);
+    if length < 1.0 {
+        return Err(CmdError::invalid_args("truss start and end are the same point"));
+    }
     insert(ctx, a.common, "Truss", p, ObjectKind::Truss { length, profile: a.profile })
 }
 
@@ -173,6 +186,8 @@ struct FixtureArgs {
     mode: Option<String>,
     /// Name of an embedded GDTF file.
     gdtf: Option<String>,
+    /// Weight in kg, for load sums.
+    weight_kg: Option<f64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -213,7 +228,16 @@ fn fixture(ctx: &mut Ctx, a: FixtureArgs) -> CmdResult {
         Some(f) => format!("Fixture {f}"),
         None => "Fixture".into(),
     };
-    insert(ctx, a.common, &name, p, ObjectKind::Fixture { fid: a.fid, cid: a.cid, gdtf: a.gdtf, mode: a.mode, address })
+    if a.weight_kg.is_some_and(|w| !(w >= 0.0 && w.is_finite())) {
+        return Err(CmdError::invalid_args("weight_kg must be zero or more"));
+    }
+    insert(
+        ctx,
+        a.common,
+        &name,
+        p,
+        ObjectKind::Fixture { fid: a.fid, cid: a.cid, gdtf: a.gdtf, mode: a.mode, address, weight_kg: a.weight_kg },
+    )
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -226,6 +250,8 @@ struct FixtureUpdateArgs {
     /// `1.001`, absolute number, or empty string / 0 to unpatch.
     address: Option<AddressArg>,
     mode: Option<String>,
+    /// Weight in kg; 0 or less clears it.
+    weight_kg: Option<f64>,
 }
 
 fn fixture_update(ctx: &mut Ctx, a: FixtureUpdateArgs) -> CmdResult {
@@ -243,7 +269,10 @@ fn fixture_update(ctx: &mut Ctx, a: FixtureUpdateArgs) -> CmdResult {
         Some(x) => Some(Some(x.resolve()?)),
     };
     let o = ctx.doc_mut().objects.get_mut(&a.id).expect("checked");
-    let ObjectKind::Fixture { fid, cid, mode, address: addr, .. } = &mut o.kind else { unreachable!() };
+    let ObjectKind::Fixture { fid, cid, mode, address: addr, weight_kg, .. } = &mut o.kind else { unreachable!() };
+    if let Some(w) = a.weight_kg {
+        *weight_kg = (w > 0.0 && w.is_finite()).then_some(w);
+    }
     if let Some(f) = a.fid {
         *fid = (f != 0).then_some(f);
     }
@@ -257,7 +286,7 @@ fn fixture_update(ctx: &mut Ctx, a: FixtureUpdateArgs) -> CmdResult {
         *addr = x;
     }
     let shown = addr.map(format_address);
-    Ok(json!({ "fid": fid, "cid": cid, "mode": mode, "address": shown }))
+    Ok(json!({ "fid": fid, "cid": cid, "mode": mode, "address": shown, "weight_kg": weight_kg }))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -303,7 +332,7 @@ fn fixture_number(ctx: &mut Ctx, a: NumberArgs) -> CmdResult {
     Ok(json!({ "fids": fids }))
 }
 
-fn positive(what: &str, v: f64) -> Result<(), CmdError> {
+pub(super) fn positive(what: &str, v: f64) -> Result<(), CmdError> {
     if v > 0.0 && v.is_finite() {
         Ok(())
     } else {
@@ -400,7 +429,7 @@ fn truss_update(ctx: &mut Ctx, a: TrussUpdateArgs) -> CmdResult {
 }
 
 /// The object, mutable, after checking it is of type `ty`.
-fn kind_mut<'c>(ctx: &'c mut Ctx, id: Id, ty: &str) -> Result<&'c mut Object, CmdError> {
+pub(super) fn kind_mut<'c>(ctx: &'c mut Ctx, id: Id, ty: &str) -> Result<&'c mut Object, CmdError> {
     let o = object(ctx.doc(), id)?;
     if o.kind.type_name() != ty {
         return Err(CmdError::invalid(format!("{id} is not a {ty}")));

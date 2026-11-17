@@ -417,14 +417,10 @@ fn ghost(kind: ObjectKind, placement: Placement, style: &PlanStyle) -> Vec<stage
         parent: None,
         placement,
         kind,
+        style: Default::default(),
     };
     let w = stagecraft_core::geom::placement_to_affine(&obj.placement);
-    match &obj.kind {
-        ObjectKind::Truss { .. } => stagecraft_geom::kinds::truss::plan(&w, &obj, style),
-        ObjectKind::Wall { .. } => stagecraft_geom::kinds::wall::plan(&w, &obj, style),
-        ObjectKind::Floor { .. } => stagecraft_geom::kinds::floor::plan(&w, &obj, style),
-        ObjectKind::Fixture { .. } => stagecraft_geom::kinds::fixture::plan(&w, &obj, style),
-    }
+    stagecraft_geom::kinds::plan_at(&w, &obj, style)
 }
 
 /// Previews, the snap marker, the selection box and the typed-dimension box.
@@ -528,7 +524,8 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
         }
         (Tool::Fixture, Some(c)) => {
             let placement = Placement { position: [c[0], c[1], 0.0], rotation: [0.0; 3] };
-            let kind = ObjectKind::Fixture { fid: None, cid: None, gdtf: None, mode: None, address: None };
+            let kind =
+                ObjectKind::Fixture { fid: None, cid: None, gdtf: None, mode: None, address: None, weight_kg: None };
             ghosts(ghost(kind, placement, style));
         }
         _ => {}

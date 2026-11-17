@@ -3,11 +3,13 @@
 //! Everything that changes a document goes through [`Engine::execute`] with a command
 //! name and JSON arguments. The UI, the control channel and MCP all use that one door.
 
+pub mod catalog;
 pub mod command;
 pub mod commands;
 pub mod engine;
 pub mod file;
 pub mod geom;
+pub mod load;
 pub mod model;
 
 pub use command::{CmdError, CmdResult, CommandInfo, Kind, Registry, registry};

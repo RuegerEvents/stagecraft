@@ -21,6 +21,8 @@ pub struct Palette {
     pub floor: Color32,
     pub wall: Color32,
     pub body: Color32,
+    pub masking: Color32,
+    pub deck: Color32,
     pub selected: Color32,
     pub hover: Color32,
     pub preview: Color32,
@@ -41,6 +43,8 @@ pub fn palette(dark: bool) -> Palette {
             floor: Color32::from_rgb(0x2a, 0x2e, 0x33),
             wall: Color32::from_rgb(0x8a, 0x8e, 0x96),
             body: Color32::from_rgb(0x3a, 0x3d, 0x44),
+            masking: Color32::from_rgb(0x5c, 0x5f, 0x66),
+            deck: Color32::from_rgb(0x30, 0x33, 0x38),
             selected: Color32::from_rgb(0x4d, 0x97, 0xff),
             hover: Color32::from_rgb(0x9c, 0xc3, 0xff),
             preview: Color32::from_rgb(0xff, 0xa8, 0x3a),
@@ -59,6 +63,8 @@ pub fn palette(dark: bool) -> Palette {
             floor: Color32::from_rgb(0xee, 0xec, 0xe6),
             wall: Color32::from_rgb(0x55, 0x59, 0x60),
             body: Color32::from_rgb(0xf6, 0xf6, 0xf8),
+            masking: Color32::from_rgb(0x3c, 0x3e, 0x44),
+            deck: Color32::from_rgb(0xe6, 0xe2, 0xda),
             selected: ACCENT,
             hover: Color32::from_rgb(0x86, 0xb3, 0xfa),
             preview: Color32::from_rgb(0xe0, 0x7a, 0x00),
@@ -75,6 +81,8 @@ impl Palette {
             FillClass::Floor => self.floor,
             FillClass::Wall => self.wall,
             FillClass::Body => self.body,
+            FillClass::Masking => self.masking,
+            FillClass::Deck => self.deck,
         }
     }
 }

@@ -1,15 +1,15 @@
 {
-  "note": "Nominal dimensions in mm and weights in kg per metre. Weights are typical catalogue values; check the maker's data sheet for load work. Users may add profiles in the same shape.",
+  "note": "Nominal dimensions in mm and weights in kg per metre (node_kg: one corner or junction block). Weights are typical catalogue values; check the maker's data sheet for load work. stock_lengths are the piece lengths a run is split into. Users may add profiles in the same shape (see docs/spec/decisions.md, Catalogues).",
   "profiles": [
-    { "name": "F31",  "maker": "Global Truss", "chords": 1, "width": 50,  "height": 50,  "tube": 50, "kg_per_m": 1.6 },
-    { "name": "F32",  "maker": "Global Truss", "chords": 2, "width": 290, "height": 50,  "tube": 50, "kg_per_m": 3.0 },
-    { "name": "F33",  "maker": "Global Truss", "chords": 3, "width": 290, "height": 250, "tube": 50, "kg_per_m": 4.0 },
-    { "name": "F34",  "maker": "Global Truss", "chords": 4, "width": 290, "height": 290, "tube": 50, "kg_per_m": 5.0 },
-    { "name": "F44P", "maker": "Global Truss", "chords": 4, "width": 400, "height": 400, "tube": 51, "kg_per_m": 7.8 },
-    { "name": "F24",  "maker": "Global Truss", "chords": 4, "width": 220, "height": 220, "tube": 35, "kg_per_m": 2.9 },
-    { "name": "X30D", "maker": "Prolyte",      "chords": 3, "width": 290, "height": 250, "tube": 48, "kg_per_m": 4.1 },
-    { "name": "X30V", "maker": "Prolyte",      "chords": 4, "width": 290, "height": 290, "tube": 48, "kg_per_m": 5.3 },
-    { "name": "H30V", "maker": "Prolyte",      "chords": 4, "width": 300, "height": 300, "tube": 51, "kg_per_m": 7.4 },
-    { "name": "H40V", "maker": "Prolyte",      "chords": 4, "width": 400, "height": 400, "tube": 51, "kg_per_m": 9.0 }
+    { "name": "F31",  "maker": "Global Truss", "chords": 1, "width": 50,  "height": 50,  "tube": 50, "kg_per_m": 1.6, "node_kg": 1.0 },
+    { "name": "F32",  "maker": "Global Truss", "chords": 2, "width": 290, "height": 50,  "tube": 50, "kg_per_m": 3.0, "node_kg": 2.5 },
+    { "name": "F33",  "maker": "Global Truss", "chords": 3, "width": 290, "height": 250, "tube": 50, "kg_per_m": 4.0, "node_kg": 3.5 },
+    { "name": "F34",  "maker": "Global Truss", "chords": 4, "width": 290, "height": 290, "tube": 50, "kg_per_m": 5.0, "node_kg": 4.5 },
+    { "name": "F44P", "maker": "Global Truss", "chords": 4, "width": 400, "height": 400, "tube": 51, "kg_per_m": 7.8, "node_kg": 9.0 },
+    { "name": "F24",  "maker": "Global Truss", "chords": 4, "width": 220, "height": 220, "tube": 35, "kg_per_m": 2.9, "node_kg": 2.5 },
+    { "name": "X30D", "maker": "Prolyte",      "chords": 3, "width": 290, "height": 250, "tube": 48, "kg_per_m": 4.1, "node_kg": 3.5 },
+    { "name": "X30V", "maker": "Prolyte",      "chords": 4, "width": 290, "height": 290, "tube": 48, "kg_per_m": 5.3, "node_kg": 4.5 },
+    { "name": "H30V", "maker": "Prolyte",      "chords": 4, "width": 300, "height": 300, "tube": 51, "kg_per_m": 7.4, "node_kg": 7.0 },
+    { "name": "H40V", "maker": "Prolyte",      "chords": 4, "width": 400, "height": 400, "tube": 51, "kg_per_m": 9.0, "node_kg": 10.0 }
   ]
 }

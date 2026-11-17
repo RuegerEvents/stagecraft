@@ -27,7 +27,7 @@ pub struct Uniforms {
     pub view_dir: [f32; 4],
     pub light: [f32; 4],
     pub planes: [[f32; 4]; 6],
-    pub colors: [[f32; 4]; 8],
+    pub colors: [[f32; 4]; 16],
     pub selected: [f32; 4],
     pub hatch: [f32; 4],
     pub grid: [f32; 4],

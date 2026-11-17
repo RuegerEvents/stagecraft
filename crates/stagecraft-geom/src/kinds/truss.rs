@@ -6,22 +6,25 @@ use glam::{DAffine3, DVec3};
 use stagecraft_core::{Object, ObjectKind};
 
 use super::to_plan;
-use crate::{Detail, LineClass, Lod, MaterialClass, Mesh, PlanPrim, PlanStyle, TrussProfile, truss_profile};
+use crate::{
+    Detail, LineClass, Lod, MaterialClass, Mesh, PlanPrim, PlanStyle, TrussProfile, truss_profile_or_fallback,
+};
 
 /// The profile of a truss object, or the fallback box for unknown names.
 pub fn profile_of(obj: &Object) -> TrussProfile {
     match &obj.kind {
-        ObjectKind::Truss { profile, .. } => {
-            truss_profile(profile).cloned().unwrap_or_else(|| TrussProfile::fallback(profile))
-        }
+        ObjectKind::Truss { profile, .. } | ObjectKind::TrussNode { profile, .. } => truss_profile_or_fallback(profile),
         _ => TrussProfile::fallback("?"),
     }
 }
 
 pub fn plan(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
     let ObjectKind::Truss { length, .. } = &obj.kind else { return Vec::new() };
-    let length = *length;
-    let prof = profile_of(obj);
+    plan_piece(w, *length, &profile_of(obj), style)
+}
+
+/// The plan symbol of a straight piece along local +x.
+pub fn plan_piece(w: &DAffine3, length: f64, prof: &TrussProfile, style: &PlanStyle) -> Vec<PlanPrim> {
     // Plan sees the top chords; z of the symbol is the truss axis.
     let p = |x: f64, y: f64| to_plan(w, [x, y, 0.0]);
     let hw = prof.width / 2.0;
@@ -92,8 +95,11 @@ pub fn brace_diameter(prof: &TrussProfile) -> f64 {
 /// `Simple` drops the bracing, `Box` gives the outer box.
 pub fn mesh(obj: &Object, lod: Lod) -> Mesh {
     let ObjectKind::Truss { length, .. } = &obj.kind else { return Mesh::empty() };
-    let length = *length;
-    let prof = profile_of(obj);
+    mesh_piece(*length, &profile_of(obj), lod)
+}
+
+/// The mesh of a straight piece along local +x from 0 to `length`.
+pub fn mesh_piece(length: f64, prof: &TrussProfile, lod: Lod) -> Mesh {
     let mut m = Mesh::empty();
     m.set_material(MaterialClass::Metal);
     if length <= 0.0 {
@@ -104,7 +110,7 @@ pub fn mesh(obj: &Object, lod: Lod) -> Mesh {
         m.cuboid(DVec3::new(0.0, -hw, -hh), DVec3::new(length, hw, hh));
         return m;
     }
-    let chords = chord_centres(&prof);
+    let chords = chord_centres(prof);
     let r = prof.tube / 2.0;
     let segs = if lod == Lod::Full { CHORD_SEGMENTS } else { CHORD_SEGMENTS_SIMPLE };
     let at = |x: f64, c: [f64; 2]| DVec3::new(x, c[0], c[1]);
@@ -119,7 +125,7 @@ pub fn mesh(obj: &Object, lod: Lod) -> Mesh {
         2 => vec![(0, 1)],
         n => (0..n).map(|i| (i, (i + 1) % n)).collect(),
     };
-    let br = brace_diameter(&prof) / 2.0;
+    let br = brace_diameter(prof) / 2.0;
     for (fi, &(a, b)) in faces.iter().enumerate() {
         let (ca, cb) = (chords[a], chords[b]);
         let width = ((ca[0] - cb[0]).hypot(ca[1] - cb[1])).max(1.0);

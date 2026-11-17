@@ -10,7 +10,7 @@ struct U {
     light: vec4<f32>,
     // xyz normal (towards the hidden side), w = offset: hidden if dot(n, p) > w.
     planes: array<vec4<f32>, 6>,
-    colors: array<vec4<f32>, 8>,
+    colors: array<vec4<f32>, 16>,
     selected: vec4<f32>,
     hatch: vec4<f32>,
     // minor step, major step, fade radius, z.
@@ -74,9 +74,9 @@ fn fs_mesh(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
         discard;
     }
     let selected = (in.flags & 1u) != 0u;
-    if (in.material == 7u) {
+    if (in.material == 15u) {
         // Cut face: flat colour with screen-space hatching.
-        var c = u.colors[7].rgb;
+        var c = u.colors[15].rgb;
         if (selected) {
             c = mix(c, u.selected.rgb, 0.45);
         }
@@ -96,7 +96,18 @@ fn fs_mesh(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
         n = -n;
         inside = 0.55;
     }
-    let base = u.colors[in.material].rgb;
+    // Bit 31: the object's own sRGB colour in the low 24 bits (cloth tints).
+    var base = vec3<f32>(0.0);
+    if ((in.material & 0x80000000u) != 0u) {
+        let srgb = vec3<f32>(
+            f32((in.material >> 16u) & 0xffu),
+            f32((in.material >> 8u) & 0xffu),
+            f32(in.material & 0xffu),
+        ) / 255.0;
+        base = pow(srgb, vec3<f32>(2.2));
+    } else {
+        base = u.colors[in.material].rgb;
+    }
     let key = max(dot(n, u.light.xyz), 0.0);
     let head = max(dot(n, e), 0.0);
     let sky = 0.5 + 0.5 * n.z;

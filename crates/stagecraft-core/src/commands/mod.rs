@@ -8,7 +8,9 @@ mod doc;
 mod history;
 mod layer;
 mod object;
+mod rigging;
 mod selection;
+mod stage;
 mod tag;
 
 use serde_json::{Value, json};
@@ -24,6 +26,8 @@ pub(crate) fn register(r: &mut Registry) {
     tag::register(r);
     object::register(r);
     create::register(r);
+    stage::register(r);
+    rigging::register(r);
     selection::register(r);
     r.add::<crate::engine::BatchArgs>(
         "batch",
@@ -59,6 +63,11 @@ pub(crate) fn resolve_tag(doc: &Document, r: &str) -> Option<Id> {
         return Some(id);
     }
     doc.tags.values().find(|t| t.name == r).map(|t| t.id)
+}
+
+/// The `id` field of a create command's result.
+pub(crate) fn id_of(v: &Value) -> Id {
+    serde_json::from_value(v["id"].clone()).expect("create commands return an id")
 }
 
 pub(crate) fn object(doc: &Document, id: Id) -> Result<&Object, CmdError> {
@@ -108,6 +117,11 @@ pub(crate) fn detail(doc: &Document, o: &Object) -> Value {
     m.insert("placement".into(), json!(o.placement));
     m.insert("kind".into(), json!(o.kind));
     m.insert("children".into(), json!(doc.children(o.id)));
+    if !o.style.is_default() {
+        m.insert("style".into(), json!(o.style));
+    }
+    let l = crate::load::load_of(doc, o.id);
+    m.insert("load".into(), json!({ "own_kg": l.own_kg, "attached_kg": l.attached_kg, "unknown_weights": l.unknown }));
     v
 }
 

@@ -35,17 +35,31 @@ pub enum MaterialClass {
     Metal,
     Fixture,
     Lens,
+    /// Curtain cloth (velour); the mesh's `tint` colours it.
+    Curtain,
+    /// Masking cloth (molton); the mesh's `tint` colours it.
+    Masking,
+    /// Platform decks.
+    Deck,
 }
 
 impl MaterialClass {
-    pub const ALL: [MaterialClass; 6] = [
+    pub const ALL: [MaterialClass; 9] = [
         MaterialClass::Generic,
         MaterialClass::Floor,
         MaterialClass::Wall,
         MaterialClass::Metal,
         MaterialClass::Fixture,
         MaterialClass::Lens,
+        MaterialClass::Curtain,
+        MaterialClass::Masking,
+        MaterialClass::Deck,
     ];
+
+    /// Cloth takes the object's own colour (the mesh tint) when it has one.
+    pub fn tintable(self) -> bool {
+        matches!(self, MaterialClass::Curtain | MaterialClass::Masking)
+    }
 
     /// Index into a renderer's colour table.
     pub fn index(self) -> u32 {
@@ -70,6 +84,9 @@ pub struct Mesh {
     pub indices: Vec<u32>,
     /// Material runs covering all of `indices`, in order.
     pub groups: Vec<Group>,
+    /// sRGB colour for tintable material groups (cloth), from the object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tint: Option<[u8; 3]>,
 }
 
 impl Mesh {
@@ -227,6 +244,9 @@ impl Mesh {
 
     /// Append another mesh (its groups too).
     pub fn append(&mut self, other: &Mesh) {
+        if self.tint.is_none() {
+            self.tint = other.tint;
+        }
         let base = self.positions.len() as u32;
         self.positions.extend_from_slice(&other.positions);
         self.normals.extend_from_slice(&other.normals);
@@ -251,6 +271,7 @@ impl Mesh {
             normals: n.collect(),
             indices: self.indices.clone(),
             groups: self.groups.clone(),
+            tint: self.tint,
         }
     }
 

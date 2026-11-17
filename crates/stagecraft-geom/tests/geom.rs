@@ -340,3 +340,143 @@ fn fixture_placeholder_hangs_below_its_origin() {
     let (_, whi) = w.bounds().unwrap();
     assert!((whi[2] - 6000.0).abs() < 1e-2);
 }
+
+// ---- block 4: stage objects ----------------------------------------------------
+
+fn obj_plan(e: &Engine, id: Id) -> Vec<PlanPrim> {
+    plan(e.doc(), &e.doc().objects[&id], &PlanStyle::default())
+}
+
+#[test]
+fn every_stage_mesh_is_closed_at_every_detail_level() {
+    let mut e = Engine::new();
+    let ids = [
+        run(&mut e, "proscenium.create", json!({ "iron": 800 })),
+        run(&mut e, "curtain.create", json!({ "width": 10000, "height": 6000 })),
+        run(&mut e, "curtain.create", json!({ "opening": 60 })),
+        run(&mut e, "curtain.create", json!({ "state": "gathered", "split": false })),
+        run(&mut e, "batten.create", json!({})),
+        run(&mut e, "platform.create", json!({ "system": "Bütec", "height": 600 })),
+        run(&mut e, "platform.create", json!({ "system": "Nivoflex", "height": 600, "preset": "1x2" })),
+        run(&mut e, "platform.create", json!({ "under": "none", "height": 50 })),
+        run(&mut e, "truss.node", json!({ "preset": "tee_4way" })),
+        run(&mut e, "support.create", json!({ "preset": "Wind-up stand" })),
+        run(&mut e, "support.create", json!({ "preset": "Ground support base" })),
+        run(&mut e, "support.create", json!({})),
+        run(&mut e, "hoist.create", json!({})),
+        run(&mut e, "ceiling.create", json!({ "outline": [[0, 0], [4000, 0], [4000, 3000], [0, 3000]] })),
+    ];
+    for v in &ids {
+        let id = id(v);
+        for lod in [Lod::Full, Lod::Simple, Lod::Box] {
+            let m = mesh_of(&e, id, lod);
+            let ty = e.doc().objects[&id].kind.type_name();
+            assert!(!m.is_empty(), "{ty} {lod:?} empty");
+            assert_unit_normals(&m);
+            assert!(m.is_watertight(), "{ty} {lod:?} not closed");
+            assert!(m.volume() > 0.0, "{ty} {lod:?} inside out");
+        }
+    }
+    let wings = run(&mut e, "wingset.create", json!({ "fullness": 50 }));
+    let leg: Id = serde_json::from_value(wings["legs"][0].clone()).unwrap();
+    assert!(mesh_of(&e, leg, Lod::Full).is_watertight());
+    assert!(mesh_of(&e, id(&wings), Lod::Full).is_empty());
+}
+
+#[test]
+fn proscenium_has_two_pillars_a_header_and_the_iron_line() {
+    let mut e = Engine::new();
+    let p = id(&run(
+        &mut e,
+        "proscenium.create",
+        json!({ "width": 10000, "height": 6000, "depth": 600, "frame": 1000, "iron": 800 }),
+    ));
+    let prims = obj_plan(&e, p);
+    let walls =
+        prims.iter().filter(|q| matches!(q, PlanPrim::Polygon { fill: stagecraft_geom::FillClass::Wall, .. })).count();
+    assert_eq!(walls, 2);
+    assert!(prims.iter().any(|q| matches!(q, PlanPrim::Polyline { line: LineClass::Hidden, .. })));
+    let iron = prims.iter().find(|q| matches!(q, PlanPrim::Polyline { line: LineClass::Centre, .. })).unwrap();
+    let PlanPrim::Polyline { points, .. } = iron else { unreachable!() };
+    assert!(near(points[0], [-6000.0, 800.0]) && near(points[1], [6000.0, 800.0]));
+    let m = mesh_of(&e, p, Lod::Full);
+    assert!(within(&m, [-6000.0, 0.0, 0.0], [6000.0, 600.0, 7000.0], 0.0));
+}
+
+#[test]
+fn a_curtain_hangs_down_from_its_batten_with_pleats() {
+    let mut e = Engine::new();
+    let b = id(&run(&mut e, "batten.create", json!({ "y": 1000, "trim": 8000, "length": 12000 })));
+    let c = id(&run(&mut e, "curtain.create", json!({ "parent": b, "width": 10000, "height": 7500, "fullness": 100 })));
+    let wm = world_mesh(e.doc(), &e.doc().objects[&c], Lod::Full);
+    let (lo, hi) = wm.bounds().unwrap();
+    assert!((lo[2] - 500.0).abs() < 1e-2 && (hi[2] - 8000.0).abs() < 1e-2, "{lo:?} {hi:?}");
+    assert!((lo[0] + 5006.0).abs() < 10.0 && (hi[0] - 5006.0).abs() < 10.0);
+    // Pleats: the cloth swings both ways around the track.
+    assert!(lo[1] < 1000.0 - 100.0 && hi[1] > 1000.0 + 100.0, "{lo:?} {hi:?}");
+    assert_eq!(wm.tint, Some([0x8b, 0x1a, 0x1a]));
+    assert!(wm.groups.iter().all(|g| g.material == MaterialClass::Curtain));
+    // Plan: two pleated panels and the track line; low detail: straight panels.
+    let prims = obj_plan(&e, c);
+    assert_eq!(prims.len(), 3);
+    let PlanPrim::Polyline { points, .. } = &prims[0] else { panic!() };
+    assert!(points.len() > 100);
+    let low = plan(e.doc(), &e.doc().objects[&c], &PlanStyle { detail: Detail::Low, ..Default::default() });
+    assert!(low.iter().all(|q| matches!(q, PlanPrim::Polyline { points, .. } if points.len() == 2)));
+    // Opened, both panels sit at the sides.
+    run(&mut e, "curtain.update", json!({ "id": c, "opening": 100 }));
+    let b = object_bounds(e.doc(), &e.doc().objects[&c], &PlanStyle { detail: Detail::Low, ..Default::default() });
+    assert!(b.size()[0] > 9000.0);
+}
+
+#[test]
+fn battens_platforms_and_hoists_draw_their_symbols() {
+    let mut e = Engine::new();
+    let b = id(&run(&mut e, "batten.create", json!({ "number": 12, "y": 3000, "length": 10000 })));
+    let prims = obj_plan(&e, b);
+    assert!(prims.iter().any(|q| matches!(q, PlanPrim::Text { text, .. } if text == "12")));
+    let bb = stagecraft_geom::pick::bounds(&prims);
+    assert!(bb.min[0] < -5000.0 && bb.max[0] >= 5000.0 && (bb.center()[1] - 3000.0).abs() < 1.0);
+
+    run(&mut e, "layer.create", json!({ "name": "Up", "elevation": 1000 }));
+    let p = id(&run(&mut e, "platform.create", json!({ "layer": "Up", "preset": "2x1", "height": 400 })));
+    let prims = obj_plan(&e, p);
+    assert!(prims.iter().any(|q| matches!(q, PlanPrim::Text { text, .. } if text == "+1.40")), "{prims:?}");
+    // Box selection and picking work on the new symbols.
+    let hits = in_box(
+        e.doc(),
+        all(&e),
+        Bounds::from_points([-1100.0, -600.0], [1100.0, 600.0]),
+        BoxMode::Window,
+        &PlanStyle::default(),
+    );
+    assert_eq!(hits, vec![p]);
+    let h = id(&run(&mut e, "hoist.create", json!({ "position": [0, 0, 9000] })));
+    assert_eq!(pick(e.doc(), all(&e), [10.0, 10.0], 50.0, &PlanStyle::default()), Some(h));
+}
+
+#[test]
+fn per_object_style_overrides_the_view() {
+    let mut e = Engine::new();
+    let c = id(&run(&mut e, "ceiling.create", json!({ "outline": [[0, 0], [4000, 0], [4000, 3000]] })));
+    assert!(matches!(obj_plan(&e, c)[0], PlanPrim::Polyline { line: LineClass::Hidden, .. }));
+    run(&mut e, "ceiling.update", json!({ "id": c, "show_in_plan": false }));
+    assert!(obj_plan(&e, c).is_empty());
+    let t = id(&run(&mut e, "truss.create", json!({ "start": [0, 0, 6000], "end": [3000, 0, 6000] })));
+    run(&mut e, "object.set_style", json!({ "ids": [t], "line": "thick", "detail": "low" }));
+    let prims = obj_plan(&e, t);
+    assert_eq!(prims.len(), 1);
+    assert!(matches!(prims[0], PlanPrim::Polyline { line: LineClass::Thick, .. }));
+    run(&mut e, "object.set_style", json!({ "ids": [t], "hidden": true }));
+    assert!(obj_plan(&e, t).is_empty());
+}
+
+#[test]
+fn a_corner_node_reaches_one_profile_width_along_each_arm() {
+    let mut e = Engine::new();
+    let n = id(&run(&mut e, "truss.node", json!({ "position": [0, 0, 6000], "preset": "corner_3way" })));
+    let m = world_mesh(e.doc(), &e.doc().objects[&n], Lod::Box);
+    assert!(within(&m, [-145.0, -145.0, 6000.0 - 290.0], [290.0, 290.0, 6145.0], 0.5));
+    let b = object_bounds(e.doc(), &e.doc().objects[&n], &PlanStyle::default());
+    assert!(near(b.min, [-145.0, -145.0]) && near(b.max, [290.0, 290.0]), "{b:?}");
+}
