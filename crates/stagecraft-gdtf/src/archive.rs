@@ -5,6 +5,9 @@ use std::io::{Cursor, Read};
 
 use crate::{GdtfError, Warning};
 
+/// Largest entry read (decompressed).
+const MAX_ENTRY: u64 = 256 << 20;
+
 /// All entries of the archive by path (as stored, `/` separated, no leading `./`).
 #[derive(Debug, Clone, Default)]
 pub struct Archive {
@@ -31,9 +34,18 @@ impl Archive {
                 Ok(n) => normalize(&n),
                 Err(_) => normalize(&String::from_utf8_lossy(entry.name_raw())),
             };
-            let mut data = Vec::with_capacity(entry.size().min(64 << 20) as usize);
-            if let Err(e) = entry.read_to_end(&mut data) {
+            if entry.size() > MAX_ENTRY {
+                warnings.push(Warning::new("archive", format!("{name}: larger than 256 MB; skipped")));
+                continue;
+            }
+            let mut data = Vec::with_capacity(entry.size() as usize);
+            // The header size can lie; never inflate more than the cap.
+            if let Err(e) = (&mut entry).take(MAX_ENTRY + 1).read_to_end(&mut data) {
                 warnings.push(Warning::new("archive", format!("{name}: {e}")));
+                continue;
+            }
+            if data.len() as u64 > MAX_ENTRY {
+                warnings.push(Warning::new("archive", format!("{name}: larger than 256 MB; skipped")));
                 continue;
             }
             files.insert(name, data);
