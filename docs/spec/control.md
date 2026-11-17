@@ -30,11 +30,16 @@ A wrong token is `-32001`.
 `stagecraft` without a subcommand opens the GUI, which runs the same server with
 `mode: "gui"`. There, `commands` and `describe` also list the GUI's own `ui.*`
 commands (`kind: "ui"`), and `execute` runs them: `ui.state`, `ui.set_tool`,
-`ui.set_view`, `ui.zoom`, `ui.pan`, `ui.zoom_to_fit`, `ui.set_theme`,
+`ui.set_view` (`plan`, `3d`, `split`), `ui.zoom`, `ui.pan`, `ui.zoom_to_fit`,
+`ui.camera` (3D: `view` top/front/back/side/left/iso, `eye`, `target`,
+`projection`, `fov`, `orbit`, `zoom`, `fit`), `ui.section` (3D: `axis` + `offset`,
+`origin` + `normal`, `box {min,max}`, `off`, `hatch`), `ui.set_theme`,
 `ui.toggle_panel`, `ui.set_tag_visible`, `ui.set_active_layer`, `ui.set_snap`,
 `ui.set_tool_options`, `ui.palette`, `ui.screenshot {path}`. They change only what
-the window shows, not the document, and are not undoable. `ui.screenshot` answers
-once the next frame is captured, with `{path, width, height}` in physical pixels.
+the window shows, not the document, and are not undoable. `ui.state` reports the 3D
+camera (`camera3d`) and section too. `ui.screenshot` answers once the next frame is
+captured, with `{path, width, height}` in physical pixels; it includes the 3D view.
+A window that draws no frames (screen locked, minimised) leaves it waiting.
 
 ## TCP framing
 

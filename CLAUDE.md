@@ -32,9 +32,15 @@ UX. Commits are GPG-signed.
 ## Geometry
 
 `stagecraft-geom` turns objects into what views draw: `plan()` gives 2D primitives in
-world mm with line/fill classes, one module per kind in `src/kinds/`; `mesh()` is a
-stub until block 3. Hit tests, box selection, truss hits and snapping are pure
-functions in `pick.rs` and `snap.rs` with tests. Truss profiles live in
+world mm with line/fill classes, `mesh(doc, obj, Lod)` triangles in the object's local
+space (normals, material groups), one module per kind in `src/kinds/`. Meshes depend
+on kind parameters and `Lod` (Full/Simple/Box, only truss differs) only, so callers
+cache them; `world_mesh` applies the transform. `Mesh` has builders (`quad`,
+`cuboid`, `tube`, `extrude`) and checks (`is_watertight`, `volume`, `bounds`).
+`section.rs` cuts a mesh with a `Plane` into closed polygons in plane coordinates
+(holes by nesting) and triangulates them; a plane hides the side its normal points
+to. Hit tests, box selection, truss hits and snapping are pure functions in
+`pick.rs` and `snap.rs` with tests. Truss profiles live in
 `catalog/truss_profiles.json`. It must build for wasm too.
 
 ## UI (`stagecraft-ui`)
@@ -55,13 +61,24 @@ functions in `pick.rs` and `snap.rs` with tests. Truss profiles live in
 - Give clickable things an accessible name (`widgets::name`); tests find them so.
   Table cells are named `"<Column> <row>"`, e.g. `FID 1`.
 
+- 3D view in `src/view3d/`: `camera.rs` (orbit camera, pure maths), `scene.rs`
+  (per-object world-mesh cache keyed on kind, `Lod` and world transform; flattened
+  GPU buffers with versions; cut faces; ray picking), `gpu.rs` + `*.wgsl` (offscreen
+  4× MSAA pass with reversed depth in the paint callback's `prepare`, blitted in
+  `paint`). `gpu::install(render_state)` must run once per wgpu render state:
+  `run` does it from eframe's creation context; headless tests build their own
+  render state (see `tests/screens.rs`), otherwise the 3D view stays empty.
+  `ui.set_view` switches plan / 3d / split (⌘1/⌘2/⌘3); `ui.camera` and
+  `ui.section` drive the rest.
+
 Look at the screens after UI changes:
 
 ```
 STAGECRAFT_SCREENSHOTS=/some/dir cargo test -p stagecraft-ui --test screens
 ```
 
-renders the demo document (`demo.rs`) in light and dark to PNG.
+renders the demo document (`demo.rs`) in light and dark to PNG, including 3D iso,
+front, sections, a truss close-up and split.
 
 ## Test data
 
