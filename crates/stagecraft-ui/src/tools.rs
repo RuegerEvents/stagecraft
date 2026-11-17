@@ -379,7 +379,12 @@ fn place_fixture(s: &mut Studio, ids: &[Id], raw: P2, cursor: Snapped, tol: f64)
             };
             json!({ "parent": hit.id, "position": [along, 0.0, -hit.height / 2.0] })
         }
-        None => json!({ "position": [cursor.point[0], cursor.point[1], 0.0], "layer": s.active_layer_arg() }),
+        // Standing on the floor: turned over, GDTF style (fixtures hang from their origin).
+        None => json!({
+            "position": [cursor.point[0], cursor.point[1], 0.0],
+            "rotation": [180.0, 0.0, 0.0],
+            "layer": s.active_layer_arg()
+        }),
     };
     created(s, "fixture.create", args, "tool.fixture");
 }

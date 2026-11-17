@@ -20,6 +20,7 @@ stagecraft-control = { path = "crates/stagecraft-control" }
 stagecraft-geom = { path = "crates/stagecraft-geom" }
 stagecraft-ui = { path = "crates/stagecraft-ui" }
 anyhow = "1"
+earcutr = "0.5"
 egui = "0.36.2"
 eframe = "0.36.2"
 egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot"] }

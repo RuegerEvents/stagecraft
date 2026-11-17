@@ -12,7 +12,11 @@ pub fn plan(w: &DAffine3, obj: &Object, _style: &PlanStyle) -> Vec<PlanPrim> {
     vec![PlanPrim::Polygon { points, fill: FillClass::Floor, line: Some(LineClass::Medium) }]
 }
 
-pub fn mesh(_obj: &Object, _lod: Lod) -> Mesh {
-    // TODO(block 3): extrude the outline down by the thickness.
-    Mesh::empty(MaterialClass::Floor)
+/// The outline extruded down by the thickness: the top surface is at local z 0.
+pub fn mesh(obj: &Object, _lod: Lod) -> Mesh {
+    let ObjectKind::Floor { outline, thickness } = &obj.kind else { return Mesh::empty() };
+    let mut m = Mesh::empty();
+    m.set_material(MaterialClass::Floor);
+    m.extrude(outline, -thickness.max(1.0), 0.0);
+    m
 }

@@ -76,7 +76,7 @@ pub fn engine() -> Engine {
             &mut e,
             "fixture.create",
             json!({
-                "position": [x, 8000, 0], "rotation": [0, 0, 180], "tags": ["light", "floor"],
+                "position": [x, 8000, 0], "rotation": [180, 0, 0], "tags": ["light", "floor"],
                 "name": "Floor wash", "mode": "8ch"
             }),
         );

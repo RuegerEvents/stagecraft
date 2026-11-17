@@ -22,6 +22,8 @@ pub fn plan(doc: &Document, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
     }
 }
 
+/// The object's mesh in its local space. Meshes depend on the kind's parameters and the
+/// level of detail only, never on the placement, so views can cache them per object.
 pub fn mesh(_doc: &Document, obj: &Object, lod: Lod) -> Mesh {
     match &obj.kind {
         ObjectKind::Floor { .. } => floor::mesh(obj, lod),
