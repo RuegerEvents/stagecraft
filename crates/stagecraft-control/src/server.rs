@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use stagecraft_core::Engine;
 
-use crate::protocol::{RpcError, handle};
+use crate::protocol::{Extension, RpcError, handle, handle_with};
 
 /// One request waiting for the engine.
 pub struct Call {
@@ -23,6 +23,17 @@ impl Call {
     /// Run the call on the engine and send the answer back to the connection.
     pub fn answer(self, engine: &mut Engine) {
         let out = handle(engine, &self.method, self.params);
+        let _ = self.reply.send(out);
+    }
+
+    /// Run the call on the engine and an extension registry (the GUI's `ui.*`).
+    pub fn answer_with(self, engine: &mut Engine, ext: &mut dyn Extension) {
+        let out = handle_with(engine, ext, &self.method, self.params.clone());
+        let _ = self.reply.send(out);
+    }
+
+    /// Answer later, e.g. after a screenshot has been taken.
+    pub fn reply(self, out: Result<Value, RpcError>) {
         let _ = self.reply.send(out);
     }
 }

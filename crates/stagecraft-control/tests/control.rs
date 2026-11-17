@@ -105,3 +105,46 @@ fn mcp_round_trip() {
     let text = resp[4]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("fixture.number"));
 }
+
+struct Echo {
+    calls: usize,
+}
+
+impl stagecraft_control::Extension for Echo {
+    fn commands(&self) -> Vec<Value> {
+        vec![json!({ "name": "ui.echo", "kind": "ui", "summary": "Echo" })]
+    }
+    fn describe(&self, name: &str) -> Option<Value> {
+        (name == "ui.echo").then(|| json!({ "name": "ui.echo", "kind": "ui", "summary": "Echo", "args": {} }))
+    }
+    fn execute(&mut self, _: &mut Engine, name: &str, args: Value) -> Option<Result<Value, stagecraft_core::CmdError>> {
+        (name == "ui.echo").then(|| {
+            self.calls += 1;
+            Ok(args)
+        })
+    }
+}
+
+#[test]
+fn an_extension_registry_is_listed_described_and_run() {
+    let mut engine = Engine::new();
+    let mut ext = Echo { calls: 0 };
+    let list = stagecraft_control::handle_with(&mut engine, &mut ext, "commands", json!({ "prefix": "ui." })).unwrap();
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    let all = stagecraft_control::handle_with(&mut engine, &mut ext, "commands", Value::Null).unwrap();
+    let names: Vec<&str> = all.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"ui.echo") && names.contains(&"object.list"));
+    assert!(names.windows(2).all(|w| w[0] <= w[1]));
+    let d = stagecraft_control::handle_with(&mut engine, &mut ext, "describe", json!({ "name": "ui.echo" })).unwrap();
+    assert_eq!(d["kind"], "ui");
+    let out = stagecraft_control::handle_with(
+        &mut engine,
+        &mut ext,
+        "execute",
+        json!({ "command": "ui.echo", "args": { "x": 1 } }),
+    )
+    .unwrap();
+    assert_eq!(out, json!({ "x": 1 }));
+    stagecraft_control::handle_with(&mut engine, &mut ext, "execute", json!({ "command": "doc.info" })).unwrap();
+    assert_eq!(ext.calls, 1);
+}

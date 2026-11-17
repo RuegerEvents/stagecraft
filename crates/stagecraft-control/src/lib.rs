@@ -17,5 +17,5 @@ pub mod protocol;
 pub mod server;
 
 pub use client::Client;
-pub use protocol::{RpcError, handle};
+pub use protocol::{Extension, RpcError, handle, handle_with};
 pub use server::{Call, Server};
