@@ -25,6 +25,14 @@ pub struct Document {
     pub layers: OrdMap<Id, Layer>,
     pub tags: OrdMap<Id, Tag>,
     pub objects: OrdMap<Id, Object>,
+    /// Drawing sheets (block 7).
+    #[serde(default)]
+    pub sheets: OrdMap<Id, crate::sheet::Sheet>,
+    #[serde(default)]
+    pub label_templates: OrdMap<Id, crate::sheet::LabelTemplate>,
+    /// Custom title blocks; sheets without one use [`crate::sheet::TitleBlock::generic`].
+    #[serde(default)]
+    pub title_blocks: OrdMap<Id, crate::sheet::TitleBlock>,
 }
 
 impl Default for Document {
@@ -42,6 +50,9 @@ impl Document {
             layers: OrdMap::new(),
             tags: OrdMap::new(),
             objects: OrdMap::new(),
+            sheets: OrdMap::new(),
+            label_templates: OrdMap::new(),
+            title_blocks: OrdMap::new(),
         };
         let stage = Layer { id: Uuid::new_v4(), name: "Stage".into(), elevation: 0.0, order: 0, visible: true };
         doc.layers.insert(stage.id, stage);
@@ -72,6 +83,33 @@ impl Document {
         out
     }
 
+    /// Sheets sorted by their `order`, then number.
+    pub fn sheets_sorted(&self) -> Vec<&crate::sheet::Sheet> {
+        let mut v: Vec<_> = self.sheets.values().collect();
+        v.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.number.cmp(&b.number)));
+        v
+    }
+
+    /// The sheet holding a viewport.
+    pub fn sheet_of_viewport(&self, viewport: Id) -> Option<&crate::sheet::Sheet> {
+        self.sheets.values().find(|s| s.viewport(viewport).is_some())
+    }
+
+    /// Change every viewport of every sheet.
+    pub fn edit_viewports(&mut self, mut f: impl FnMut(&mut crate::sheet::Viewport)) {
+        let ids: Vec<Id> = self.sheets.keys().copied().collect();
+        for id in ids {
+            let s = self.sheets.get_mut(&id).expect("listed");
+            s.viewports.iter_mut().for_each(&mut f);
+        }
+    }
+
+    /// One viewport, mutable.
+    pub fn viewport_mut(&mut self, viewport: Id) -> Option<&mut crate::sheet::Viewport> {
+        let sheet = self.sheet_of_viewport(viewport)?.id;
+        self.sheets.get_mut(&sheet)?.viewports.iter_mut().find(|v| v.id == viewport)
+    }
+
     /// True if `ancestor` is `id` or one of its parents.
     pub fn is_ancestor(&self, ancestor: Id, id: Id) -> bool {
         let mut cur = Some(id);
@@ -91,6 +129,16 @@ pub struct Meta {
     pub venue: String,
     pub drawn_by: String,
     pub revision: String,
+    /// Shown in title blocks.
+    #[serde(default)]
+    pub company: String,
+    /// Date printed in title blocks, free text (e.g. `2026-11-18`).
+    #[serde(default)]
+    pub date: String,
+    /// Logo for title blocks: PNG or JPEG, base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
+    pub logo: Option<String>,
 }
 
 /// A spatial layer: a storey or area. Root objects on it sit at its elevation.
@@ -138,6 +186,10 @@ pub struct Object {
     /// the symbol, this restyles it).
     #[serde(default, skip_serializing_if = "PlanOverride::is_default")]
     pub style: PlanOverride,
+    /// Free attributes (key → text): `gel`, `circuit`, `focus`, `note` for fixtures, or
+    /// anything else. Labels and tables can show them.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub attrs: std::collections::BTreeMap<String, String>,
 }
 
 /// Per-object plan style. Unset fields follow the view.

@@ -123,5 +123,6 @@ fn delete(ctx: &mut Ctx, a: DeleteArgs) -> CmdResult {
         }
     }
     doc.layers.remove(&id);
+    doc.edit_viewports(|v| v.hidden_layers.retain(|l| *l != id));
     Ok(json!({ "moved": on_it.len() }))
 }

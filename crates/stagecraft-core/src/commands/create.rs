@@ -62,6 +62,7 @@ pub(super) fn insert(
         placement,
         kind,
         style: Default::default(),
+        attrs: Default::default(),
     };
     let id = o.id;
     ctx.doc_mut().objects.insert(id, o);

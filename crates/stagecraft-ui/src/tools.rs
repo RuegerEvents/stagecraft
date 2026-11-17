@@ -622,6 +622,7 @@ fn ghost(kind: ObjectKind, placement: Placement, style: &PlanStyle) -> Vec<stage
         placement,
         kind,
         style: Default::default(),
+        attrs: Default::default(),
     };
     let w = stagecraft_core::geom::placement_to_affine(&obj.placement);
     stagecraft_geom::kinds::plan_at(&w, &obj, style)

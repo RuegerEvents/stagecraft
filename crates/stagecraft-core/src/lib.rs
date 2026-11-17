@@ -11,6 +11,7 @@ pub mod file;
 pub mod geom;
 pub mod load;
 pub mod model;
+pub mod sheet;
 
 pub use command::{CmdError, CmdResult, CommandInfo, Kind, Registry, registry};
 pub use engine::{Engine, JournalEntry};

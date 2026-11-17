@@ -10,6 +10,7 @@ mod layer;
 mod object;
 mod rigging;
 mod selection;
+pub(crate) mod sheet;
 mod stage;
 mod tag;
 
@@ -29,6 +30,7 @@ pub(crate) fn register(r: &mut Registry) {
     stage::register(r);
     rigging::register(r);
     selection::register(r);
+    sheet::register(r);
     r.add::<crate::engine::BatchArgs>(
         "batch",
         crate::command::Kind::Meta,
