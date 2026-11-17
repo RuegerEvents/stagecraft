@@ -154,3 +154,56 @@ fn every_private_gdtf_parses() {
     println!("{} GDTF files, {} failures", all.len(), failures.len());
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// `GDTF_VIEWS=/some/dir cargo test --test real_files views -- --nocapture` writes a
+/// front view (x/z, triangles) and the plan silhouette (x/y) of every private GDTF
+/// as SVG, to eyeball orientation and scaling.
+#[test]
+fn views() {
+    let Some(dir) = std::env::var_os("GDTF_VIEWS").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&dir).unwrap();
+    for (label, bytes) in collect() {
+        let Ok(g) = Gdtf::from_bytes(&bytes) else { continue };
+        let mesh = g.mesh(None, Lod::Default);
+        let flat = mesh.flatten();
+        let Some((lo, hi)) = flat.bounds() else { continue };
+        let sil = silhouette::silhouette(&mesh);
+        let pad = 20.0;
+        let (w, h) = (hi.x - lo.x, hi.z - lo.z);
+        let d = hi.y - lo.y;
+        let mut svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}" width="800"><rect x="{}" y="{}" width="100%" height="100%" fill="white"/>"#,
+            lo.x - pad,
+            -hi.z - pad,
+            w * 2.0 + 3.0 * pad,
+            h.max(d) + 2.0 * pad,
+            lo.x - pad,
+            -hi.z - pad
+        );
+        // Front view: looking along +y, x right, z up (SVG y down → −z).
+        for t in flat.indices.chunks_exact(3) {
+            let p: Vec<String> =
+                t.iter().map(|i| flat.positions[*i as usize]).map(|v| format!("{:.1},{:.1}", v[0], -v[2])).collect();
+            svg += &format!(
+                r##"<polygon points="{}" fill="#89a" fill-opacity="0.15" stroke="#234" stroke-width="0.3"/>"##,
+                p.join(" ")
+            );
+        }
+        // Plan: right of the front view, y up on the sheet.
+        // Plan top edge level with the front view's top: sheet y = −hi.z + (hi.y − y).
+        let ox = w + pad;
+        let oy = -hi.z;
+        for (_, part) in &sil.parts {
+            let p: Vec<String> = part.iter().map(|v| format!("{:.1},{:.1}", v[0] + ox, oy + hi.y - v[1])).collect();
+            svg += &format!(
+                r##"<polygon points="{}" fill="#c84" fill-opacity="0.25" stroke="#630" stroke-width="0.8"/>"##,
+                p.join(" ")
+            );
+        }
+        let p: Vec<String> = sil.hull.iter().map(|v| format!("{:.1},{:.1}", v[0] + ox, oy + hi.y - v[1])).collect();
+        svg += &format!(r##"<polygon points="{}" fill="none" stroke="#000" stroke-width="1.5"/>"##, p.join(" "));
+        svg += "</svg>";
+        let name = label.replace(['/', ' ', '@'], "_").replace(".gdtf", ".svg");
+        std::fs::write(dir.join(name), svg).unwrap();
+    }
+}

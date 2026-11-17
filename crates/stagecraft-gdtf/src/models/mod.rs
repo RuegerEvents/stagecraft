@@ -162,6 +162,15 @@ fn fit(raw: &mut RawMesh, dims: Vec3, ext: &str, ctx: &str, warnings: &mut Vec<W
         let unit = if ext == "3ds" && size.max_element() >= 10.0 { 1.0 } else { 1000.0 };
         warnings.push(Warning::new(ctx, "no dimensions; mesh units guessed"));
         s = [unit; 3];
+    } else if let Some(unit) = mismatched_dimensions(&known) {
+        // Some exporters (Vectorworks "Custom@" files) write wrong Width/Height
+        // while the mesh is already true to size: one axis matches exactly in m or
+        // mm, another would stretch by more than 25 %. Keep the proportions.
+        warnings.push(Warning::new(
+            ctx,
+            "model dimensions disagree with the mesh, which is already to scale on one axis; kept its proportions",
+        ));
+        s = [unit; 3];
     } else {
         let mean = known.iter().sum::<f32>() / known.len() as f32;
         for (i, v) in s.iter_mut().enumerate() {
@@ -171,4 +180,63 @@ fn fit(raw: &mut RawMesh, dims: Vec3, ext: &str, ctx: &str, warnings: &mut Vec<W
         }
     }
     raw.transform(Mat4::from_scale(Vec3::from_array(s)));
+}
+
+/// With per-axis scales `s` (mm per mesh unit): the unit (1000 for metres, 1 for
+/// mm) if one axis matches it within 1 % while the scales spread by more than 25 %.
+fn mismatched_dimensions(s: &[f32]) -> Option<f32> {
+    let (lo, hi) = s.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
+    if s.len() < 2 || hi / lo <= 1.25 {
+        return None;
+    }
+    [1000.0, 1.0].into_iter().find(|unit| s.iter().any(|v| (v / unit - 1.0).abs() < 0.01))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cube_raw(size: Vec3) -> RawMesh {
+        // Unit cube (primitive sizes are clamped to ≥ 1 mm), then scaled.
+        let m = primitives::primitive(&PrimitiveType::Cube, Vec3::ONE);
+        RawMesh {
+            positions: m.positions.iter().map(|p| Vec3::from_array(*p) * size).collect(),
+            normals: None,
+            indices: m.indices,
+            groups: vec![],
+        }
+    }
+
+    fn fitted(mesh: Vec3, dims_mm: Vec3) -> (Vec3, usize) {
+        let mut raw = cube_raw(mesh);
+        let mut w = Vec::new();
+        fit(&mut raw, dims_mm, "glb", "t", &mut w);
+        let (lo, hi) = raw.bounds().unwrap();
+        (hi - lo, w.len())
+    }
+
+    #[test]
+    fn scales_to_dimensions() {
+        // Mesh in arbitrary units, stretched per axis.
+        let (s, w) = fitted(Vec3::new(2.0, 1.0, 1.0), Vec3::new(300.0, 200.0, 100.0));
+        assert!((s - Vec3::new(300.0, 200.0, 100.0)).length() < 1e-3);
+        assert_eq!(w, 0);
+        // Mesh in metres, slightly off: still fitted.
+        let (s, _) = fitted(Vec3::new(0.3, 0.2, 0.1), Vec3::new(310.0, 190.0, 100.0));
+        assert!((s - Vec3::new(310.0, 190.0, 100.0)).length() < 1e-2);
+    }
+
+    #[test]
+    fn keeps_true_scale_mesh_when_dimensions_are_wrong() {
+        // x matches in metres, y/z dimensions far off (Vectorworks Body case).
+        let (s, w) = fitted(Vec3::new(0.2787, 0.2578, 0.5347), Vec3::new(278.7, 718.4, 718.4));
+        assert!((s - Vec3::new(278.7, 257.8, 534.7)).length() < 0.1, "{s}");
+        assert_eq!(w, 1);
+    }
+
+    #[test]
+    fn zero_dimension_takes_mean_scale() {
+        let (s, _) = fitted(Vec3::new(1.0, 1.0, 1.0), Vec3::new(100.0, 100.0, 0.0));
+        assert!((s.z - 100.0).abs() < 1e-3);
+    }
 }
