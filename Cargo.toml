@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/stagecraft-core",
+    "crates/stagecraft-geom",
     "crates/stagecraft-control",
     "crates/stagecraft-app",
 ]
@@ -15,6 +16,7 @@ license = "MIT"
 [workspace.dependencies]
 stagecraft-core = { path = "crates/stagecraft-core" }
 stagecraft-control = { path = "crates/stagecraft-control" }
+stagecraft-geom = { path = "crates/stagecraft-geom" }
 anyhow = "1"
 clap = { version = "4.6", features = ["derive"] }
 dirs = "7"

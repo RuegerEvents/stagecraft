@@ -1,0 +1,17 @@
+[package]
+name = "stagecraft-geom"
+description = "What views draw for each StageCraft object: plan primitives, meshes, hit tests, snapping."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# Builds for wasm32-unknown-unknown: no files, no clock. Catalogues are embedded.
+[dependencies]
+stagecraft-core.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
