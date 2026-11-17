@@ -128,6 +128,67 @@ pub fn offset_polyline(points: &[P2], d: f64) -> Vec<P2> {
     out
 }
 
+/// Twice the signed area; positive for counter-clockwise outlines.
+pub fn signed_area2(poly: &[P2]) -> f64 {
+    let n = poly.len();
+    (0..n)
+        .map(|i| {
+            let a = poly[i];
+            let b = poly[(i + 1) % n];
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum()
+}
+
+/// Triangles of a simple polygon by ear clipping, as index triples into `poly`.
+/// Self-intersecting input still gets triangles (a fan for what is left), so a fill
+/// never disappears.
+pub fn triangulate(poly: &[P2]) -> Vec<[usize; 3]> {
+    let n = poly.len();
+    if n < 3 {
+        return Vec::new();
+    }
+    let ccw = signed_area2(poly) >= 0.0;
+    let mut idx: Vec<usize> = if ccw { (0..n).collect() } else { (0..n).rev().collect() };
+    let cross = |a: P2, b: P2, c: P2| (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    let mut out = Vec::with_capacity(n - 2);
+    let mut guard = 0;
+    while idx.len() > 3 && guard < n * n {
+        guard += 1;
+        let m = idx.len();
+        let mut clipped = false;
+        for i in 0..m {
+            let (ia, ib, ic) = (idx[(i + m - 1) % m], idx[i], idx[(i + 1) % m]);
+            let (a, b, c) = (poly[ia], poly[ib], poly[ic]);
+            if cross(a, b, c) <= 1e-12 {
+                continue;
+            }
+            let inside = idx.iter().any(|&j| {
+                if j == ia || j == ib || j == ic {
+                    return false;
+                }
+                let p = poly[j];
+                cross(a, b, p) >= 0.0 && cross(b, c, p) >= 0.0 && cross(c, a, p) >= 0.0
+            });
+            if inside {
+                continue;
+            }
+            out.push([ia, ib, ic]);
+            idx.remove(i);
+            clipped = true;
+            break;
+        }
+        if !clipped {
+            break;
+        }
+    }
+    // What is left (a triangle, or a degenerate rest): fan it.
+    for k in 1..idx.len().saturating_sub(1) {
+        out.push([idx[0], idx[k], idx[k + 1]]);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +225,26 @@ mod tests {
         assert!(near(left[2], [9.0, 10.0]));
         let right = offset_polyline(&path, -1.0);
         assert!(near(right[1], [11.0, -1.0]));
+    }
+
+    #[test]
+    fn triangulation_covers_concave_outlines() {
+        let l = [[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [4.0, 4.0], [4.0, 10.0], [0.0, 10.0]];
+        for poly in [l.to_vec(), l.iter().rev().copied().collect()] {
+            let tris = triangulate(&poly);
+            assert_eq!(tris.len(), 4);
+            let area: f64 = tris.iter().map(|t| signed_area2(&[poly[t[0]], poly[t[1]], poly[t[2]]]).abs() / 2.0).sum();
+            assert!((area - 64.0).abs() < 1e-9, "{area}");
+            // No triangle centre falls in the notch.
+            for t in &tris {
+                let c = [
+                    (poly[t[0]][0] + poly[t[1]][0] + poly[t[2]][0]) / 3.0,
+                    (poly[t[0]][1] + poly[t[1]][1] + poly[t[2]][1]) / 3.0,
+                ];
+                assert!(point_in_polygon(&poly, c));
+            }
+        }
+        assert!(triangulate(&[[0.0, 0.0], [1.0, 1.0]]).is_empty());
     }
 
     #[test]

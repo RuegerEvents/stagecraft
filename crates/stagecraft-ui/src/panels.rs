@@ -1,0 +1,366 @@
+//! Menu bar, toolbar, status bar, layers and tags panels.
+
+use egui::{RichText, Ui, WidgetType};
+use serde_json::{Value, json};
+use stagecraft_core::{Id, Layer};
+
+use crate::app::Studio;
+use crate::i18n::{t, tf};
+use crate::state::{FileRequest, PanelKind, ThemePref, Tool};
+use crate::widgets::{self, button, edit_field};
+
+pub fn new_document(s: &mut Studio) {
+    if s.engine.dirty() && !crate::app::confirm_discard_or_test(s) {
+        return;
+    }
+    let _ = s.run("doc.new", json!({ "discard": true }));
+}
+
+/// Save to the current file, or ask where.
+pub fn save(s: &mut Studio, save_as: bool) {
+    if save_as || s.engine.path().is_none() {
+        s.ui.file_request = Some(FileRequest::SaveAs);
+    } else if s.run("doc.save", Value::Null).is_ok() {
+        s.ui.info(t("status.saved"));
+    }
+}
+
+pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
+    egui::MenuBar::new().ui(ui, |ui| {
+        ui.menu_button(t("menu.file"), |ui| {
+            if ui.button(t("menu.new")).clicked() {
+                new_document(s);
+            }
+            if ui.button(t("menu.open")).clicked() {
+                s.ui.file_request = Some(FileRequest::Open);
+            }
+            if ui.button(t("menu.save")).clicked() {
+                save(s, false);
+            }
+            if ui.button(t("menu.save_as")).clicked() {
+                save(s, true);
+            }
+        });
+        ui.menu_button(t("menu.edit"), |ui| {
+            if ui.add_enabled(s.engine.can_undo(), egui::Button::new(t("menu.undo"))).clicked() {
+                let _ = s.run("history.undo", Value::Null);
+            }
+            if ui.add_enabled(s.engine.can_redo(), egui::Button::new(t("menu.redo"))).clicked() {
+                let _ = s.run("history.redo", Value::Null);
+            }
+            ui.separator();
+            let any = !s.engine.selection().is_empty();
+            if ui.add_enabled(any, egui::Button::new(t("menu.delete"))).clicked() {
+                let ids = s.engine.selection().to_vec();
+                let _ = s.run("object.delete", json!({ "ids": ids }));
+            }
+            if ui.button(t("menu.palette")).clicked() {
+                s.ui.palette.open();
+            }
+        });
+        ui.menu_button(t("menu.view"), |ui| {
+            if ui.button(t("menu.zoom_fit")).clicked() {
+                let _ = s.run("ui.zoom_to_fit", Value::Null);
+            }
+            ui.separator();
+            for (p, key) in [
+                (PanelKind::Layers, "panel.layers"),
+                (PanelKind::Tags, "panel.tags"),
+                (PanelKind::Inspector, "panel.inspector"),
+                (PanelKind::Table, "panel.table"),
+            ] {
+                let mut on = *s.ui.panels.get_mut(p);
+                if ui.checkbox(&mut on, t(key)).changed() {
+                    let _ = s.run("ui.toggle_panel", json!({ "panel": p, "visible": on }));
+                }
+            }
+            ui.separator();
+            for (theme, key) in [
+                (ThemePref::System, "theme.system"),
+                (ThemePref::Light, "theme.light"),
+                (ThemePref::Dark, "theme.dark"),
+            ] {
+                if ui.radio(s.ui.theme == theme, t(key)).clicked() {
+                    let _ = s.run("ui.set_theme", json!({ "theme": theme }));
+                }
+            }
+        });
+    });
+}
+
+pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
+    ui.add_space(3.0);
+    ui.horizontal(|ui| {
+        for tool in Tool::ALL {
+            let label = t(tool.key());
+            let r = ui.selectable_label(s.ui.tool == tool, label);
+            widgets::name(&r, WidgetType::Button, tf("a11y.tool", &[("tool", &label)]));
+            let r = r.on_hover_text(tf("tool.tip", &[("tool", &label), ("key", &format!("{:?}", tool.shortcut()))]));
+            if r.clicked() {
+                let _ = s.run("ui.set_tool", json!({ "tool": tool }));
+            }
+        }
+        ui.separator();
+        tool_options(ui, s);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if button(ui, t("palette.button"), "Command palette").clicked() {
+                s.ui.palette.open();
+            }
+        });
+    });
+    ui.add_space(3.0);
+}
+
+fn tool_options(ui: &mut Ui, s: &mut Studio) {
+    match s.ui.tool {
+        Tool::Truss => {
+            ui.label(t("option.profile"));
+            let current = s.ui.options.truss_profile.clone();
+            egui::ComboBox::from_id_salt("truss_profile").selected_text(&current).show_ui(ui, |ui| {
+                for p in stagecraft_geom::truss_profiles() {
+                    let label = format!("{}  {} · {} mm", p.name, p.maker, p.width);
+                    if ui.selectable_label(p.name == current, label).clicked() {
+                        let _ = s.run("ui.set_tool_options", json!({ "truss_profile": p.name }));
+                    }
+                }
+            });
+            mm_option(ui, s, "option.height", "truss_height", s.ui.options.truss_height);
+        }
+        Tool::Wall => {
+            mm_option(ui, s, "option.height", "wall_height", s.ui.options.wall_height);
+            mm_option(ui, s, "option.thickness", "wall_thickness", s.ui.options.wall_thickness);
+        }
+        tool => {
+            ui.label(RichText::new(t(hint_key(tool))).weak());
+        }
+    }
+    if matches!(s.ui.tool, Tool::Truss | Tool::Wall) {
+        ui.label(RichText::new(t(hint_key(s.ui.tool))).weak());
+    }
+}
+
+fn mm_option(ui: &mut Ui, s: &mut Studio, label: &str, field: &str, value: f64) {
+    ui.label(t(label));
+    let id = egui::Id::new(("tool_option", field));
+    if let Some(v) = edit_field(ui, id, &fmt_mm(value), 56.0, t(label))
+        && let Some(mm) = parse_mm(&v)
+    {
+        let _ = s.run("ui.set_tool_options", json!({ field: mm }));
+    }
+    ui.label(RichText::new("mm").weak());
+}
+
+fn hint_key(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Select => "hint.select",
+        Tool::Move => "hint.move",
+        Tool::Rotate => "hint.rotate",
+        Tool::Floor => "hint.floor",
+        Tool::Wall => "hint.wall",
+        Tool::Truss => "hint.truss",
+        Tool::Fixture => "hint.fixture",
+    }
+}
+
+/// mm without trailing zeros.
+pub fn fmt_mm(v: f64) -> String {
+    let r = (v * 10.0).round() / 10.0;
+    if r.fract() == 0.0 { format!("{r:.0}") } else { format!("{r:.1}") }
+}
+
+/// A number of mm; "m"/"cm" suffixes allowed ("4.5m").
+pub fn parse_mm(s: &str) -> Option<f64> {
+    let s = s.trim();
+    if s.ends_with("mm") || !s.ends_with('m') {
+        let n = s.trim_end_matches("mm").trim().replace(',', ".");
+        return n.parse().ok().filter(|v: &f64| v.is_finite());
+    }
+    crate::tools::parse_length(s)
+}
+
+pub fn status_bar(ui: &mut Ui, s: &mut Studio) {
+    ui.horizontal(|ui| {
+        if let Some(c) = s.ui.gesture.cursor {
+            ui.monospace(format!("x {:>9}  y {:>9}", fmt_mm(c.point[0]), fmt_mm(c.point[1])));
+            ui.label(RichText::new(t(snap_key(c.kind))).weak());
+        }
+        ui.separator();
+        let grid =
+            s.ui.snap
+                .grid
+                .map_or_else(|| t("status.grid_off").to_owned(), |g| tf("status.grid", &[("mm", &fmt_mm(g))]));
+        ui.label(RichText::new(grid).weak());
+        ui.separator();
+        let n = s.engine.selection().len();
+        ui.label(tf("status.selected", &[("n", &n)]));
+        if let Some((msg, err)) = &s.ui.status {
+            ui.separator();
+            let text = RichText::new(msg);
+            ui.label(if *err { text.color(ui.visuals().error_fg_color) } else { text });
+        }
+    });
+}
+
+fn snap_key(k: stagecraft_geom::snap::SnapKind) -> &'static str {
+    use stagecraft_geom::snap::SnapKind::*;
+    match k {
+        Endpoint => "snap.endpoint",
+        Midpoint => "snap.midpoint",
+        Truss => "snap.truss",
+        Grid => "snap.grid",
+        Orthogonal => "snap.orthogonal",
+        Free => "snap.free",
+    }
+}
+
+pub fn layers(ui: &mut Ui, s: &mut Studio) {
+    ui.horizontal(|ui| {
+        ui.heading(t("panel.layers"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if button(ui, "+", "Add layer").on_hover_text(t("layers.add")).clicked() {
+                let n = s.engine.doc().layers.len() + 1;
+                let mut name = tf("layers.new_name", &[("n", &n)]);
+                let mut i = n;
+                while s.engine.doc().layers.values().any(|l| l.name == name) {
+                    i += 1;
+                    name = tf("layers.new_name", &[("n", &i)]);
+                }
+                let _ = s.run("layer.create", json!({ "name": name }));
+            }
+        });
+    });
+    let layers: Vec<Layer> = s.engine.doc().layers_sorted().into_iter().cloned().collect();
+    let active = s.ui.active_layer.or(layers.first().map(|l| l.id));
+    egui::Grid::new("layers").num_columns(5).spacing([6.0, 4.0]).striped(true).show(ui, |ui| {
+        ui.label("");
+        ui.label(RichText::new(t("layers.name")).small().weak());
+        ui.label(RichText::new(t("layers.elevation")).small().weak());
+        ui.label("");
+        ui.label("");
+        ui.end_row();
+        for (i, l) in layers.iter().enumerate() {
+            let mut vis = l.visible;
+            let r = ui.checkbox(&mut vis, "");
+            widgets::name(&r, WidgetType::Checkbox, format!("Visible {}", l.name));
+            if r.changed() {
+                let _ = s.run("layer.update", json!({ "layer": l.id, "visible": vis }));
+            }
+            ui.horizontal(|ui| {
+                let is_active = active == Some(l.id);
+                let r = ui.selectable_label(is_active, if is_active { "●" } else { "○" });
+                widgets::name(&r, WidgetType::Button, format!("Activate {}", l.name));
+                if r.on_hover_text(t("layers.activate")).clicked() {
+                    let _ = s.run("ui.set_active_layer", json!({ "layer": l.id }));
+                }
+                if let Some(name) = edit_field(
+                    ui,
+                    egui::Id::new(("layer_name", l.id)),
+                    &l.name,
+                    90.0,
+                    &format!("Layer name {}", l.name),
+                ) && !name.trim().is_empty()
+                {
+                    let _ = s.run("layer.update", json!({ "layer": l.id, "name": name.trim() }));
+                }
+            });
+            ui.horizontal(|ui| {
+                if let Some(v) = edit_field(
+                    ui,
+                    egui::Id::new(("layer_elev", l.id)),
+                    &fmt_mm(l.elevation),
+                    52.0,
+                    &format!("Elevation {}", l.name),
+                ) {
+                    match parse_mm(&v) {
+                        Some(mm) => {
+                            let _ = s.run("layer.update", json!({ "layer": l.id, "elevation": mm }));
+                        }
+                        None => s.ui.error(tf("status.bad_number", &[("text", &v)])),
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                if i > 0 && button(ui, "↑", &format!("Raise {}", l.name)).clicked() {
+                    swap_order(s, &layers[i - 1], l);
+                }
+                if i + 1 < layers.len() && button(ui, "↓", &format!("Lower {}", l.name)).clicked() {
+                    swap_order(s, l, &layers[i + 1]);
+                }
+            });
+            if layers.len() > 1
+                && button(ui, "✕", &format!("Delete layer {}", l.name)).on_hover_text(t("layers.delete")).clicked()
+            {
+                let other = layers.iter().find(|o| o.id != l.id).map(|o| o.id);
+                let _ = s.run("layer.delete", json!({ "layer": l.id, "move_objects_to": other }));
+            }
+            ui.end_row();
+        }
+    });
+}
+
+/// Swap two neighbouring layers in the list, as one undo step.
+fn swap_order(s: &mut Studio, a: &Layer, b: &Layer) {
+    let (oa, ob) = if a.order == b.order { (a.order, a.order + 1) } else { (a.order, b.order) };
+    let _ = s.run(
+        "batch",
+        json!({ "commands": [
+            { "command": "layer.update", "args": { "layer": a.id, "order": ob } },
+            { "command": "layer.update", "args": { "layer": b.id, "order": oa } },
+        ]}),
+    );
+}
+
+pub fn tags(ui: &mut Ui, s: &mut Studio) {
+    ui.horizontal(|ui| {
+        ui.heading(t("panel.tags"));
+    });
+    let mut tags: Vec<(Id, String, usize)> = {
+        let doc = s.engine.doc();
+        doc.tags
+            .values()
+            .map(|t| (t.id, t.name.clone(), doc.objects.values().filter(|o| o.tags.contains(&t.id)).count()))
+            .collect()
+    };
+    tags.sort_by(|a, b| a.1.cmp(&b.1));
+    if tags.is_empty() {
+        ui.label(RichText::new(t("tags.none")).weak());
+    }
+    for (id, name, n) in tags {
+        ui.horizontal(|ui| {
+            let mut vis = !s.ui.hidden_tags.contains(&id);
+            let r = ui.checkbox(&mut vis, format!("{name}  ({n})"));
+            widgets::name(&r, WidgetType::Checkbox, format!("Show tag {name}"));
+            if r.changed() {
+                let _ = s.run("ui.set_tag_visible", json!({ "tag": id, "visible": vis }));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if button(ui, "✕", &format!("Delete tag {name}")).on_hover_text(t("tags.delete")).clicked() {
+                    let _ = s.run("tag.delete", json!({ "tag": id }));
+                }
+            });
+        });
+    }
+    ui.horizontal(|ui| {
+        let id = egui::Id::new("new_tag");
+        if let Some(name) = crate::widgets::edit_field_hint(ui, id, "", 140.0, "New tag", t("tags.new_hint"))
+            && !name.trim().is_empty()
+        {
+            let _ = s.run("tag.create", json!({ "name": name.trim() }));
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mm_fields_take_plain_mm_and_metres() {
+        assert_eq!(parse_mm("150"), Some(150.0));
+        assert_eq!(parse_mm("150 mm"), Some(150.0));
+        assert_eq!(parse_mm("4.5m"), Some(4500.0));
+        assert_eq!(parse_mm("x"), None);
+        assert_eq!(fmt_mm(1500.0), "1500");
+        assert_eq!(fmt_mm(12.34), "12.3");
+    }
+}

@@ -1,5 +1,5 @@
-//! `stagecraft`: headless server, MCP server and command-line access.
-//! The GUI arrives in block 2 and will be the default when no subcommand is given.
+//! `stagecraft`: the GUI (no subcommand), headless server, MCP server and
+//! command-line access.
 
 use std::io::{self, BufReader};
 use std::path::PathBuf;
@@ -13,10 +13,12 @@ use stagecraft_control::{Client, Server, discovery, handle};
 use stagecraft_core::Engine;
 
 #[derive(Parser)]
-#[command(name = "stagecraft", version, about = "Stage and lighting planning")]
+#[command(name = "stagecraft", version, about = "Stage and lighting planning", args_conflicts_with_subcommands = true)]
 struct Cli {
     #[command(subcommand)]
-    cmd: Cmd,
+    cmd: Option<Cmd>,
+    /// Without a subcommand: open the GUI, with this .stagecraft file.
+    file: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -56,7 +58,15 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().cmd {
+    let cli = Cli::parse();
+    let Some(cmd) = cli.cmd else {
+        let engine = match cli.file {
+            Some(f) => Engine::open(&f).map_err(|e| anyhow!("{e}"))?,
+            None => Engine::new(),
+        };
+        return stagecraft_ui::run(engine).map_err(|e| anyhow!("{e}"));
+    };
+    match cmd {
         Cmd::Serve { file, port } => serve(file, port),
         Cmd::Mcp { file, standalone } => run_mcp(file, standalone),
         Cmd::Instances => {

@@ -1,0 +1,25 @@
+[package]
+name = "stagecraft-ui"
+description = "StageCraft's GUI in egui: plan canvas, panels, table, command palette, ui.* commands."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# A library, so egui_kittest can drive every screen headlessly. `run` opens the window.
+[dependencies]
+stagecraft-core.workspace = true
+stagecraft-geom.workspace = true
+stagecraft-control.workspace = true
+egui.workspace = true
+eframe.workspace = true
+image.workspace = true
+rfd.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
+tempfile.workspace = true
