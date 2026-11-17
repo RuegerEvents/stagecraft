@@ -1,0 +1,30 @@
+[package]
+name = "stagecraft-gdtf"
+description = "GDTF fixture types for StageCraft: description.xml, geometry tree, DMX modes and footprints, 3DS/glTF models, plan silhouettes, GDTF Share client."
+version = "0.1.0"
+edition = "2024"
+authors = ["Hannes Rüger <hannes@rueger.events>"]
+license = "MIT"
+publish = false
+
+# Default features build for wasm32-unknown-unknown: no files, no sockets, no clock.
+[features]
+default = []
+# GDTF Share client (blocking HTTP, disk cache). Native only.
+share = ["dep:ureq", "dep:serde", "dep:serde_json"]
+# Read GDTF Share credentials from the macOS keychain.
+keychain = ["share", "dep:security-framework"]
+
+[dependencies]
+glam = "0.34"
+roxmltree = "0.20"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+gltf = { version = "1", default-features = false, features = ["utils", "names"] }
+ureq = { version = "3", optional = true, features = ["cookies"] }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "3", optional = true }
+
+[dev-dependencies]
