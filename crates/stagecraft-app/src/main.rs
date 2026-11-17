@@ -57,8 +57,18 @@ enum Cmd {
     },
 }
 
+/// User catalogues (truss profiles, platform systems, supports): every `*.json` in
+/// `<data dir>/StageCraft/catalog/`, merged over the built-in ones.
+fn load_user_catalogues() {
+    let dir = discovery::base_dir().join("catalog");
+    for (path, err) in stagecraft_core::catalog::load_dir(&dir) {
+        eprintln!("catalogue {}: {err}", path.display());
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    load_user_catalogues();
     let Some(cmd) = cli.cmd else {
         let engine = match cli.file {
             Some(f) => Engine::open(&f).map_err(|e| anyhow!("{e}"))?,

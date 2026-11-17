@@ -25,11 +25,52 @@ pub enum Tool {
     Wall,
     Truss,
     Fixture,
+    /// A run of truss along clicked points, corners at the bends.
+    Run,
+    Batten,
+    Curtain,
+    Proscenium,
+    /// A wing set (legs and borders) from the first wing.
+    Wings,
+    Platform,
+    Support,
+    Hoist,
+    Ceiling,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 7] =
+    /// Drawing tools, then stage objects (the toolbar's two groups).
+    pub const DRAW: [Tool; 7] =
         [Tool::Select, Tool::Move, Tool::Rotate, Tool::Floor, Tool::Wall, Tool::Truss, Tool::Fixture];
+    pub const STAGE: [Tool; 9] = [
+        Tool::Run,
+        Tool::Batten,
+        Tool::Curtain,
+        Tool::Proscenium,
+        Tool::Wings,
+        Tool::Platform,
+        Tool::Support,
+        Tool::Hoist,
+        Tool::Ceiling,
+    ];
+    pub const ALL: [Tool; 16] = [
+        Tool::Select,
+        Tool::Move,
+        Tool::Rotate,
+        Tool::Floor,
+        Tool::Wall,
+        Tool::Truss,
+        Tool::Fixture,
+        Tool::Run,
+        Tool::Batten,
+        Tool::Curtain,
+        Tool::Proscenium,
+        Tool::Wings,
+        Tool::Platform,
+        Tool::Support,
+        Tool::Hoist,
+        Tool::Ceiling,
+    ];
 
     /// Catalog key of the tool's name.
     pub fn key(self) -> &'static str {
@@ -41,13 +82,22 @@ impl Tool {
             Tool::Wall => "tool.wall",
             Tool::Truss => "tool.truss",
             Tool::Fixture => "tool.fixture",
+            Tool::Run => "tool.run",
+            Tool::Batten => "tool.batten",
+            Tool::Curtain => "tool.curtain",
+            Tool::Proscenium => "tool.proscenium",
+            Tool::Wings => "tool.wings",
+            Tool::Platform => "tool.platform",
+            Tool::Support => "tool.support",
+            Tool::Hoist => "tool.hoist",
+            Tool::Ceiling => "tool.ceiling",
         }
     }
 
-    /// Single-key shortcut.
-    pub fn shortcut(self) -> egui::Key {
+    /// Single-key shortcut, if the tool has one.
+    pub fn shortcut(self) -> Option<egui::Key> {
         use egui::Key;
-        match self {
+        Some(match self {
             Tool::Select => Key::V,
             Tool::Move => Key::M,
             Tool::Rotate => Key::R,
@@ -55,12 +105,28 @@ impl Tool {
             Tool::Wall => Key::W,
             Tool::Truss => Key::T,
             Tool::Fixture => Key::L,
-        }
+            Tool::Run => Key::U,
+            Tool::Batten => Key::B,
+            Tool::Curtain => Key::C,
+            Tool::Platform => Key::P,
+            Tool::Hoist => Key::H,
+            Tool::Proscenium | Tool::Wings | Tool::Support | Tool::Ceiling => return None,
+        })
     }
 
     /// Tools that take typed lengths after their first point.
     pub fn draws(self) -> bool {
-        matches!(self, Tool::Move | Tool::Rotate | Tool::Floor | Tool::Wall | Tool::Truss)
+        matches!(
+            self,
+            Tool::Move
+                | Tool::Rotate
+                | Tool::Floor
+                | Tool::Wall
+                | Tool::Truss
+                | Tool::Run
+                | Tool::Curtain
+                | Tool::Ceiling
+        )
     }
 }
 
@@ -231,11 +297,58 @@ pub struct ToolOptions {
     pub truss_height: f64,
     pub wall_height: f64,
     pub wall_thickness: f64,
+    /// Trim height of new battens, mm.
+    pub batten_trim: f64,
+    pub batten_length: f64,
+    /// Top edge of new curtains not hung on a batten, mm.
+    pub curtain_trim: f64,
+    pub curtain_height: f64,
+    pub proscenium_width: f64,
+    pub proscenium_height: f64,
+    pub wing_count: u32,
+    pub wing_spacing: f64,
+    pub wing_opening: f64,
+    /// `2x1` style, metres.
+    pub platform_preset: String,
+    pub platform_height: f64,
+    /// Catalogue system; empty = none.
+    pub platform_system: String,
+    /// Support catalogue entry.
+    pub support_preset: String,
+    pub hoist_height: f64,
+    pub ceiling_height: f64,
+}
+
+impl ToolOptions {
+    /// Width of the truss profile new truss gets, mm.
+    pub fn truss_profile_width(&self) -> f64 {
+        stagecraft_geom::truss_profile_or_fallback(&self.truss_profile).width
+    }
 }
 
 impl Default for ToolOptions {
     fn default() -> Self {
-        Self { truss_profile: "F34".into(), truss_height: 6000.0, wall_height: 3000.0, wall_thickness: 150.0 }
+        Self {
+            truss_profile: "F34".into(),
+            truss_height: 6000.0,
+            wall_height: 3000.0,
+            wall_thickness: 150.0,
+            batten_trim: 8000.0,
+            batten_length: 14000.0,
+            curtain_trim: 8000.0,
+            curtain_height: 7000.0,
+            proscenium_width: 10000.0,
+            proscenium_height: 6000.0,
+            wing_count: 3,
+            wing_spacing: 2000.0,
+            wing_opening: 10000.0,
+            platform_preset: "2x1".into(),
+            platform_height: 400.0,
+            platform_system: String::new(),
+            support_preset: "Base plate 600".into(),
+            hoist_height: 9000.0,
+            ceiling_height: 9000.0,
+        }
     }
 }
 

@@ -23,7 +23,7 @@ pub fn objects_bounds(doc: &Document, ids: impl IntoIterator<Item = Id>, style: 
 }
 
 /// Which object wins when several are under the pointer: small things on top.
-/// Platforms rank with floors, ceilings below everything.
+/// Platforms sit on floors; ceilings come last. The canvas draws in the reverse order.
 pub fn rank(kind: &ObjectKind) -> u8 {
     match kind {
         ObjectKind::Fixture { .. } | ObjectKind::Hoist { .. } => 0,
@@ -35,9 +35,10 @@ pub fn rank(kind: &ObjectKind) -> u8 {
         | ObjectKind::Curtain { .. }
         | ObjectKind::Masking { .. }
         | ObjectKind::Proscenium { .. } => 2,
-        ObjectKind::Floor { .. } | ObjectKind::Platform { .. } => 3,
-        ObjectKind::Ceiling { .. } => 4,
-        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } => 5,
+        ObjectKind::Platform { .. } => 3,
+        ObjectKind::Floor { .. } => 4,
+        ObjectKind::Ceiling { .. } => 5,
+        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } => 6,
     }
 }
 

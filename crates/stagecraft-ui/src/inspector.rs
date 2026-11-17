@@ -145,6 +145,10 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         });
     }
 
+    if let [o] = objs.as_slice() {
+        load_section(ui, &doc, o);
+    }
+
     ui.add_space(6.0);
     ui.separator();
     tags_field(ui, s, &doc, &objs, &sel);
@@ -157,6 +161,11 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                 parents.iter().filter_map(|p| doc.objects.get(p).map(|o| o.name.clone())).collect();
             let shown = common(names.iter().cloned()).unwrap_or_else(|| t("inspector.mixed").to_owned());
             ui.label(tf("inspector.attached_to", &[("name", &shown)]));
+            if let Some(&p) = common(parents.iter())
+                && button(ui, t("inspector.select_parent"), "Select parent").clicked()
+            {
+                let _ = s.run("selection.set", json!({ "ids": [p] }));
+            }
             if button(ui, t("inspector.detach"), "Detach").clicked() {
                 let ids: Vec<Id> = objs.iter().filter(|o| o.parent.is_some()).map(|o| o.id).collect();
                 let _ = s.run("object.detach", json!({ "ids": ids }));
@@ -269,8 +278,549 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             if let Some(v) = field(ui, "inspector.address", "address", addr) {
                 batch(s, each("fixture.update", &|id| json!({ "id": id, "address": v.trim() })));
             }
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.weight",
+                "fixture_weight",
+                |o| match o.kind {
+                    ObjectKind::Fixture { weight_kg, .. } => Some(weight_kg.unwrap_or(0.0)),
+                    _ => None,
+                },
+                "fixture.update",
+                "weight_kg",
+            );
+        }
+        _ => crate::inspector::stage_fields(ui, s, ty, objs, sel),
+    }
+}
+
+/// A number field over the selection: shown when all agree, applied to all.
+#[allow(clippy::too_many_arguments)]
+fn num(
+    ui: &mut Ui,
+    s: &mut Studio,
+    objs: &[&Object],
+    sel: &[Id],
+    key: &str,
+    salt: &str,
+    get: impl Fn(&Object) -> Option<f64>,
+    cmd: &str,
+    arg: &str,
+) {
+    let cur = common(objs.iter().map(|o| get(o).map(fmt_mm).unwrap_or_default()));
+    if let Some(v) = field(ui, key, salt, cur)
+        && let Some(x) = mm_or_error(s, &v)
+    {
+        // Whole numbers go as integers so counts (batten numbers) parse too.
+        let x = if x.fract() == 0.0 && x.abs() < 1e15 { json!(x as i64) } else { json!(x) };
+        batch(s, sel.iter().map(|id| step(cmd, json!({ "id": id, arg: x }))).collect());
+    }
+}
+
+/// A choice among fixed values (the JSON value and its label).
+#[allow(clippy::too_many_arguments)]
+fn choice(
+    ui: &mut Ui,
+    s: &mut Studio,
+    sel: &[Id],
+    key: &str,
+    salt: &str,
+    current: Option<String>,
+    options: &[(String, String)],
+    cmd: &str,
+    arg: &str,
+) {
+    ui.label(t(key));
+    let shown = current
+        .as_ref()
+        .and_then(|c| options.iter().find(|(v, _)| v == c).map(|o| o.1.clone()))
+        .unwrap_or_else(|| t("inspector.mixed").to_owned());
+    egui::ComboBox::from_id_salt(("inspector_choice", salt)).selected_text(shown).show_ui(ui, |ui| {
+        for (v, label) in options {
+            if ui.selectable_label(current.as_deref() == Some(v), label).clicked() {
+                batch(s, sel.iter().map(|id| step(cmd, json!({ "id": id, arg: v }))).collect());
+            }
+        }
+    });
+    ui.end_row();
+}
+
+fn flag(ui: &mut Ui, s: &mut Studio, sel: &[Id], key: &str, current: Option<bool>, cmd: &str, arg: &str) {
+    ui.label(t(key));
+    let mut on = current.unwrap_or(false);
+    let r = ui.checkbox(&mut on, "");
+    widgets::name(&r, egui::WidgetType::Checkbox, format!("Inspector {}", t(key)));
+    if r.changed() {
+        batch(s, sel.iter().map(|id| step(cmd, json!({ "id": id, arg: on }))).collect());
+    }
+    ui.end_row();
+}
+
+fn colour(ui: &mut Ui, s: &mut Studio, sel: &[Id], current: Option<String>, cmd: &str) {
+    ui.label(t("inspector.colour"));
+    let mut rgb = current.as_deref().and_then(stagecraft_core::model::parse_color).unwrap_or([128, 128, 128]);
+    let r = ui.color_edit_button_srgb(&mut rgb);
+    widgets::name(&r, egui::WidgetType::ColorButton, "Inspector colour");
+    if r.changed() {
+        let hex = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+        batch(s, sel.iter().map(|id| step(cmd, json!({ "id": id, "color": hex }))).collect());
+    }
+    ui.end_row();
+}
+
+fn opts(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs.iter().map(|(v, k)| ((*v).to_owned(), t(k).to_owned())).collect()
+}
+
+/// The value of a kind's enum field as its JSON string.
+fn json_str<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_value(v).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+}
+
+/// Fields of the block-4 stage objects.
+pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[Id]) {
+    macro_rules! f {
+        ($kind:pat => $v:expr) => {
+            |o: &Object| match &o.kind {
+                $kind => Some($v),
+                _ => None,
+            }
+        };
+    }
+    let all_str = |f: &dyn Fn(&Object) -> Option<String>| common(objs.iter().map(|o| f(o).unwrap_or_default()));
+    let all_bool = |f: &dyn Fn(&Object) -> Option<bool>| common(objs.iter().map(|o| f(o).unwrap_or(false)));
+    match ty {
+        "proscenium" => {
+            let c = "proscenium.update";
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.width",
+                "pr_w",
+                f!(ObjectKind::Proscenium { width, .. } => *width),
+                c,
+                "width",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.height",
+                "pr_h",
+                f!(ObjectKind::Proscenium { height, .. } => *height),
+                c,
+                "height",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.depth",
+                "pr_d",
+                f!(ObjectKind::Proscenium { depth, .. } => *depth),
+                c,
+                "depth",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.frame",
+                "pr_f",
+                f!(ObjectKind::Proscenium { frame, .. } => *frame),
+                c,
+                "frame",
+            );
+            let show = all_bool(&f!(ObjectKind::Proscenium { show_iron, .. } => *show_iron));
+            flag(ui, s, sel, "inspector.show_iron", show, c, "show_iron");
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.iron",
+                "pr_i",
+                f!(ObjectKind::Proscenium { iron, .. } => *iron),
+                c,
+                "iron",
+            );
+        }
+        "curtain" => {
+            let c = "curtain.update";
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.width",
+                "cu_w",
+                f!(ObjectKind::Curtain { width, .. } => *width),
+                c,
+                "width",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.height",
+                "cu_h",
+                f!(ObjectKind::Curtain { height, .. } => *height),
+                c,
+                "height",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.fullness",
+                "cu_f",
+                f!(ObjectKind::Curtain { fullness, .. } => *fullness),
+                c,
+                "fullness",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.opening",
+                "cu_o",
+                f!(ObjectKind::Curtain { opening, .. } => *opening),
+                c,
+                "opening",
+            );
+            let g = all_str(&f!(ObjectKind::Curtain { gather, .. } => json_str(gather)));
+            let gathers = opts(&[("tab", "gather.tab"), ("italian", "gather.italian")]);
+            choice(ui, s, sel, "inspector.gather", "cu_g", g, &gathers, c, "gather");
+            let split = all_bool(&f!(ObjectKind::Curtain { split, .. } => *split));
+            flag(ui, s, sel, "inspector.split", split, c, "split");
+            colour(ui, s, sel, all_str(&f!(ObjectKind::Curtain { color, .. } => color.clone())), c);
+        }
+        "masking" => {
+            let c = "masking.update";
+            let r = all_str(&f!(ObjectKind::Masking { role, .. } => json_str(role)));
+            let roles = opts(&[("leg", "masking.leg"), ("border", "masking.border")]);
+            choice(ui, s, sel, "inspector.role", "ma_r", r, &roles, c, "role");
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.width",
+                "ma_w",
+                f!(ObjectKind::Masking { width, .. } => *width),
+                c,
+                "width",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.height",
+                "ma_h",
+                f!(ObjectKind::Masking { height, .. } => *height),
+                c,
+                "height",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.fullness",
+                "ma_f",
+                f!(ObjectKind::Masking { fullness, .. } => *fullness),
+                c,
+                "fullness",
+            );
+            colour(ui, s, sel, all_str(&f!(ObjectKind::Masking { color, .. } => color.clone())), c);
+        }
+        "batten" => {
+            let c = "batten.update";
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.number",
+                "ba_n",
+                f!(ObjectKind::Batten { number, .. } => f64::from(*number)),
+                c,
+                "number",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.position_y",
+                "ba_y",
+                |o| matches!(o.kind, ObjectKind::Batten { .. }).then_some(o.placement.position[1]),
+                c,
+                "y",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.trim",
+                "ba_t",
+                |o| matches!(o.kind, ObjectKind::Batten { .. }).then_some(o.placement.position[2]),
+                c,
+                "trim",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.length",
+                "ba_l",
+                f!(ObjectKind::Batten { length, .. } => *length),
+                c,
+                "length",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.max_load",
+                "ba_m",
+                f!(ObjectKind::Batten { max_load, .. } => *max_load),
+                c,
+                "max_load",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.kg_per_m",
+                "ba_k",
+                f!(ObjectKind::Batten { kg_per_m, .. } => *kg_per_m),
+                c,
+                "kg_per_m",
+            );
+        }
+        "platform" => {
+            let c = "platform.update";
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.width",
+                "pl_w",
+                f!(ObjectKind::Platform { width, .. } => *width),
+                c,
+                "width",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.depth",
+                "pl_d",
+                f!(ObjectKind::Platform { depth, .. } => *depth),
+                c,
+                "depth",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.height",
+                "pl_h",
+                f!(ObjectKind::Platform { height, .. } => *height),
+                c,
+                "height",
+            );
+            let u = all_str(&f!(ObjectKind::Platform { under, .. } => json_str(under)));
+            let unders = opts(&[("legs", "under.legs"), ("scissor", "under.scissor"), ("none", "under.none")]);
+            choice(ui, s, sel, "inspector.under", "pl_u", u, &unders, c, "under");
+            let sys = all_str(&f!(ObjectKind::Platform { system, .. } => system.clone().unwrap_or_default()));
+            let mut systems = vec![(String::new(), t("option.none").to_owned())];
+            systems.extend(stagecraft_geom::platform_systems().into_iter().map(|p| (p.name.clone(), p.name)));
+            choice(ui, s, sel, "inspector.system", "pl_s", sys, &systems, c, "system");
+        }
+        "support" => {
+            let c = "support.update";
+            let st = all_str(&f!(ObjectKind::Support { style, .. } => json_str(style)));
+            let styles = opts(&[
+                ("base_plate", "support.base_plate"),
+                ("stand", "support.stand"),
+                ("ground_support", "support.ground_support"),
+            ]);
+            choice(ui, s, sel, "inspector.style", "su_s", st, &styles, c, "style");
+            num(ui, s, objs, sel, "inspector.size", "su_z", f!(ObjectKind::Support { size, .. } => *size), c, "size");
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.height",
+                "su_h",
+                f!(ObjectKind::Support { height, .. } => *height),
+                c,
+                "height",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.weight",
+                "su_w",
+                f!(ObjectKind::Support { weight_kg, .. } => *weight_kg),
+                c,
+                "weight_kg",
+            );
+        }
+        "hoist" => {
+            let c = "hoist.update";
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.capacity",
+                "ho_c",
+                f!(ObjectKind::Hoist { capacity_kg, .. } => *capacity_kg),
+                c,
+                "capacity_kg",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.weight",
+                "ho_w",
+                f!(ObjectKind::Hoist { weight_kg, .. } => *weight_kg),
+                c,
+                "weight_kg",
+            );
+        }
+        "ceiling" => {
+            let c = "ceiling.update";
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.height",
+                "ce_h",
+                |o| matches!(o.kind, ObjectKind::Ceiling { .. }).then_some(o.placement.position[2]),
+                c,
+                "height",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.thickness",
+                "ce_t",
+                f!(ObjectKind::Ceiling { thickness, .. } => *thickness),
+                c,
+                "thickness",
+            );
+            let show = all_bool(&f!(ObjectKind::Ceiling { show_in_plan, .. } => *show_in_plan));
+            flag(ui, s, sel, "inspector.show_in_plan", show, c, "show_in_plan");
+        }
+        "truss_node" | "truss_run" | "wing_set" => {
+            if let [o] = objs {
+                let info = match &o.kind {
+                    ObjectKind::TrussNode { profile, arms, down, up } => {
+                        let n = arms.len() + usize::from(*down) + usize::from(*up);
+                        tf("inspector.node_info", &[("profile", profile), ("n", &n)])
+                    }
+                    ObjectKind::TrussRun { profile } => {
+                        tf("inspector.run_info", &[("profile", profile), ("n", &s.engine.doc().children(o.id).len())])
+                    }
+                    _ => tf("inspector.set_info", &[("n", &s.engine.doc().children(o.id).len())]),
+                };
+                ui.label("");
+                ui.label(RichText::new(info).weak());
+                ui.end_row();
+                if o.kind.is_group() {
+                    ui.label("");
+                    if button(ui, t("inspector.select_members"), "Select members").clicked() {
+                        let kids = s.engine.doc().children(o.id);
+                        let _ = s.run("selection.set", json!({ "ids": kids }));
+                    }
+                    ui.end_row();
+                }
+            }
         }
         _ => {}
+    }
+}
+
+/// Own weight, what hangs on it, and the limit, for one selected object.
+fn load_section(ui: &mut Ui, doc: &stagecraft_core::Document, o: &Object) {
+    let relevant = matches!(
+        o.kind,
+        ObjectKind::Truss { .. }
+            | ObjectKind::TrussRun { .. }
+            | ObjectKind::TrussNode { .. }
+            | ObjectKind::Batten { .. }
+            | ObjectKind::Hoist { .. }
+            | ObjectKind::Support { .. }
+    ) || !doc.children(o.id).is_empty();
+    if !relevant {
+        return;
+    }
+    let rep = stagecraft_core::load::report(doc, &[o.id]);
+    let row = rep.trusses.iter().chain(&rep.runs).chain(&rep.battens).chain(&rep.hoists).next().cloned();
+    let (own, attached, total, unknown, limit, over) = match row {
+        Some(r) => (r.own_kg, r.attached_kg, r.total_kg, r.unknown_weights, r.limit_kg, r.over),
+        None => {
+            let l = stagecraft_core::load::load_of(doc, o.id);
+            (l.own_kg, l.attached_kg, l.total_kg(), l.unknown, None, false)
+        }
+    };
+    ui.add_space(6.0);
+    ui.separator();
+    ui.label(RichText::new(t("inspector.load")).strong());
+    let kg = |v: f64| format!("{v:.1} kg");
+    egui::Grid::new("inspector_load").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+        ui.label(t("load.own"));
+        ui.label(kg(own));
+        ui.end_row();
+        ui.label(t("load.attached"));
+        let text = RichText::new(kg(attached));
+        ui.label(if over { text.color(ui.visuals().error_fg_color).strong() } else { text });
+        ui.end_row();
+        ui.label(t("load.total"));
+        ui.label(RichText::new(kg(total)).strong());
+        ui.end_row();
+        if let Some(m) = limit {
+            ui.label(t("load.limit"));
+            ui.label(kg(m));
+            ui.end_row();
+        }
+    });
+    if over {
+        ui.label(RichText::new(t("load.over")).color(ui.visuals().error_fg_color));
+    }
+    if unknown > 0 {
+        ui.label(RichText::new(tf("load.unknown", &[("n", &unknown)])).weak());
     }
 }
 

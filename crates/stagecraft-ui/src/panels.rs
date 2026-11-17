@@ -103,17 +103,23 @@ pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
 pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
     ui.add_space(3.0);
     ui.horizontal(|ui| {
-        for tool in Tool::ALL {
-            let label = t(tool.key());
-            let r = ui.selectable_label(s.ui.tool == tool, label);
-            widgets::name(&r, WidgetType::Button, tf("a11y.tool", &[("tool", &label)]));
-            let r = r.on_hover_text(tf("tool.tip", &[("tool", &label), ("key", &format!("{:?}", tool.shortcut()))]));
-            if r.clicked() {
-                let _ = s.run("ui.set_tool", json!({ "tool": tool }));
+        for (i, group) in [&Tool::DRAW[..], &Tool::STAGE[..]].into_iter().enumerate() {
+            if i > 0 {
+                ui.separator();
+            }
+            for &tool in group {
+                let label = t(tool.key());
+                let r = ui.selectable_label(s.ui.tool == tool, label);
+                widgets::name(&r, WidgetType::Button, tf("a11y.tool", &[("tool", &label)]));
+                let tip = match tool.shortcut() {
+                    Some(k) => tf("tool.tip", &[("tool", &label), ("key", &format!("{k:?}"))]),
+                    None => label.to_owned(),
+                };
+                if r.on_hover_text(tip).clicked() {
+                    let _ = s.run("ui.set_tool", json!({ "tool": tool }));
+                }
             }
         }
-        ui.separator();
-        tool_options(ui, s);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if button(ui, t("palette.button"), "Command palette").clicked() {
                 s.ui.palette.open();
@@ -129,35 +135,98 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
             }
         });
     });
+    ui.horizontal(|ui| tool_options(ui, s));
     ui.add_space(3.0);
 }
 
 fn tool_options(ui: &mut Ui, s: &mut Studio) {
+    let o = s.ui.options.clone();
+    let profile_box = |ui: &mut Ui, s: &mut Studio| {
+        ui.label(t("option.profile"));
+        egui::ComboBox::from_id_salt("truss_profile").selected_text(&o.truss_profile).show_ui(ui, |ui| {
+            for p in stagecraft_geom::truss_profiles() {
+                let label = format!("{}  {} · {} mm", p.name, p.maker, p.width);
+                if ui.selectable_label(p.name == o.truss_profile, label).clicked() {
+                    let _ = s.run("ui.set_tool_options", json!({ "truss_profile": p.name }));
+                }
+            }
+        });
+    };
     match s.ui.tool {
-        Tool::Truss => {
-            ui.label(t("option.profile"));
-            let current = s.ui.options.truss_profile.clone();
-            egui::ComboBox::from_id_salt("truss_profile").selected_text(&current).show_ui(ui, |ui| {
-                for p in stagecraft_geom::truss_profiles() {
-                    let label = format!("{}  {} · {} mm", p.name, p.maker, p.width);
-                    if ui.selectable_label(p.name == current, label).clicked() {
-                        let _ = s.run("ui.set_tool_options", json!({ "truss_profile": p.name }));
+        Tool::Truss | Tool::Run => {
+            profile_box(ui, s);
+            mm_option(ui, s, "option.height", "truss_height", o.truss_height);
+        }
+        Tool::Wall => {
+            mm_option(ui, s, "option.height", "wall_height", o.wall_height);
+            mm_option(ui, s, "option.thickness", "wall_thickness", o.wall_thickness);
+        }
+        Tool::Batten => {
+            mm_option(ui, s, "option.trim", "batten_trim", o.batten_trim);
+            mm_option(ui, s, "option.length", "batten_length", o.batten_length);
+        }
+        Tool::Curtain => {
+            mm_option(ui, s, "option.height", "curtain_height", o.curtain_height);
+            mm_option(ui, s, "option.trim", "curtain_trim", o.curtain_trim);
+        }
+        Tool::Proscenium => {
+            mm_option(ui, s, "option.width", "proscenium_width", o.proscenium_width);
+            mm_option(ui, s, "option.height", "proscenium_height", o.proscenium_height);
+        }
+        Tool::Wings => {
+            ui.label(t("option.count"));
+            let id = egui::Id::new(("tool_option", "wing_count"));
+            if let Some(v) = edit_field(ui, id, &o.wing_count.to_string(), 32.0, t("option.count"))
+                && let Ok(n) = v.trim().parse::<u32>()
+            {
+                let _ = s.run("ui.set_tool_options", json!({ "wing_count": n }));
+            }
+            mm_option(ui, s, "option.spacing", "wing_spacing", o.wing_spacing);
+            mm_option(ui, s, "option.opening", "wing_opening", o.wing_opening);
+        }
+        Tool::Platform => {
+            ui.label(t("option.size"));
+            egui::ComboBox::from_id_salt("platform_preset").selected_text(&o.platform_preset).show_ui(ui, |ui| {
+                for p in ["2x1", "1x1", "2x0.5", "1x0.5"] {
+                    if ui.selectable_label(o.platform_preset == p, format!("{p} m")).clicked() {
+                        let _ = s.run("ui.set_tool_options", json!({ "platform_preset": p }));
                     }
                 }
             });
-            mm_option(ui, s, "option.height", "truss_height", s.ui.options.truss_height);
+            mm_option(ui, s, "option.height", "platform_height", o.platform_height);
+            ui.label(t("option.system"));
+            let shown =
+                if o.platform_system.is_empty() { t("option.none").to_owned() } else { o.platform_system.clone() };
+            egui::ComboBox::from_id_salt("platform_system").selected_text(shown).show_ui(ui, |ui| {
+                if ui.selectable_label(o.platform_system.is_empty(), t("option.none")).clicked() {
+                    let _ = s.run("ui.set_tool_options", json!({ "platform_system": "" }));
+                }
+                for sys in stagecraft_geom::platform_systems() {
+                    let label = format!("{} · {}–{} mm", sys.name, sys.min_height, sys.max_height);
+                    if ui.selectable_label(o.platform_system == sys.name, label).clicked() {
+                        let _ = s.run("ui.set_tool_options", json!({ "platform_system": sys.name }));
+                    }
+                }
+            });
         }
-        Tool::Wall => {
-            mm_option(ui, s, "option.height", "wall_height", s.ui.options.wall_height);
-            mm_option(ui, s, "option.thickness", "wall_thickness", s.ui.options.wall_thickness);
+        Tool::Support => {
+            ui.label(t("option.preset"));
+            egui::ComboBox::from_id_salt("support_preset").selected_text(&o.support_preset).show_ui(ui, |ui| {
+                for p in stagecraft_geom::supports() {
+                    if ui.selectable_label(o.support_preset == p.name, &p.name).clicked() {
+                        let _ = s.run("ui.set_tool_options", json!({ "support_preset": p.name }));
+                    }
+                }
+            });
         }
-        tool => {
-            ui.label(RichText::new(t(hint_key(tool))).weak());
-        }
+        Tool::Hoist => mm_option(ui, s, "option.height", "hoist_height", o.hoist_height),
+        Tool::Ceiling => mm_option(ui, s, "option.height", "ceiling_height", o.ceiling_height),
+        _ => {}
     }
-    if matches!(s.ui.tool, Tool::Truss | Tool::Wall) {
-        ui.label(RichText::new(t(hint_key(s.ui.tool))).weak());
+    if !matches!(s.ui.tool, Tool::Select | Tool::Move | Tool::Rotate | Tool::Floor | Tool::Fixture) {
+        ui.separator();
     }
+    ui.label(RichText::new(t(hint_key(s.ui.tool))).weak());
 }
 
 fn mm_option(ui: &mut Ui, s: &mut Studio, label: &str, field: &str, value: f64) {
@@ -180,6 +249,15 @@ fn hint_key(tool: Tool) -> &'static str {
         Tool::Wall => "hint.wall",
         Tool::Truss => "hint.truss",
         Tool::Fixture => "hint.fixture",
+        Tool::Run => "hint.run",
+        Tool::Batten => "hint.batten",
+        Tool::Curtain => "hint.curtain",
+        Tool::Proscenium => "hint.proscenium",
+        Tool::Wings => "hint.wings",
+        Tool::Platform => "hint.platform",
+        Tool::Support => "hint.support",
+        Tool::Hoist => "hint.hoist",
+        Tool::Ceiling => "hint.ceiling",
     }
 }
 

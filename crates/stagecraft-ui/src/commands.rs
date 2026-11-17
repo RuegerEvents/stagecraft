@@ -107,7 +107,11 @@ fn register(r: &mut UiRegistry) {
     r.add("ui.set_tag_visible", "Show or hide objects carrying a tag in the views", set_tag_visible);
     r.add("ui.set_active_layer", "Layer that new objects go on", set_active_layer);
     r.add("ui.set_snap", "Turn snaps on or off and set the grid", set_snap);
-    r.add("ui.set_tool_options", "Truss profile and height, wall height and thickness for new objects", set_options);
+    r.add(
+        "ui.set_tool_options",
+        "Options for new objects: truss, wall, batten, curtain, proscenium, wings, platform, support, hoist, ceiling",
+        set_options,
+    );
     r.add("ui.palette", "Open or close the command palette", palette);
     r.add("ui.screenshot", "Write a PNG of the window to `path` (answered after the next frame)", screenshot);
 }
@@ -493,6 +497,36 @@ struct OptionsArgs {
     wall_height: Option<f64>,
     /// mm.
     wall_thickness: Option<f64>,
+    /// Trim height of new battens, mm.
+    batten_trim: Option<f64>,
+    /// mm.
+    batten_length: Option<f64>,
+    /// Top edge of new curtains that are not hung on a batten, mm.
+    curtain_trim: Option<f64>,
+    /// mm.
+    curtain_height: Option<f64>,
+    /// Opening of new prosceniums, mm.
+    proscenium_width: Option<f64>,
+    /// mm.
+    proscenium_height: Option<f64>,
+    /// Wings per new wing set.
+    wing_count: Option<u32>,
+    /// mm between wings.
+    wing_spacing: Option<f64>,
+    /// Clear width between the legs, mm.
+    wing_opening: Option<f64>,
+    /// Size preset of new platforms in metres, e.g. `2x1`.
+    platform_preset: Option<String>,
+    /// Deck top above the base, mm.
+    platform_height: Option<f64>,
+    /// Platform system from the catalogue; empty = none.
+    platform_system: Option<String>,
+    /// Support catalogue entry, e.g. `Base plate 600`.
+    support_preset: Option<String>,
+    /// Hook height of new hoists, mm.
+    hoist_height: Option<f64>,
+    /// Underside of new ceilings, mm.
+    ceiling_height: Option<f64>,
 }
 
 fn set_options(c: &mut UiCtx, a: OptionsArgs) -> CmdResult {
@@ -503,11 +537,46 @@ fn set_options(c: &mut UiCtx, a: OptionsArgs) -> CmdResult {
     if let Some(v) = a.truss_height {
         o.truss_height = v;
     }
-    for (slot, v) in [(&mut o.wall_height, a.wall_height), (&mut o.wall_thickness, a.wall_thickness)] {
+    for (slot, v) in [
+        (&mut o.wall_height, a.wall_height),
+        (&mut o.wall_thickness, a.wall_thickness),
+        (&mut o.batten_length, a.batten_length),
+        (&mut o.curtain_height, a.curtain_height),
+        (&mut o.proscenium_width, a.proscenium_width),
+        (&mut o.proscenium_height, a.proscenium_height),
+        (&mut o.wing_spacing, a.wing_spacing),
+        (&mut o.wing_opening, a.wing_opening),
+        (&mut o.platform_height, a.platform_height),
+    ] {
         if let Some(v) = v {
-            if v <= 0.0 {
-                return Err(CmdError::invalid_args("wall sizes must be positive mm"));
+            if v <= 0.0 || !v.is_finite() {
+                return Err(CmdError::invalid_args("sizes must be positive mm"));
             }
+            *slot = v;
+        }
+    }
+    for (slot, v) in [
+        (&mut o.batten_trim, a.batten_trim),
+        (&mut o.curtain_trim, a.curtain_trim),
+        (&mut o.hoist_height, a.hoist_height),
+        (&mut o.ceiling_height, a.ceiling_height),
+    ] {
+        if let Some(v) = v {
+            *slot = v;
+        }
+    }
+    if let Some(n) = a.wing_count {
+        if !(1..=20).contains(&n) {
+            return Err(CmdError::invalid_args("wing_count must be 1–20"));
+        }
+        o.wing_count = n;
+    }
+    for (slot, v) in [
+        (&mut o.platform_preset, a.platform_preset),
+        (&mut o.platform_system, a.platform_system),
+        (&mut o.support_preset, a.support_preset),
+    ] {
+        if let Some(v) = v {
             *slot = v;
         }
     }

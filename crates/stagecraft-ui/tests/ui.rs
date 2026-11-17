@@ -464,3 +464,77 @@ fn the_3d_scene_is_cached_and_follows_visibility() {
     let out = run(&mut h, "ui.zoom_to_fit", Value::Null);
     assert!(out.get("scale").is_some() && out.get("camera3d").is_some(), "{out}");
 }
+
+// ---- block 4: stage tools ------------------------------------------------------
+
+#[test]
+fn stage_tools_place_battens_curtains_and_stacked_platforms() {
+    let mut h = harness(Engine::new());
+    run(&mut h, "ui.zoom", json!({ "scale": 0.05 }));
+    run(&mut h, "ui.pan", json!({ "center": [0, 2000] }));
+    // A batten by click, at the trim option.
+    h.get_by_label("Tool Batten").click();
+    h.run();
+    run(&mut h, "ui.set_tool_options", json!({ "batten_trim": 8500 }));
+    click_world(&mut h, [0.0, 1000.0]);
+    let battens = objects_of(&h, "batten");
+    assert_eq!(battens.len(), 1);
+    assert_eq!(battens[0].placement.position, [0.0, 1000.0, 8500.0]);
+    // A curtain drawn along it hangs on it.
+    run(&mut h, "ui.set_tool", json!({ "tool": "curtain" }));
+    click_world(&mut h, [-4000.0, 1000.0]);
+    click_world(&mut h, [4000.0, 1000.0]);
+    let c = &objects_of(&h, "curtain")[0];
+    assert_eq!(c.parent, Some(battens[0].id));
+    assert!(matches!(c.kind, ObjectKind::Curtain { width: 8000.0, .. }));
+    // The inspector shows the batten's load with the curtain on it.
+    run(&mut h, "selection.set", json!({ "ids": [battens[0].id] }));
+    assert!(h.query_by_label_contains("Attached").is_some());
+    assert!(h.query_by_label("Inspector Trim").is_some());
+    // Platforms: a click on a platform stacks the next one on it.
+    run(&mut h, "selection.clear", Value::Null);
+    h.get_by_label("Tool Platform").click();
+    h.run();
+    click_world(&mut h, [0.0, 4000.0]);
+    click_world(&mut h, [200.0, 4100.0]);
+    let mut ps = objects_of(&h, "platform");
+    ps.sort_by(|a, b| a.placement.position[2].total_cmp(&b.placement.position[2]));
+    assert_eq!(ps.len(), 2);
+    assert_eq!(ps[1].placement.position[2], 400.0);
+}
+
+#[test]
+fn the_run_tool_closes_a_ring_of_truss() {
+    let mut h = harness(Engine::new());
+    run(&mut h, "ui.zoom", json!({ "scale": 0.05 }));
+    run(&mut h, "ui.pan", json!({ "center": [3000, 2000] }));
+    run(&mut h, "ui.set_tool", json!({ "tool": "run" }));
+    for p in [[0.0, 0.0], [6000.0, 0.0], [6000.0, 4000.0], [0.0, 4000.0], [0.0, 0.0]] {
+        click_world(&mut h, p);
+    }
+    let runs = objects_of(&h, "truss_run");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(objects_of(&h, "truss_node").len(), 4);
+    assert!(objects_of(&h, "truss").iter().all(|t| t.parent == Some(runs[0].id)));
+}
+
+#[test]
+fn the_fly_bar_table_lists_battens_by_number_with_loads() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    h.get_by_label("Show Fly bars").click();
+    h.run();
+    assert_eq!(h.state().ui.table.kind.as_deref(), Some("batten"));
+    // Row 4 is batten 4 with LX1: 12 m of F34 (60 kg) and eight 21 kg fixtures.
+    let doc = h.state().engine.doc().clone();
+    let rows = stagecraft_ui::table::rows(&doc, &h.state().ui.table);
+    let b4 = &doc.objects[&rows[3]];
+    assert_eq!(b4.name, "Batten 4");
+    assert_eq!(stagecraft_ui::table::cell_text(&doc, b4, stagecraft_ui::table::Col::Load), "228.0");
+    // Trim typed into the table moves the batten and what hangs on it.
+    let lx1 = doc.objects.values().find(|o| o.name == "LX1").unwrap().id;
+    let before = stagecraft_core::geom::world_placement(&doc, lx1).unwrap().position[2];
+    let steps = stagecraft_ui::table::edit_steps(&doc, b4, stagecraft_ui::table::Col::Trim, "8000").unwrap();
+    run(&mut h, "batch", json!({ "commands": steps }));
+    let after = stagecraft_core::geom::world_placement(h.state().engine.doc(), lx1).unwrap().position[2];
+    assert_eq!(after - before, 500.0);
+}

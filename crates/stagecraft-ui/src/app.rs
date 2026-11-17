@@ -176,7 +176,8 @@ fn shortcuts(ui: &mut Ui, s: &mut Studio) {
     let typing = s.ui.gesture.dim.is_some();
     if !typing {
         for tool in Tool::ALL {
-            if ui.input_mut(|i| i.consume_key(Modifiers::NONE, tool.shortcut())) {
+            let Some(key) = tool.shortcut() else { continue };
+            if ui.input_mut(|i| i.consume_key(Modifiers::NONE, key)) {
                 s.ui.set_tool(tool);
             }
         }

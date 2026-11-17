@@ -110,13 +110,29 @@ pub fn interact(ui: &mut Ui, resp: &Response, s: &mut Studio, ids: &[Id], style:
     match s.ui.tool {
         Tool::Select => unreachable!(),
         Tool::Wall => s.ui.gesture.points.push(p),
-        Tool::Floor => {
+        Tool::Floor | Tool::Ceiling | Tool::Run => {
             let pts = &s.ui.gesture.points;
             if pts.len() >= 3 && math::dist(pts[0], p) <= tol {
+                // A run clicked shut closes into a ring.
+                if s.ui.tool == Tool::Run {
+                    let first = pts[0];
+                    s.ui.gesture.points.push(first);
+                }
                 finish(s);
             } else {
                 s.ui.gesture.points.push(p);
             }
+        }
+        Tool::Curtain => {
+            if s.ui.gesture.points.is_empty() {
+                s.ui.gesture.points.push(p);
+            } else {
+                let a = s.ui.gesture.points[0];
+                create_curtain(s, ids, a, p, tol);
+            }
+        }
+        Tool::Batten | Tool::Proscenium | Tool::Wings | Tool::Platform | Tool::Support | Tool::Hoist => {
+            place_stage(s, ids, raw, p, tol);
         }
         Tool::Truss => {
             if s.ui.gesture.points.is_empty() {
@@ -313,8 +329,13 @@ fn enter(s: &mut Studio) {
     };
     s.ui.gesture.dim = None;
     match s.ui.tool {
-        Tool::Wall | Tool::Floor => s.ui.gesture.points.push(p),
+        Tool::Wall | Tool::Floor | Tool::Run | Tool::Ceiling => s.ui.gesture.points.push(p),
         Tool::Truss => create_truss(s, last, p),
+        Tool::Curtain => {
+            let ids = crate::canvas::visible_ids(s.engine.doc(), &s.ui);
+            let tol = tolerance(&s.ui.camera);
+            create_curtain(s, &ids, last, p, tol);
+        }
         Tool::Move => commit_move(s, math::sub(p, last)),
         _ => {}
     }
@@ -335,7 +356,25 @@ fn finish(s: &mut Studio) {
         Tool::Floor if pts.len() >= 3 => {
             created(s, "floor.create", json!({ "outline": pts, "layer": layer }), "tool.floor");
         }
-        Tool::Wall | Tool::Floor if !pts.is_empty() => s.ui.error(t("status.too_few_points")),
+        Tool::Ceiling if pts.len() >= 3 => {
+            let h = s.ui.options.ceiling_height;
+            created(s, "ceiling.create", json!({ "outline": pts, "height": h, "layer": layer }), "tool.ceiling");
+        }
+        Tool::Run if pts.len() >= 2 => {
+            let mut pts = pts;
+            let closed = pts.len() >= 4 && math::dist(pts[0], pts[pts.len() - 1]) < 1e-6;
+            if closed {
+                pts.pop();
+            }
+            let o = &s.ui.options;
+            let h = o.truss_height;
+            let points: Vec<[f64; 3]> = pts.iter().map(|p| [p[0], p[1], h]).collect();
+            let args = json!({ "points": points, "profile": o.truss_profile, "closed": closed, "layer": layer });
+            created(s, "truss.run", args, "tool.run");
+        }
+        Tool::Wall | Tool::Floor | Tool::Ceiling | Tool::Run if !pts.is_empty() => {
+            s.ui.error(t("status.too_few_points"));
+        }
         _ => {}
     }
 }
@@ -363,8 +402,12 @@ fn create_truss(s: &mut Studio, a: P2, b: P2) {
     created(s, "truss.create", args, "tool.truss");
 }
 
-/// Click with the fixture tool: on a truss it hangs there (under the bottom chord),
-/// elsewhere it stands on the layer.
+/// How far under a batten's axis a fixture clicked onto it hangs, mm.
+pub const PIPE_HANG: f64 = 60.0;
+
+/// Click with the fixture tool: on a truss it hangs there (under the bottom chord), on
+/// a batten under the pipe, on a support on top of it; elsewhere it stands on the
+/// layer.
 fn place_fixture(s: &mut Studio, ids: &[Id], raw: P2, cursor: Snapped, tol: f64) {
     let doc = s.engine.doc();
     let args = match truss_at(doc, ids.iter().copied(), raw, tol) {
@@ -379,6 +422,16 @@ fn place_fixture(s: &mut Studio, ids: &[Id], raw: P2, cursor: Snapped, tol: f64)
             };
             json!({ "parent": hit.id, "position": [along, 0.0, -hit.height / 2.0] })
         }
+        None if let Some(b) = object_at(s, ids, raw, tol, is_batten) => {
+            let x = local_on(s, b, raw).x;
+            let x = s.ui.snap.grid.map_or(x, |g| round_to(x, g));
+            json!({ "parent": b, "position": [x, 0.0, -crate::tools::PIPE_HANG] })
+        }
+        None if let Some(sp) = object_at(s, ids, raw, tol, |k| matches!(k, ObjectKind::Support { .. })) => {
+            // On a stand or base: on top, upright (turned over like floor fixtures).
+            let top = stagecraft_geom::kinds::stage::support_top(&doc.objects[&sp]);
+            json!({ "parent": sp, "position": [0.0, 0.0, top], "rotation": [180.0, 0.0, 0.0] })
+        }
         // Standing on the floor: turned over, GDTF style (fixtures hang from their origin).
         None => json!({
             "position": [cursor.point[0], cursor.point[1], 0.0],
@@ -387,6 +440,157 @@ fn place_fixture(s: &mut Studio, ids: &[Id], raw: P2, cursor: Snapped, tol: f64)
         }),
     };
     created(s, "fixture.create", args, "tool.fixture");
+}
+
+/// The topmost visible object under `p` whose kind passes `want`.
+fn object_at(s: &Studio, ids: &[Id], p: P2, tol: f64, want: fn(&ObjectKind) -> bool) -> Option<Id> {
+    let doc = s.engine.doc();
+    let cands: Vec<Id> = ids.iter().copied().filter(|id| doc.objects.get(id).is_some_and(|o| want(&o.kind))).collect();
+    pick(doc, cands, p, tol, &PlanStyle::default())
+}
+
+fn is_batten(k: &ObjectKind) -> bool {
+    matches!(k, ObjectKind::Batten { .. })
+}
+
+/// The local position on a batten (or support) for a world plan point at its height.
+fn local_on(s: &Studio, id: Id, p: P2) -> glam::DVec3 {
+    let w = stagecraft_core::geom::world(s.engine.doc(), id).unwrap_or(glam::DAffine3::IDENTITY);
+    w.inverse().transform_point3(glam::DVec3::new(p[0], p[1], w.translation.z))
+}
+
+/// Two clicks give a curtain's width and direction. Drawn along a batten, it hangs
+/// there; elsewhere its top edge is at the curtain trim option.
+fn create_curtain(s: &mut Studio, ids: &[Id], a: P2, b: P2, tol: f64) {
+    s.ui.gesture = Gesture::default();
+    let width = math::dist(a, b);
+    if width < 1.0 {
+        return;
+    }
+    let mid = math::midpoint(a, b);
+    let angle = math::angle_deg(math::sub(b, a));
+    let o = s.ui.options.clone();
+    let args = match object_at(s, ids, mid, tol.max(150.0), is_batten) {
+        Some(bid) => {
+            let local = local_on(s, bid, mid);
+            let yaw = stagecraft_core::geom::world_placement(s.engine.doc(), bid).map_or(0.0, |w| w.rotation[2]);
+            json!({ "parent": bid, "position": [local.x, 0.0, 0.0], "rotation": angle - yaw,
+                    "width": width, "height": o.curtain_height })
+        }
+        None => json!({ "position": [mid[0], mid[1], o.curtain_trim], "rotation": angle,
+                        "width": width, "height": o.curtain_height, "layer": s.active_layer_arg() }),
+    };
+    created(s, "curtain.create", args, "tool.curtain");
+}
+
+/// One click places a batten, proscenium, wing set, platform, support or hoist.
+fn place_stage(s: &mut Studio, ids: &[Id], raw: P2, p: P2, tol: f64) {
+    let o = s.ui.options.clone();
+    let layer = s.active_layer_arg();
+    let (cmd, args) = match s.ui.tool {
+        Tool::Batten => (
+            "batten.create",
+            json!({ "x": p[0], "y": p[1], "trim": o.batten_trim, "length": o.batten_length, "layer": layer }),
+        ),
+        Tool::Proscenium => (
+            "proscenium.create",
+            json!({ "position": [p[0], p[1], 0.0], "width": o.proscenium_width,
+                    "height": o.proscenium_height, "layer": layer }),
+        ),
+        Tool::Wings => (
+            "wingset.create",
+            json!({ "x": p[0], "y": p[1], "count": o.wing_count, "spacing": o.wing_spacing,
+                    "opening": o.wing_opening, "layer": layer }),
+        ),
+        Tool::Platform => {
+            let mut a = json!({ "position": [p[0], p[1], 0.0], "preset": o.platform_preset,
+                                "height": o.platform_height, "layer": layer });
+            if !o.platform_system.is_empty() {
+                a["system"] = json!(o.platform_system);
+            }
+            // Clicked onto a platform: stack on it.
+            if let Some(under) = object_at(s, ids, raw, tol, |k| matches!(k, ObjectKind::Platform { .. })) {
+                a["on"] = json!(under);
+            }
+            ("platform.create", a)
+        }
+        Tool::Support => {
+            ("support.create", json!({ "position": [p[0], p[1], 0.0], "preset": o.support_preset, "layer": layer }))
+        }
+        Tool::Hoist => ("hoist.create", json!({ "position": [p[0], p[1], o.hoist_height], "layer": layer })),
+        _ => return,
+    };
+    let what = s.ui.tool.key();
+    created(s, cmd, args, what);
+}
+
+/// The ghost of what a one-click stage tool would place at `c`.
+fn stage_ghost(tool: Tool, o: &crate::state::ToolOptions, c: P2) -> Vec<(ObjectKind, Placement)> {
+    let at = |x: f64, y: f64| Placement { position: [x, y, 0.0], rotation: [0.0; 3] };
+    let kind = match tool {
+        Tool::Batten => ObjectKind::Batten { number: 0, length: o.batten_length, max_load: 0.0, kg_per_m: 0.0 },
+        Tool::Proscenium => ObjectKind::Proscenium {
+            width: o.proscenium_width,
+            height: o.proscenium_height,
+            depth: 600.0,
+            frame: 1000.0,
+            iron: 0.0,
+            show_iron: false,
+        },
+        Tool::Platform => {
+            let [w, d] = parse_preset(&o.platform_preset).unwrap_or([2000.0, 1000.0]);
+            ObjectKind::Platform {
+                width: w,
+                depth: d,
+                height: o.platform_height,
+                under: Default::default(),
+                system: None,
+            }
+        }
+        Tool::Support => {
+            let pre = stagecraft_geom::support(&o.support_preset);
+            ObjectKind::Support {
+                style: pre.as_ref().map(|p| p.style).unwrap_or_default(),
+                size: pre.as_ref().map_or(600.0, |p| p.size),
+                height: 10.0,
+                weight_kg: 0.0,
+            }
+        }
+        Tool::Hoist => ObjectKind::Hoist { capacity_kg: 0.0, weight_kg: 0.0 },
+        Tool::Wings => {
+            let leg = |x: f64| {
+                let k = ObjectKind::Masking {
+                    role: stagecraft_core::model::MaskingRole::Leg,
+                    width: 1500.0,
+                    height: 1.0,
+                    fullness: 0.0,
+                    color: String::new(),
+                };
+                (k, at(c[0] + x, c[1]))
+            };
+            let x = o.wing_opening / 2.0 + 750.0;
+            return (0..o.wing_count)
+                .flat_map(|i| {
+                    let dy = i as f64 * o.wing_spacing;
+                    [leg(-x), leg(x)].map(|(k, mut p)| {
+                        p.position[1] += dy;
+                        (k, p)
+                    })
+                })
+                .collect();
+        }
+        _ => return Vec::new(),
+    };
+    vec![(kind, at(c[0], c[1]))]
+}
+
+/// `2x1` (metres) → mm, as the platform command reads it.
+fn parse_preset(s: &str) -> Option<[f64; 2]> {
+    let s = s.to_lowercase().replace(['×', '*'], "x").replace(',', ".");
+    let (w, d) = s.split_once('x')?;
+    let w: f64 = w.trim().trim_end_matches('m').parse().ok()?;
+    let d: f64 = d.trim().trim_end_matches('m').parse().ok()?;
+    (w > 0.0 && d > 0.0).then_some([w * 1000.0, d * 1000.0])
 }
 
 fn commit_move(s: &mut Studio, d: P2) {
@@ -429,9 +633,11 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
     let g = &s.ui.gesture;
     // A typed length moves the preview to where Enter will put the point.
     let typed = match (s.ui.tool, &g.dim, g.points.last()) {
-        (Tool::Wall | Tool::Floor | Tool::Truss | Tool::Move, Some(d), Some(last)) => {
-            typed_point(*last, g.cursor.map(|c| c.point), d)
-        }
+        (
+            Tool::Wall | Tool::Floor | Tool::Truss | Tool::Move | Tool::Run | Tool::Ceiling | Tool::Curtain,
+            Some(d),
+            Some(last),
+        ) => typed_point(*last, g.cursor.map(|c| c.point), d),
         _ => None,
     };
     let cursor = typed.or(g.cursor.map(|c| c.point));
@@ -479,7 +685,39 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
             ));
             length_label(p, cam, pal, *pts.last().expect("non-empty"), c);
         }
-        (Tool::Floor, Some(c)) if !pts.is_empty() => {
+        (Tool::Run, Some(c)) if !pts.is_empty() => {
+            let mut sp: Vec<Pos2> = pts.iter().map(|q| cam.to_screen(*q)).collect();
+            sp.push(cam.to_screen(c));
+            let w = (o.truss_profile_width() * cam.scale).max(2.0) as f32;
+            p.add(Shape::line(sp, Stroke::new(w, pal.preview.gamma_multiply(0.45))));
+            length_label(p, cam, pal, *pts.last().expect("non-empty"), c);
+        }
+        (Tool::Curtain, Some(c)) if !pts.is_empty() => {
+            let a = pts[0];
+            let d = math::sub(c, a);
+            let len = math::length(d);
+            if len > 1.0 {
+                let mid = math::midpoint(a, c);
+                let placement = Placement { position: [mid[0], mid[1], 0.0], rotation: [0.0, 0.0, math::angle_deg(d)] };
+                let kind = ObjectKind::Curtain {
+                    width: len,
+                    height: o.curtain_height,
+                    fullness: 100.0,
+                    split: true,
+                    opening: 0.0,
+                    gather: Default::default(),
+                    color: String::new(),
+                };
+                ghosts(ghost(kind, placement, style));
+            }
+            length_label(p, cam, pal, a, c);
+        }
+        (Tool::Batten | Tool::Proscenium | Tool::Wings | Tool::Platform | Tool::Support | Tool::Hoist, Some(c)) => {
+            for (kind, placement) in stage_ghost(s.ui.tool, o, c) {
+                ghosts(ghost(kind, placement, style));
+            }
+        }
+        (Tool::Floor | Tool::Ceiling, Some(c)) if !pts.is_empty() => {
             let mut sp: Vec<Pos2> = pts.iter().map(|q| cam.to_screen(*q)).collect();
             sp.push(cam.to_screen(c));
             p.add(Shape::line(sp.clone(), Stroke::new(1.5, pal.preview)));

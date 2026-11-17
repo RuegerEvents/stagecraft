@@ -24,7 +24,14 @@ fn label(pos: P2, text: String, height: f64) -> PlanPrim {
 
 // ---------------------------------------------------------------- proscenium
 
-pub fn proscenium_plan(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
+/// Batten numbers, platform heights and the iron label are drawn unless the object
+/// turns labels off: the canvas already drops text too small to read, and these are
+/// bigger than FIDs, so they stay readable when fixture labels are switched off.
+fn own_labels(obj: &Object) -> bool {
+    obj.style.labels != Some(false)
+}
+
+pub fn proscenium_plan(w: &DAffine3, obj: &Object, _style: &PlanStyle) -> Vec<PlanPrim> {
     let ObjectKind::Proscenium { width, depth, frame, iron, show_iron, .. } = obj.kind else { return Vec::new() };
     let (hw, f) = (width / 2.0, frame);
     let mut out = vec![
@@ -46,7 +53,7 @@ pub fn proscenium_plan(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<Pla
             vec![to_plan_2d(w, [-hw - f, iron]), to_plan_2d(w, [hw + f, iron])],
             LineClass::Centre,
         ));
-        if style.labels {
+        if own_labels(obj) {
             out.push(PlanPrim::Text {
                 pos: to_plan_2d(w, [hw + f + 150.0, iron]),
                 text: "Iron".into(),
@@ -154,7 +161,7 @@ pub fn cloth_mesh(obj: &Object, lod: Lod) -> Mesh {
 
 // ---------------------------------------------------------------- battens
 
-pub fn batten_plan(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
+pub fn batten_plan(w: &DAffine3, obj: &Object, _style: &PlanStyle) -> Vec<PlanPrim> {
     let ObjectKind::Batten { number, length, .. } = obj.kind else { return Vec::new() };
     let hl = length / 2.0;
     let mut out = vec![
@@ -164,7 +171,7 @@ pub fn batten_plan(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanPri
     ];
     let c = to_plan_2d(w, [-hl - 260.0, 0.0]);
     out.push(PlanPrim::Circle { center: c, radius: 190.0, fill: Some(FillClass::Body), line: Some(LineClass::Thin) });
-    if style.labels {
+    if own_labels(obj) {
         out.push(label(c, number.to_string(), LABEL_HEIGHT));
     }
     out
@@ -202,7 +209,7 @@ pub fn platform_plan(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanP
         out.push(PlanPrim::line(vec![corners[0], corners[2]], LineClass::Thin));
         out.push(PlanPrim::line(vec![corners[1], corners[3]], LineClass::Thin));
     }
-    if style.labels {
+    if own_labels(obj) {
         let top = w.transform_point3(DVec3::new(0.0, 0.0, height)).z;
         let h = LABEL_HEIGHT.min(depth / 4.0);
         let c = to_plan_2d(w, [0.0, 0.0]);
@@ -324,7 +331,8 @@ pub fn support_mesh(obj: &Object, lod: Lod) -> Mesh {
         SupportStyle::BasePlate => m.cuboid(DVec3::new(-h, -h, 0.0), DVec3::new(h, h, height)),
         SupportStyle::Stand => {
             if lod == Lod::Box {
-                m.cuboid(DVec3::new(-h, -h, 0.0), DVec3::new(h, h, height));
+                // The mast only: a box round the tripod would read as a solid block.
+                m.cuboid(DVec3::new(-30.0, -30.0, 0.0), DVec3::new(30.0, 30.0, height));
                 return m;
             }
             let knee = (height * 0.3).min(900.0);

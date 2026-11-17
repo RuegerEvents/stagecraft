@@ -27,6 +27,18 @@ pub enum Col {
     Thickness,
     Layer,
     Tags,
+    /// Batten number.
+    Number,
+    /// Batten distance from the setting line.
+    PosY,
+    /// Batten trim height.
+    Trim,
+    /// What hangs on it, kg (read only).
+    Load,
+    /// Batten payload limit, kg.
+    MaxLoad,
+    /// Fixture weight, kg.
+    Weight,
 }
 
 impl Col {
@@ -44,6 +56,12 @@ impl Col {
             Col::Thickness => "col.thickness",
             Col::Layer => "col.layer",
             Col::Tags => "col.tags",
+            Col::Number => "col.number",
+            Col::PosY => "col.position_y",
+            Col::Trim => "col.trim",
+            Col::Load => "col.load",
+            Col::MaxLoad => "col.max_load",
+            Col::Weight => "col.weight",
         }
     }
 
@@ -52,6 +70,7 @@ impl Col {
             Col::Name => 170.0,
             Col::Tags => 170.0,
             Col::Layer | Col::Mode => 110.0,
+            Col::Number => 50.0,
             _ => 80.0,
         }
     }
@@ -61,8 +80,9 @@ impl Col {
 pub fn columns(kind: Option<&str>) -> Vec<Col> {
     use Col::*;
     match kind {
-        Some("fixture") => vec![Name, Fid, Cid, Address, Mode, Layer, Tags],
-        Some("truss") => vec![Name, Profile, Length, Layer, Tags],
+        Some("fixture") => vec![Name, Fid, Cid, Address, Mode, Weight, Layer, Tags],
+        Some("truss") => vec![Name, Profile, Length, Load, Layer, Tags],
+        Some("batten") => vec![Number, Name, PosY, Trim, Length, Load, MaxLoad, Tags],
         Some("wall") => vec![Name, Height, Thickness, Layer, Tags],
         Some("floor") => vec![Name, Thickness, Layer, Tags],
         _ => vec![Name, Type, Layer, Tags],
@@ -126,6 +146,14 @@ pub fn rows(doc: &Document, st: &TableState) -> Vec<Id> {
     };
     let (mut numbered, rest): (Vec<Id>, Vec<Id>) = ids.into_iter().partition(|id| fid(id).is_some());
     numbered.sort_by_key(fid);
+    // Battens read by number, like the house's fly bar list.
+    let batten = |id: &Id| match doc.objects[id].kind {
+        ObjectKind::Batten { number, .. } => Some(number),
+        _ => None,
+    };
+    let (mut battens, rest): (Vec<Id>, Vec<Id>) = rest.into_iter().partition(|id| batten(id).is_some());
+    battens.sort_by_key(batten);
+    numbered.extend(battens);
     numbered.extend(plan_order(doc, &rest));
     numbered
 }
@@ -139,7 +167,18 @@ pub fn cell_text(doc: &Document, o: &Object, col: Col) -> String {
         (Col::Address, ObjectKind::Fixture { address, .. }) => address.map(format_address).unwrap_or_default(),
         (Col::Mode, ObjectKind::Fixture { mode, .. }) => mode.clone().unwrap_or_default(),
         (Col::Profile, ObjectKind::Truss { profile, .. }) => profile.clone(),
-        (Col::Length, ObjectKind::Truss { length, .. }) => fmt_mm(*length),
+        (Col::Length, ObjectKind::Truss { length, .. } | ObjectKind::Batten { length, .. }) => fmt_mm(*length),
+        (Col::Number, ObjectKind::Batten { number, .. }) => number.to_string(),
+        (Col::PosY, ObjectKind::Batten { .. }) => fmt_mm(o.placement.position[1]),
+        (Col::Trim, ObjectKind::Batten { .. }) => fmt_mm(o.placement.position[2]),
+        (Col::MaxLoad, ObjectKind::Batten { max_load, .. }) => fmt_mm(*max_load),
+        (Col::Weight, ObjectKind::Fixture { weight_kg, .. }) => weight_kg.map(fmt_mm).unwrap_or_default(),
+        (Col::Load, _) => {
+            let l = stagecraft_core::load::load_of(doc, o.id);
+            let over = matches!(o.kind, ObjectKind::Batten { max_load, .. } if l.attached_kg > max_load);
+            let unknown = if l.unknown > 0 { "+?" } else { "" };
+            format!("{:.1}{unknown}{}", l.attached_kg, if over { " !" } else { "" })
+        }
         (Col::Height, ObjectKind::Wall { height, .. }) => fmt_mm(*height),
         (Col::Thickness, ObjectKind::Wall { thickness, .. } | ObjectKind::Floor { thickness, .. }) => {
             fmt_mm(*thickness)
@@ -184,7 +223,20 @@ pub fn edit_steps(doc: &Document, o: &Object, col: Col, text: &str) -> Result<Ve
         }
         Col::Mode => step("fixture.update", json!({ "id": id, "mode": text })),
         Col::Profile => step("truss.update", json!({ "id": id, "profile": text })),
+        Col::Length if o.kind.type_name() == "batten" => step("batten.update", json!({ "id": id, "length": mm()? })),
         Col::Length => step("truss.update", json!({ "id": id, "length": mm()? })),
+        Col::Number => {
+            let n: u32 = text.parse().map_err(|_| tf("status.bad_number", &[("text", &text)]))?;
+            step("batten.update", json!({ "id": id, "number": n }))
+        }
+        Col::PosY => step("batten.update", json!({ "id": id, "y": mm()? })),
+        Col::Trim => step("batten.update", json!({ "id": id, "trim": mm()? })),
+        Col::MaxLoad => step("batten.update", json!({ "id": id, "max_load": mm()? })),
+        Col::Load => return Err(t("table.read_only").to_owned()),
+        Col::Weight => {
+            let w = if text.is_empty() { 0.0 } else { mm()? };
+            step("fixture.update", json!({ "id": id, "weight_kg": w }))
+        }
         Col::Height => step("wall.update", json!({ "id": id, "height": mm()? })),
         Col::Thickness => {
             let cmd = if o.kind.type_name() == "wall" { "wall.update" } else { "floor.update" };
@@ -209,7 +261,10 @@ pub fn edit_steps(doc: &Document, o: &Object, col: Col, text: &str) -> Result<Ve
     // Cells of other types in a mixed table are left alone.
     let fits = match col {
         Col::Fid | Col::Cid | Col::Address | Col::Mode => matches!(o.kind, ObjectKind::Fixture { .. }),
-        Col::Profile | Col::Length => matches!(o.kind, ObjectKind::Truss { .. }),
+        Col::Profile => matches!(o.kind, ObjectKind::Truss { .. }),
+        Col::Length => matches!(o.kind, ObjectKind::Truss { .. } | ObjectKind::Batten { .. }),
+        Col::Number | Col::PosY | Col::Trim | Col::MaxLoad => matches!(o.kind, ObjectKind::Batten { .. }),
+        Col::Weight => matches!(o.kind, ObjectKind::Fixture { .. }),
         Col::Height => matches!(o.kind, ObjectKind::Wall { .. }),
         Col::Thickness => matches!(o.kind, ObjectKind::Wall { .. } | ObjectKind::Floor { .. }),
         _ => true,
@@ -407,6 +462,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             (None, "table.all"),
             (Some("fixture"), "type.fixture.plural"),
             (Some("truss"), "type.truss.plural"),
+            (Some("batten"), "table.fly_bars"),
             (Some("wall"), "type.wall.plural"),
             (Some("floor"), "type.floor.plural"),
         ];

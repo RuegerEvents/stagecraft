@@ -86,6 +86,19 @@ fn screenshots() {
         h.state_mut().run("ui.zoom", json!({ "scale": 0.25 })).unwrap();
         h.state_mut().run("ui.pan", json!({ "center": [4500, 2000] })).unwrap();
         save(&mut h, &dir, &format!("5-zoomed-{tn}"));
+
+        // The fly bar list with loads, batten 4 (LX1) selected: inspector shows its load.
+        let b4 = doc.objects.values().find(|o| o.name == "Batten 4").unwrap().id;
+        h.state_mut().ui.table.kind = Some("batten".into());
+        h.state_mut().run("selection.set", json!({ "ids": [b4] })).unwrap();
+        h.state_mut().run("ui.zoom", json!({ "scale": 0.055 })).unwrap();
+        h.state_mut().run("ui.pan", json!({ "center": [0, 5000] })).unwrap();
+        save(&mut h, &dir, &format!("13-fly-bars-{tn}"));
+        // A curtain selected: its inspector fields.
+        let main = doc.objects.values().find(|o| o.name == "Main curtain").unwrap().id;
+        h.state_mut().run("selection.set", json!({ "ids": [main] })).unwrap();
+        save(&mut h, &dir, &format!("14-curtain-{tn}"));
+        h.state_mut().run("selection.clear", json!(null)).unwrap();
         h.state_mut().ui.table.kind = None;
 
         // 3D: iso, front, a section through the stage, a section box, split.
@@ -93,6 +106,8 @@ fn screenshots() {
             h.state_mut().run(name, args).unwrap_or_else(|e| panic!("{name}: {e}"));
             h.run();
         };
+        // The house ceiling would cover the FOH from above; hide it for the overviews.
+        run(&mut h, "ui.set_tag_visible", json!({ "tag": "ceiling", "visible": false }));
         run(&mut h, "ui.set_view", json!({ "view": "3d" }));
         run(&mut h, "ui.camera", json!({ "view": "iso" }));
         save(&mut h, &dir, &format!("6-3d-iso-{tn}"));
@@ -102,16 +117,24 @@ fn screenshots() {
         run(&mut h, "ui.section", json!({ "axis": "x", "offset": 0 }));
         run(&mut h, "selection.set", json!({ "ids": [lx1] }));
         save(&mut h, &dir, &format!("8-3d-section-{tn}"));
-        run(&mut h, "ui.section", json!({ "box": { "min": [-3000, -500, -100], "max": [7950, 9500, 6500] } }));
+        run(&mut h, "ui.section", json!({ "box": { "min": [-3000, -2500, -100], "max": [9500, 12000, 6500] } }));
         run(&mut h, "selection.clear", json!(null));
         save(&mut h, &dir, &format!("9-3d-box-{tn}"));
-        // Close to the FOH truss: chords, diagonals, fixtures.
+        // Close to the FOH truss: chords, diagonals, corners of the run, fixtures.
         run(&mut h, "ui.section", json!({ "off": true }));
-        run(&mut h, "ui.camera", json!({ "eye": [-7800, -5600, 7400], "target": [-4300, -3000, 6300] }));
+        run(&mut h, "ui.camera", json!({ "eye": [-7000, -8600, 6600], "target": [-3000, -5000, 6400] }));
         save(&mut h, &dir, &format!("11-3d-truss-{tn}"));
+        // The stage from the house: portal, main curtain, wings, rostrum.
+        run(&mut h, "ui.set_tag_visible", json!({ "tag": "ceiling", "visible": true }));
+        run(&mut h, "ui.camera", json!({ "eye": [2500, -11500, 2600], "target": [0, 3000, 3600] }));
+        save(&mut h, &dir, &format!("15-3d-stage-{tn}"));
+        run(&mut h, "ui.set_tag_visible", json!({ "tag": "ceiling", "visible": false }));
+        // From above the forestage, stage left: battens, borders, LX truss, rostrum.
+        run(&mut h, "ui.camera", json!({ "eye": [-12500, -7000, 15500], "target": [0, 5500, 3000] }));
+        save(&mut h, &dir, &format!("16-3d-fly-{tn}"));
         // A horizontal cut at 2 m: hatched wall tops at the back corner.
         run(&mut h, "ui.section", json!({ "axis": "z", "offset": 2000 }));
-        run(&mut h, "ui.camera", json!({ "eye": [3000, 4000, 7000], "target": [7000, 8500, 1500] }));
+        run(&mut h, "ui.camera", json!({ "eye": [3000, 4000, 7000], "target": [7000, 9500, 500] }));
         save(&mut h, &dir, &format!("12-3d-cut-{tn}"));
         run(&mut h, "ui.section", json!({ "off": true }));
         run(&mut h, "ui.set_view", json!({ "view": "split" }));
