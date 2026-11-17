@@ -1,0 +1,24 @@
+[package]
+name = "stagecraft-hlr"
+version = "0.1.0"
+edition = "2024"
+authors = ["Hannes Rüger <hannes@rueger.events>"]
+license = "MIT"
+description = "Hidden-line removal, feature edges and section cuts for StageCraft vector views"
+
+# Built standalone while it is developed in parallel with the workspace
+# (the root Cargo.toml excludes this crate).
+[workspace]
+
+[features]
+default = []
+# Run HLR queries and per-mesh preparation on rayon's thread pool. Leave off for wasm.
+parallel = ["dep:rayon"]
+
+[dependencies]
+glam = "0.34"
+earcutr = "0.5"
+rayon = { version = "1.11", optional = true }
+
+[profile.test]
+opt-level = 2
