@@ -25,6 +25,17 @@ Errors use JSON-RPC codes; a failed command is `-32000` with `data.code` set to 
 command's code (`invalid_args`, `not_found`, `invalid`, `io`, `unknown_command`).
 A wrong token is `-32001`.
 
+## GUI mode
+
+`stagecraft` without a subcommand opens the GUI, which runs the same server with
+`mode: "gui"`. There, `commands` and `describe` also list the GUI's own `ui.*`
+commands (`kind: "ui"`), and `execute` runs them: `ui.state`, `ui.set_tool`,
+`ui.set_view`, `ui.zoom`, `ui.pan`, `ui.zoom_to_fit`, `ui.set_theme`,
+`ui.toggle_panel`, `ui.set_tag_visible`, `ui.set_active_layer`, `ui.set_snap`,
+`ui.set_tool_options`, `ui.palette`, `ui.screenshot {path}`. They change only what
+the window shows, not the document, and are not undoable. `ui.screenshot` answers
+once the next frame is captured, with `{path, width, height}` in physical pixels.
+
 ## TCP framing
 
 ```json

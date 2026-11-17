@@ -16,7 +16,7 @@ UX. Commits are GPG-signed.
 
 - `stagecraft-core` holds the document and every command. No UI, no sockets, no clock.
   It must keep building for `wasm32-unknown-unknown`
-  (`cargo check -p stagecraft-core --target wasm32-unknown-unknown`).
+  (`cargo check -p stagecraft-core -p stagecraft-geom --target wasm32-unknown-unknown`).
 - **Every action is a command** registered in `crates/stagecraft-core/src/commands/`.
   The GUI never mutates the document directly. A new feature without a command is not
   done.
@@ -28,6 +28,40 @@ UX. Commits are GPG-signed.
   Attachment behaviour has tests in `crates/stagecraft-core/tests/engine.rs`; extend
   them when you touch it.
 - Units mm and degrees, axes as in MVR: x right from the audience, y upstage, z up.
+
+## Geometry
+
+`stagecraft-geom` turns objects into what views draw: `plan()` gives 2D primitives in
+world mm with line/fill classes, one module per kind in `src/kinds/`; `mesh()` is a
+stub until block 3. Hit tests, box selection, truss hits and snapping are pure
+functions in `pick.rs` and `snap.rs` with tests. Truss profiles live in
+`catalog/truss_profiles.json`. It must build for wasm too.
+
+## UI (`stagecraft-ui`)
+
+- `Studio` = engine + `UiState`; `Studio::show(ui)` draws the whole window, so tests
+  drive it with `egui_kittest`. `Studio::run(name, args)` runs a command of either
+  registry; the GUI uses nothing else to change the document.
+- UI state has its own `ui.*` registry in `src/commands.rs`. In GUI mode the control
+  server lists/describes/runs both (`UiExtension`); calls are answered in
+  `StageApp::logic`, and `ui.screenshot` is answered after the frame arrives.
+- Canvas drawing in `canvas.rs`, tool behaviour in `tools.rs` (drags are transient
+  `Gesture` state; one command on release). Typed dimensions: plain numbers are
+  metres, Tab switches to the angle, Enter takes it, an empty Enter finishes.
+- All visible text goes through `i18n::t("key")`; the catalog is
+  `assets/i18n/en.json`, and a test fails on keys used but missing.
+- Theme: `theme.rs` holds both palettes; System/Light/Dark via `ui.set_theme`.
+  Roboto is vendored; it has no arrows or crosses, so use `widgets::icon_button`.
+- Give clickable things an accessible name (`widgets::name`); tests find them so.
+  Table cells are named `"<Column> <row>"`, e.g. `FID 1`.
+
+Look at the screens after UI changes:
+
+```
+STAGECRAFT_SCREENSHOTS=/some/dir cargo test -p stagecraft-ui --test screens
+```
+
+renders the demo document (`demo.rs`) in light and dark to PNG.
 
 ## Test data
 
@@ -42,6 +76,8 @@ viewer: `open -a Perastage file.mvr`.
 
 ```
 cargo test
+cargo run -p stagecraft-app                      # the GUI
+cargo run -p stagecraft-app -- exec ui.screenshot '{"path":"/tmp/s.png"}'
 cargo run -p stagecraft-app -- commands
 cargo run -p stagecraft-app -- serve /tmp/plan.stagecraft
 cargo run -p stagecraft-app -- exec object.list
