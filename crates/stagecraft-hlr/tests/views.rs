@@ -393,3 +393,31 @@ fn plane_on_a_face_keeps_the_face() {
         .sum();
     assert_near(platform, 6000.0, 1e-6);
 }
+
+#[test]
+fn penetrating_parts_draw_their_intersection() {
+    let block = cuboid(ObjectId(1), MAT, DVec3::ZERO, DVec3::splat(1000.0));
+    let post = cuboid(ObjectId(2), MAT, DVec3::new(450.0, 450.0, 500.0), DVec3::new(550.0, 550.0, 1500.0));
+    let sc = scene(vec![block, post]);
+    let with = draw(&sc, &View::iso(), &Options::default());
+    save("intersection_iso", &with);
+    let without = draw(&sc, &View::iso(), &Options { intersections: false, ..Options::default() });
+    // The two front sides of the post's footprint on the top face.
+    let edge = 100.0 * (2.0f64 / 3.0).sqrt();
+    assert_near(with.length(LineClass::Visible) - without.length(LineClass::Visible), 2.0 * edge, 1e-6);
+
+    // In plan the footprint lies under the post's outline and adds nothing.
+    let with = draw(&sc, &View::plan(), &Options::default());
+    let without = draw(&sc, &View::plan(), &Options { intersections: false, ..Options::default() });
+    assert_near(with.length(LineClass::Visible), without.length(LineClass::Visible), 1e-6);
+
+    // Separate components of one mesh intersect too.
+    let mut one = cuboid(ID, MAT, DVec3::ZERO, DVec3::splat(1000.0));
+    one.append(&cuboid(ID, MAT, DVec3::new(450.0, 450.0, 500.0), DVec3::new(550.0, 550.0, 1500.0)));
+    let d = draw(&scene(vec![one]), &View::iso(), &Options::default());
+    assert_near(
+        d.length(LineClass::Visible),
+        draw(&sc, &View::iso(), &Options::default()).length(LineClass::Visible),
+        1e-6,
+    );
+}

@@ -19,6 +19,7 @@ pub(crate) struct Piece {
     pub b: DVec2,
     pub object: ObjectId,
     pub class: LineClass,
+    pub weak: bool,
 }
 
 struct Occ {
@@ -273,7 +274,7 @@ impl Ctx<'_> {
             if let Some(class) = class
                 && (t1 - t0) * len >= self.opts.min_length
             {
-                out.push(Piece { a: a2.lerp(b2, t0), b: a2.lerp(b2, t1), object: s.object, class });
+                out.push(Piece { a: a2.lerp(b2, t0), b: a2.lerp(b2, t1), object: s.object, class, weak: s.weak });
             }
         };
         if !s.occluded {

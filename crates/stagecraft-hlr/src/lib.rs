@@ -13,6 +13,7 @@
 mod chain;
 mod features;
 mod hlr;
+mod intersect;
 mod overlap;
 mod prep;
 pub mod primitives;
@@ -186,11 +187,14 @@ pub struct Options {
     pub hidden_lines: bool,
     /// Visible or hidden pieces shorter than this (mm) are dropped.
     pub min_length: f64,
+    /// Draw the lines where separate parts penetrate each other (different meshes, or
+    /// separate connected components of one mesh).
+    pub intersections: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { crease_angle_deg: 50.0, weld_tolerance: 0.01, hidden_lines: true, min_length: 0.05 }
+        Self { crease_angle_deg: 50.0, weld_tolerance: 0.01, hidden_lines: true, min_length: 0.05, intersections: true }
     }
 }
 
@@ -290,6 +294,8 @@ pub(crate) struct Seg {
     /// Class of the visible part; see [`Line3::occluded`] for the hidden part.
     pub class: LineClass,
     pub occluded: bool,
+    /// An intersection line: dropped where it lies on any visible or cut line.
+    pub weak: bool,
 }
 
 /// Draw `scene` as seen in `view`.
@@ -313,7 +319,14 @@ pub fn draw(scene: &Scene, view: &View, opts: &Options) -> Drawing {
                 let cut = section::cut(&prepared, pl, opts.weld_tolerance);
                 for l in &cut.lines {
                     for w in l.windows(2) {
-                        segs.push(Seg { a: w[0], b: w[1], object: m.object, class: LineClass::Cut, occluded: true });
+                        segs.push(Seg {
+                            a: w[0],
+                            b: w[1],
+                            object: m.object,
+                            class: LineClass::Cut,
+                            occluded: true,
+                            weak: false,
+                        });
                     }
                 }
                 for r in cut.regions {
@@ -322,7 +335,7 @@ pub fn draw(scene: &Scene, view: &View, opts: &Options) -> Drawing {
                 }
             }
         }
-        (segs, occluders, regions)
+        (segs, occluders, regions, prepared)
     };
 
     #[cfg(feature = "parallel")]
@@ -336,7 +349,18 @@ pub fn draw(scene: &Scene, view: &View, opts: &Options) -> Drawing {
     let mut segs = Vec::new();
     let mut occluders = Vec::new();
     let mut regions = Vec::new();
-    for (s, o, r) in results {
+    if opts.intersections {
+        let prepared: Vec<_> = results.iter().zip(&scene.meshes).map(|(r, m)| (&r.3, m.object)).collect();
+        let (r, u, w) = view.basis();
+        let frame = |p: DVec3| r * p.x + u * p.y + w * p.z;
+        for s in intersect::intersection_lines(&prepared, frame, opts.weld_tolerance) {
+            match &plane {
+                Some(pl) => segs.extend(pl.clip_seg(s)),
+                None => segs.push(s),
+            }
+        }
+    }
+    for (s, o, r, _) in results {
         segs.extend(s);
         occluders.extend(o);
         regions.extend(r);
@@ -344,7 +368,7 @@ pub fn draw(scene: &Scene, view: &View, opts: &Options) -> Drawing {
     for l in &scene.lines {
         let pts: Vec<DVec3> = l.points.iter().map(|p| view.to_view(*p)).collect();
         for w in pts.windows(2) {
-            let s = Seg { a: w[0], b: w[1], object: l.object, class: l.class, occluded: l.occluded };
+            let s = Seg { a: w[0], b: w[1], object: l.object, class: l.class, occluded: l.occluded, weak: false };
             match &plane {
                 Some(pl) => segs.extend(pl.clip_seg(s)),
                 None => segs.push(s),

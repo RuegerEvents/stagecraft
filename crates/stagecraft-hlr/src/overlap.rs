@@ -1,5 +1,6 @@
 //! Remove line pieces that lie on top of stronger ones: a hidden line under a visible
-//! or cut line, a visible line under a cut line, and duplicates within one object.
+//! or cut line, a visible line under a cut line, an intersection line under any edge,
+//! and duplicates within one object.
 //! Front views of boxes otherwise show every back edge as a dashed line exactly under
 //! the solid outline.
 
@@ -8,18 +9,21 @@ use glam::DVec2;
 use crate::LineClass;
 use crate::hlr::{Geom, Piece};
 
-fn rank(c: LineClass) -> u8 {
-    match c {
-        LineClass::Cut => 0,
-        LineClass::Visible => 1,
-        LineClass::Hidden => 2,
-        LineClass::Centre => 3,
+/// Lower is stronger. Intersection lines rank below every visible edge.
+fn rank(p: &Piece) -> u8 {
+    match (p.class, p.weak) {
+        (LineClass::Cut, _) => 0,
+        (LineClass::Visible, false) => 1,
+        (LineClass::Visible, true) => 2,
+        (LineClass::Hidden, false) => 3,
+        (LineClass::Hidden, true) => 4,
+        (LineClass::Centre, _) => 5,
     }
 }
 
 pub(crate) fn remove_overlaps(mut pieces: Vec<Piece>, tol: f64, min_length: f64) -> Vec<Piece> {
     let tol = tol.max(1e-6);
-    pieces.sort_by_key(|p| rank(p.class));
+    pieces.sort_by_key(rank);
     let mut lo = DVec2::splat(f64::INFINITY);
     let mut hi = DVec2::splat(f64::NEG_INFINITY);
     for p in &pieces {
@@ -50,7 +54,7 @@ pub(crate) fn remove_overlaps(mut pieces: Vec<Piece>, tol: f64, min_length: f64)
         generation += 1;
         stamp.resize(accepted.len(), 0);
         cut.clear();
-        let r = rank(p.class);
+        let r = rank(&p);
         geom.cells(&[p.a, p.b], |c| {
             for &qi in &cells[c] {
                 if stamp[qi as usize] == generation {
@@ -58,7 +62,7 @@ pub(crate) fn remove_overlaps(mut pieces: Vec<Piece>, tol: f64, min_length: f64)
                 }
                 stamp[qi as usize] = generation;
                 let q = &accepted[qi as usize];
-                let rq = rank(q.class);
+                let rq = rank(q);
                 if !(rq < r || (rq == r && q.object == p.object)) {
                     continue;
                 }

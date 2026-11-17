@@ -34,6 +34,7 @@ pub(crate) fn feature_edges(p: &Prepared, object: ObjectId, opts: &Options) -> V
                 object,
                 class: LineClass::Visible,
                 occluded: true,
+                weak: false,
             });
         }
     }

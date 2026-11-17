@@ -24,6 +24,8 @@ pub(crate) struct Prepared {
     /// Per triangle: its connected component is closed and consistently oriented, so
     /// back faces can never be seen.
     pub solid: Vec<bool>,
+    /// Per triangle: index of its connected component.
+    pub comp: Vec<u32>,
 }
 
 impl Prepared {
@@ -55,7 +57,7 @@ pub(crate) fn prepare(points: &[DVec3], triangles: &[[u32; 3]], tol: f64) -> Pre
 
 fn finish(pos: Vec<DVec3>, mut tris: Vec<[u32; 3]>, edges: Vec<EdgeRec>) -> Prepared {
     // Orientation changes the winding, not the adjacency; the edge table stays valid.
-    let solid = orient(&pos, &mut tris, &edges);
+    let (solid, comp) = orient(&pos, &mut tris, &edges);
     let normals = tris
         .iter()
         .map(|t| {
@@ -63,7 +65,7 @@ fn finish(pos: Vec<DVec3>, mut tris: Vec<[u32; 3]>, edges: Vec<EdgeRec>) -> Prep
             (b - a).cross(c - a).normalize_or_zero()
         })
         .collect();
-    Prepared { pos, tris, normals, edges, solid }
+    Prepared { pos, tris, normals, edges, solid, comp }
 }
 
 /// Merge points closer than `tol`. Returns the unique points and, per input point, its
@@ -286,8 +288,8 @@ fn inside(pos: &[DVec3], tris: &[[u32; 3]], comp: &[usize], p: DVec3) -> bool {
 /// Make the winding consistent across manifold edges, per connected component. Closed
 /// shells get outward normals (inward when nested in an odd number of other shells);
 /// open sheets keep the winding most of their triangles had. Returns per triangle
-/// whether its component is a closed shell.
-fn orient(pos: &[DVec3], tris: &mut [[u32; 3]], edges: &[EdgeRec]) -> Vec<bool> {
+/// whether its component is a closed shell, and its component index.
+fn orient(pos: &[DVec3], tris: &mut [[u32; 3]], edges: &[EdgeRec]) -> (Vec<bool>, Vec<u32>) {
     let n = tris.len();
     // Triangle adjacency through edges (3 slots per triangle, edge index).
     let mut tri_edges = vec![[u32::MAX; 3]; n];
@@ -389,7 +391,9 @@ fn orient(pos: &[DVec3], tris: &mut [[u32; 3]], edges: &[EdgeRec]) -> Vec<bool> 
         }
     }
     // Open sheets keep the winding most of their triangles had.
-    for (comp, closed) in &comps {
+    let mut comp_of = vec![0u32; n];
+    for (ci, (comp, closed)) in comps.iter().enumerate() {
+        comp.iter().for_each(|&f| comp_of[f] = ci as u32);
         if !closed {
             let originally_flipped = comp.iter().filter(|&&f| first_flip[f]).count();
             if originally_flipped * 2 > comp.len() {
@@ -405,7 +409,7 @@ fn orient(pos: &[DVec3], tris: &mut [[u32; 3]], edges: &[EdgeRec]) -> Vec<bool> 
             t.swap(1, 2);
         }
     }
-    solid
+    (solid, comp_of)
 }
 
 #[cfg(test)]

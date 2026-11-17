@@ -91,6 +91,7 @@ applies scale and flips y for PDF/SVG.
 | `weld_tolerance` | 0.01 mm | vertex welding; also joining output segments |
 | `hidden_lines` | true | emit `Hidden` lines; `false` also skips edges that are always hidden (faster) |
 | `min_length` | 0.05 mm | drop shorter pieces |
+| `intersections` | true | draw where separate parts penetrate each other |
 
 ## How it works
 
@@ -105,38 +106,49 @@ applies scale and flips y for PDF/SVG.
    each mesh into loops (exact vertex/edge keys, no tolerance chaining), group them into
    outer/holes, triangulate the cut faces (`earcutr`) as occluders, and add the loops
    as `Cut` edges. Open meshes (curtains) give open cut lines and no region.
-4. **Hidden-line removal**: occluders are all triangles except back faces of closed
+4. **Intersection lines**: where triangles of different meshes, or of different
+   connected components of one mesh, cross each other (strictly, not just touching),
+   the crossing segment is added as a weak `Visible` edge. Component pairs come from a
+   sweep over bounding boxes taken in world axes, so axis-aligned rigs keep tight boxes
+   in any view; within a pair, only triangles in the overlap box are tested (hashed
+   into a small grid when there are many).
+5. **Hidden-line removal**: occluders are all triangles except back faces of closed
    shells, minus edge-on triangles. They go into a uniform screen grid (one cell per
    occluder on average, triangles rasterised into the cells they actually touch). Per
    edge, the candidate triangles along its cells each give at most one hidden
    parameter interval (inside the projected triangle, slightly enlarged, *and* behind
    its plane by more than a depth tolerance). The union is hidden, the rest visible.
-5. **Overlap removal**: a hidden piece lying on a visible or cut line is dropped, and so
-   is a visible piece on a cut line or a duplicate within one object. Without this a
+6. **Overlap removal**: a hidden piece lying on a visible or cut line is dropped, and so
+   is a visible piece on a cut line, an intersection line on any edge, or a duplicate
+   within one object. Without this a
    front view of a box shows its back edges dashed exactly under the outline.
-6. **Chaining**: per (object, class) the pieces are joined at shared endpoints and
+7. **Chaining**: per (object, class) the pieces are joined at shared endpoints and
    collinear points are removed.
 
-With the `parallel` feature, mesh preparation and the per-edge HLR queries run on
-rayon. Leave it off for wasm.
+With the `parallel` feature, mesh preparation, intersection pairs and the per-edge HLR
+queries run on rayon. Leave it off for wasm.
 
 ## Performance
 
 `tests/bench.rs` (ignored by default): 64 runs of 12 m box truss (16-sided chords,
-8-sided diagonals) plus a deck, 309 k triangles, Apple Silicon, release build:
+8-sided diagonals, every diagonal penetrating two chords) plus a deck, 309 k triangles,
+Apple Silicon, release build, intersection lines on:
 
 | View | single thread | `parallel` | without hidden lines, parallel |
 |---|---|---|---|
-| front | 205 ms | 121 ms | 42 ms |
-| iso | 442 ms | 192 ms | 84 ms |
-| plan | 219 ms | 115 ms | 46 ms |
-| front section | 108 ms | 55 ms | 25 ms |
+| front | 749 ms | 396 ms | 105 ms |
+| iso | 1177 ms | 528 ms | 170 ms |
+| plan | 860 ms | 404 ms | 127 ms |
+| front section | 507 ms | 224 ms | 94 ms |
+
+Intersections cost about 0.3 s single-threaded here; `intersections: false` brings iso
+down to 442 ms single-threaded.
 
 ## Limits
 
-- **No intersection lines.** Where objects penetrate each other (a diagonal welded into
-  a chord, a fixture clamp around a tube), the edge where the surfaces meet is not
-  drawn; the parts inside the other object are hidden correctly.
+- Intersection lines are only found between separate parts (meshes or connected
+  components). A single self-intersecting component draws none, and faces that only
+  touch (a box standing on a deck) give none, which is what a drawing wants.
 - Cut regions are emitted whole and assumed to be in front: right for planes facing the
   viewer (all the presets). For a strongly oblique plane, kept geometry could lie in
   front of part of a cut face. Cut lines do go through HLR.
