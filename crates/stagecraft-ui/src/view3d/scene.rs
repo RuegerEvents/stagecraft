@@ -64,7 +64,7 @@ pub struct Scene {
     geometry_version: u64,
     pub buffers: Buffers,
     pub caps: Buffers,
-    caps_key: Option<(u64, Vec<[f64; 6]>)>,
+    caps_key: Option<(u64, Vec<Id>, Vec<[f64; 6]>)>,
     /// How many object meshes were generated (tests check the cache with it).
     pub mesh_builds: u64,
 }
@@ -191,10 +191,14 @@ impl Scene {
             .iter()
             .map(|p| [p.origin[0], p.origin[1], p.origin[2], p.normal[0], p.normal[1], p.normal[2]])
             .collect();
-        if self.caps_key.as_ref().is_some_and(|(v, k)| *v == self.geometry_version && *k == key) {
+        if self
+            .caps_key
+            .as_ref()
+            .is_some_and(|(v, sel, k)| *v == self.geometry_version && *sel == self.selection && *k == key)
+        {
             return;
         }
-        self.caps_key = Some((self.geometry_version, key));
+        self.caps_key = Some((self.geometry_version, self.selection.clone(), key));
         let sel: BTreeSet<Id> = self.selection.iter().copied().collect();
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
@@ -394,8 +398,16 @@ mod tests {
         // The cut through the high floor's slab... is none: it lies above.
         s.update_caps(&[cut]);
         assert!(s.caps.indices.is_empty());
-        s.update_caps(&[Plane::new([500.0, 0.0, 0.0], [1.0, 0.0, 0.0])]);
+        let x = [Plane::new([500.0, 0.0, 0.0], [1.0, 0.0, 0.0])];
+        s.update_caps(&x);
         assert_eq!(s.caps.indices.len(), 2 * 2 * 3, "two slabs cut, two triangles each");
+        let v = s.caps.version;
+        s.update_caps(&x);
+        assert_eq!(s.caps.version, v, "cached");
+        // Selecting the upper floor highlights its cut face too.
+        s.sync(e.doc(), &ids(&e), &[id(&high)], &Camera3d::default());
+        s.update_caps(&x);
+        assert_eq!(s.caps.vertices.iter().filter(|v| v.flags & FLAG_SELECTED != 0).count(), 4);
     }
 
     #[test]
