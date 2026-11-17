@@ -23,6 +23,10 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let mut entries: Vec<_> = rd.flatten().map(|e| e.path()).collect();
     entries.sort();
     for p in entries {
+        let hidden = p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.'));
+        if hidden {
+            continue; // e.g. the GDTF Share cache, which holds the same files by rid
+        }
         if p.is_dir() {
             walk(&p, out);
         } else {
