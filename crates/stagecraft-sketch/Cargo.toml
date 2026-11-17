@@ -1,0 +1,17 @@
+[package]
+name = "stagecraft-sketch"
+version = "0.1.0"
+edition = "2024"
+authors = ["Hannes Rüger <hannes@rueger.events>"]
+license = "MIT"
+description = "Parametric 2D floor-plan sketch for StageCraft: points, lines, arcs, constraints and dimensions solved with ezpz"
+
+[dependencies]
+ezpz = "0.2.29"
+faer = { version = "0.24", default-features = false, features = ["std"] }
+schemars = "1.2"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"
