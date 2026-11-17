@@ -1,0 +1,24 @@
+[package]
+name = "stagecraft-core"
+description = "Document model and command engine of StageCraft. No UI, no sockets."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+glam.workspace = true
+imbl.workspace = true
+schemars = { workspace = true, features = ["uuid1"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# The browser build needs a JS source of randomness for uuid v4.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+uuid = { workspace = true, features = ["js"] }

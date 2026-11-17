@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/stagecraft-core",
+    "crates/stagecraft-control",
+    "crates/stagecraft-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Hannes Rüger <hannes@rueger.events>"]
+license = "MIT"
+
+[workspace.dependencies]
+stagecraft-core = { path = "crates/stagecraft-core" }
+stagecraft-control = { path = "crates/stagecraft-control" }
+anyhow = "1"
+clap = { version = "4.6", features = ["derive"] }
+dirs = "7"
+glam = { version = "0.34", features = ["serde"] }
+imbl = { version = "7", features = ["serde"] }
+schemars = "1.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
