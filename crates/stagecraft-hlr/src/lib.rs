@@ -190,7 +190,7 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { crease_angle_deg: 30.0, weld_tolerance: 0.01, hidden_lines: true, min_length: 0.05 }
+        Self { crease_angle_deg: 50.0, weld_tolerance: 0.01, hidden_lines: true, min_length: 0.05 }
     }
 }
 
@@ -244,11 +244,8 @@ pub struct Drawing {
 impl Drawing {
     /// `(min, max)` over all points, `None` when empty.
     pub fn bounds(&self) -> Option<(DVec2, DVec2)> {
-        let pts = self
-            .polylines
-            .iter()
-            .flat_map(|p| p.points.iter())
-            .chain(self.regions.iter().flat_map(|r| r.outer.iter()));
+        let pts =
+            self.polylines.iter().flat_map(|p| p.points.iter()).chain(self.regions.iter().flat_map(|r| r.outer.iter()));
         let mut it = pts.peekable();
         it.peek()?;
         let (mut lo, mut hi) = (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY));
@@ -297,10 +294,9 @@ pub(crate) struct Seg {
 
 /// Draw `scene` as seen in `view`.
 pub fn draw(scene: &Scene, view: &View, opts: &Options) -> Drawing {
-    let plane = view.section.map(|s| section::ViewPlane {
-        origin: view.to_view(s.origin),
-        normal: view.dir_to_view(s.normal).normalize(),
-    });
+    let plane = view
+        .section
+        .map(|s| section::ViewPlane { origin: view.to_view(s.origin), normal: view.dir_to_view(s.normal).normalize() });
 
     // Per mesh: weld, orient, extract edges, cut.
     let per_mesh = |m: &Mesh| {

@@ -153,7 +153,6 @@ impl Geom {
         self.nx * self.ny
     }
 
-
     /// Calls `f` with every cell the polygon (triangle or segment) touches.
     pub(crate) fn cells(&self, pts: &[DVec2], mut f: impl FnMut(usize)) {
         let (mut ylo, mut yhi) = (f64::INFINITY, f64::NEG_INFINITY);

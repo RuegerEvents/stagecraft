@@ -68,13 +68,16 @@ fn overlapping_boxes_hide_the_rear_one_partly() {
     let d = draw(&scene(vec![front, rear]), &View::front(), &Options::default());
     save("boxes_front", &d);
     let by = |id: u64, class: LineClass| -> f64 {
-        d.lines(class).filter(|l| l.object.0 == id).map(|l| {
-            let mut s: f64 = l.points.windows(2).map(|w| w[0].distance(w[1])).sum();
-            if l.closed {
-                s += l.points.last().unwrap().distance(l.points[0]);
-            }
-            s
-        }).sum()
+        d.lines(class)
+            .filter(|l| l.object.0 == id)
+            .map(|l| {
+                let mut s: f64 = l.points.windows(2).map(|w| w[0].distance(w[1])).sum();
+                if l.closed {
+                    s += l.points.last().unwrap().distance(l.points[0]);
+                }
+                s
+            })
+            .sum()
     };
     assert_near(by(1, LineClass::Visible), 4000.0, 1e-6);
     assert_near(by(1, LineClass::Hidden), 0.0, 1e-6);
@@ -167,8 +170,7 @@ fn cylinder_shows_silhouettes_not_facets() {
 
     let d = draw(&scene(vec![cyl.clone()]), &View::iso(), &Options::default());
     save("cylinder_iso", &d);
-    let long: Vec<_> =
-        segments(&d, LineClass::Visible).into_iter().filter(|(a, b)| a.distance(*b) > 100.0).collect();
+    let long: Vec<_> = segments(&d, LineClass::Visible).into_iter().filter(|(a, b)| a.distance(*b) > 100.0).collect();
     assert_eq!(long.len(), 2, "only the two silhouettes are long");
 
     // A crease threshold below the facet angle (11.25°) shows the facets.
@@ -258,9 +260,12 @@ fn centre_lines_and_explicit_lines() {
     });
     let d = draw(&sc, &View::plan(), &Options::default());
     save("centre_lines", &d);
-    let len = |id: u64| d.lines(LineClass::Centre).filter(|l| l.object.0 == id).map(|l| {
-        l.points.windows(2).map(|w| w[0].distance(w[1])).sum::<f64>()
-    }).sum::<f64>();
+    let len = |id: u64| {
+        d.lines(LineClass::Centre)
+            .filter(|l| l.object.0 == id)
+            .map(|l| l.points.windows(2).map(|w| w[0].distance(w[1])).sum::<f64>())
+            .sum::<f64>()
+    };
     assert_near(len(9), 2000.0, 1e-6);
     // Through the middle of the cube: only the parts outside it remain.
     assert_near(len(10), 1000.0, 1e-6);
@@ -292,7 +297,15 @@ fn prism_with_concave_profile() {
 fn truss_lattice_runs_quickly() {
     let mut meshes = Vec::new();
     for i in 0..6 {
-        meshes.push(box_truss(ObjectId(i), MAT, DVec3::new(-6000.0, i as f64 * 1500.0, 6000.0), 12000.0, 290.0, 25.0, 16));
+        meshes.push(box_truss(
+            ObjectId(i),
+            MAT,
+            DVec3::new(-6000.0, i as f64 * 1500.0, 6000.0),
+            12000.0,
+            290.0,
+            25.0,
+            16,
+        ));
     }
     let tris: usize = meshes.iter().map(|m| m.triangles.len()).sum();
     let sc = scene(meshes);
@@ -303,4 +316,80 @@ fn truss_lattice_runs_quickly() {
         save(name, &d);
         assert!(d.length(LineClass::Visible) > 0.0);
     }
+}
+
+#[test]
+fn truss_detail_views() {
+    let t = box_truss(ID, MAT, DVec3::ZERO, 1200.0, 290.0, 25.0, 16);
+    for (name, view) in [
+        ("truss_detail_iso", View::iso()),
+        ("truss_detail_front", View::front()),
+        ("truss_detail_side", View::side_right()),
+    ] {
+        let d = draw(&scene(vec![t.clone()]), &view, &Options::default());
+        save(name, &d);
+        eprintln!(
+            "{name}: {} polylines, {} visible segments",
+            d.polylines.len(),
+            segments(&d, LineClass::Visible).len()
+        );
+    }
+}
+
+#[test]
+fn empty_scene_gives_empty_drawing() {
+    let d = draw(&Scene::default(), &View::iso(), &Options::default());
+    assert!(d.polylines.is_empty() && d.regions.is_empty());
+    assert!(d.bounds().is_none());
+}
+
+#[test]
+fn open_sheet_is_cut_as_a_line_without_fill() {
+    // A curtain: a vertical sheet in x/z at y = 1000, two triangles, open.
+    let curtain = Mesh {
+        object: ObjectId(5),
+        material: MAT,
+        positions: vec![
+            DVec3::new(-2000.0, 1000.0, 0.0),
+            DVec3::new(2000.0, 1000.0, 0.0),
+            DVec3::new(2000.0, 1000.0, 4000.0),
+            DVec3::new(-2000.0, 1000.0, 4000.0),
+        ],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+    };
+    let d = draw(&scene(vec![curtain.clone()]), &View::plan_cut(2000.0), &Options::default());
+    save("curtain_plan_cut", &d);
+    assert!(d.regions.is_empty());
+    assert_near(d.length(LineClass::Cut), 4000.0, 1e-6);
+
+    // Seen from the front it is a rectangle (boundary edges), no diagonal.
+    let d = draw(&scene(vec![curtain]), &View::front(), &Options::default());
+    assert_eq!(segments(&d, LineClass::Visible).len(), 4);
+}
+
+#[test]
+fn plane_on_a_face_keeps_the_face() {
+    // Plan cut exactly at the top of a 600 mm platform with a column on it.
+    let objects = vec![
+        cuboid(ObjectId(1), MAT, DVec3::new(0.0, 0.0, 0.0), DVec3::new(2000.0, 1000.0, 600.0)),
+        cuboid(ObjectId(2), MAT, DVec3::new(900.0, 400.0, 600.0), DVec3::new(1100.0, 600.0, 2000.0)),
+    ];
+    let d = draw(&scene(objects), &View::plan_cut(600.0), &Options::default());
+    save("plane_on_face", &d);
+    // The column's footprint is a cut region; the platform top stays a plain view.
+    assert_eq!(d.regions.len(), 1);
+    assert_eq!(d.regions[0].object, ObjectId(2));
+    assert_near(d.regions[0].area(), 200.0 * 200.0, 1e-6);
+    let platform: f64 = d
+        .lines(LineClass::Visible)
+        .filter(|l| l.object.0 == 1)
+        .map(|l| {
+            let mut s: f64 = l.points.windows(2).map(|w| w[0].distance(w[1])).sum();
+            if l.closed {
+                s += l.points.last().unwrap().distance(l.points[0]);
+            }
+            s
+        })
+        .sum();
+    assert_near(platform, 6000.0, 1e-6);
 }
