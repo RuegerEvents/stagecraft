@@ -7,7 +7,76 @@ use stagecraft_geom::{FillClass, LineClass};
 
 use crate::state::ThemePref;
 
-pub const ACCENT: Color32 = Color32::from_rgb(0x2f, 0x7c, 0xf6);
+/// The one accent (Style A · Studio).
+pub const ACCENT: Color32 = Color32::from_rgb(0x3d, 0x7b, 0xfd);
+
+/// Colours of the window chrome around the canvas (Style A · Studio): neutral greys, one
+/// blue accent. The light variant is the same neutral greys turned over, not warm paper.
+#[derive(Clone, Copy, Debug)]
+pub struct Chrome {
+    /// Title/tool bar.
+    pub bar: Color32,
+    /// Panels and docks.
+    pub panel: Color32,
+    /// The drawing area around the plan.
+    pub canvas: Color32,
+    pub separator: Color32,
+    pub text: Color32,
+    pub text2: Color32,
+    pub icon: Color32,
+    /// Text fields, combo boxes, buttons at rest.
+    pub field: Color32,
+    pub hover: Color32,
+    pub pressed: Color32,
+    /// The track of segmented controls.
+    pub segment: Color32,
+    /// The chosen segment (a raised panel colour).
+    pub segment_on: Color32,
+    pub status: Color32,
+    pub accent: Color32,
+    pub on_accent: Color32,
+}
+
+pub fn chrome(dark: bool) -> Chrome {
+    let c = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+    if dark {
+        Chrome {
+            bar: c(0x2a2b30),
+            panel: c(0x232428),
+            canvas: c(0x1b1c1f),
+            separator: c(0x34363b),
+            text: c(0xe6e6e8),
+            text2: c(0x8d9097),
+            icon: c(0xc9cbd0),
+            field: c(0x2e3035),
+            hover: c(0x383a40),
+            pressed: c(0x42444b),
+            segment: c(0x1b1c1f),
+            segment_on: c(0x3a3c42),
+            status: c(0x1f2023),
+            accent: ACCENT,
+            on_accent: Color32::WHITE,
+        }
+    } else {
+        Chrome {
+            bar: c(0xececee),
+            panel: c(0xf6f6f7),
+            canvas: c(0xffffff),
+            separator: c(0xdadbde),
+            text: c(0x1c1d20),
+            text2: c(0x6d7078),
+            icon: c(0x3c3e44),
+            field: c(0xffffff),
+            hover: c(0xe2e3e6),
+            pressed: c(0xd6d7db),
+            segment: c(0xdfe0e3),
+            segment_on: c(0xffffff),
+            status: c(0xefeff1),
+            accent: ACCENT,
+            on_accent: Color32::WHITE,
+        }
+    }
+}
 /// Patch conflicts and other problems, readable on light and dark.
 pub const WARNING: Color32 = Color32::from_rgb(0xe0, 0x4a, 0x2f);
 

@@ -16,6 +16,7 @@ pub mod dialogs;
 pub mod dock;
 pub mod fuzzy;
 pub mod i18n;
+pub mod icons;
 pub mod inspector;
 pub mod library;
 pub mod menu;

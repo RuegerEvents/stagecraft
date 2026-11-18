@@ -53,6 +53,8 @@
   "panel.share": "GDTF Share",
   "menu.reset_layout": "Reset Layout",
   "menu.window": "Window",
+  "toolbar.more": "More tools",
+  "palette.search_tip": "Command palette (⌘K)",
   "menu.insert": "Insert",
   "menu.help": "Help",
   "menu.theme": "Theme",

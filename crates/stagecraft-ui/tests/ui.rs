@@ -705,3 +705,28 @@ fn the_in_window_menus_run_commands() {
     let bar = stagecraft_ui::menu::bar(h.state());
     assert!(bar.items().len() > 40);
 }
+
+// ---- toolbar ---------------------------------------------------------------------
+
+#[test]
+fn toolbar_icons_have_names_and_tools_that_do_not_fit_go_into_a_menu() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    assert!(h.query_by_label("More tools").is_none());
+    h.get_by_label("Tool Ceiling").click();
+    h.run();
+    assert_eq!(h.state().ui.tool, stagecraft_ui::Tool::Ceiling);
+    // A narrow window: the last groups move into the » menu.
+    let mut h = Harness::builder()
+        .with_max_steps(8)
+        .with_size(vec2(760.0, 700.0))
+        .build_ui_state(|ui, s: &mut Studio| s.show(ui), Studio::new(stagecraft_ui::demo::engine()));
+    h.run();
+    assert!(h.query_by_label("Tool Ceiling").is_none());
+    assert!(h.query_by_label("Tool Select").is_some());
+    h.get_by_label("More tools").click();
+    h.run();
+    h.get_by_label("Menu tool Ceiling").click();
+    h.run();
+    assert_eq!(h.state().ui.tool, stagecraft_ui::Tool::Ceiling);
+    assert_eq!(stagecraft_ui::panels::tool_tip(stagecraft_ui::Tool::Wall), "Wall (W)");
+}

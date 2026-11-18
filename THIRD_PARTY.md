@@ -9,5 +9,6 @@ pulled from elsewhere:
 | acadrust 0.6.6 | crates.io, used unmodified behind `craft-dwg`; licence and notices in craft-libs `licenses/dwg/` | MPL-2.0 | reading DWG (native builds) |
 | storytold/egui | <https://github.com/storytold/egui>, rev `6d518fc799681571963842f95b55a6b68431b15a` (egui 0.37 plus the Craft suite's patches), with storytold/winit rev `a517b3846ee8457d84ee4975110bfda6797c44dc`; root `[patch.crates-io]` | MIT OR Apache-2.0 | egui, eframe, egui-wgpu, egui-winit, egui_kittest |
 | DejaVu Sans (cut) | `assets/fonts/DejaVuSans-Symbols.ttf` (see the README there, licence in `DejaVu-LICENSE.txt`) | Bitstream Vera licence, DejaVu changes public domain | Arrows and key symbols in the GUI |
+| Lucide icons (lucide-static 0.469.0) | `crates/stagecraft-ui/assets/icons/lucide/` (see the README there, licence in `LICENSE`) | ISC | Toolbar icons for the generic tools |
 | Roboto, Roboto Mono | `assets/fonts/` (see the README there) | Apache-2.0 | GUI text |
 | Arimo | `assets/fonts/` (see the README there, licence in `Arimo-OFL.txt`) | OFL-1.1 | Sheet text (PDF, SVG, Sheets mode) |

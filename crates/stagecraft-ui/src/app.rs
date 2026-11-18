@@ -122,8 +122,19 @@ impl Studio {
         if !self.ui.native_menu {
             egui::Panel::top("menu").show(ui, |ui| crate::menu::show_in_window(ui, self));
         }
-        egui::Panel::top("toolbar").show(ui, |ui| panels::toolbar(ui, self));
-        egui::Panel::bottom("status").show(ui, |ui| panels::status_bar(ui, self));
+        let c = theme::chrome(ui.visuals().dark_mode);
+        egui::Panel::top("toolbar")
+            .exact_size(panels::BAR_HEIGHT)
+            .frame(egui::Frame::new().fill(c.bar).stroke(egui::Stroke::new(1.0, c.separator)))
+            .show(ui, |ui| panels::toolbar(ui, self));
+        egui::Panel::top("options")
+            .exact_size(30.0)
+            .frame(egui::Frame::new().fill(c.panel).inner_margin(egui::Margin::symmetric(6, 0)))
+            .show(ui, |ui| panels::options_bar(ui, self));
+        egui::Panel::bottom("status")
+            .exact_size(24.0)
+            .frame(egui::Frame::new().fill(c.status).inner_margin(egui::Margin::symmetric(10, 0)))
+            .show(ui, |ui| panels::status_bar(ui, self));
         egui::CentralPanel::no_frame().show(ui, |ui| crate::dock::show(ui, self));
         palette::show(ui.ctx(), self);
         self.keep_prefs(ui.ctx());

@@ -26,6 +26,8 @@ craft-settings.workspace = true
 craft-menu.workspace = true
 craft-quit.workspace = true
 craft-window.workspace = true
+# Toolbar icons (the version stagecraft-underlay already uses).
+resvg = { version = "0.50", default-features = false }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

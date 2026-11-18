@@ -122,3 +122,41 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, accessible: &str) -> Response {
     }
     resp
 }
+
+/// A segmented control (Plan | 3D | Split | Sheets): `(label, accessible name, chosen)` per
+/// segment; returns the segment clicked.
+pub fn segmented(ui: &mut Ui, c: &crate::theme::Chrome, items: &[(String, String, bool)]) -> Option<usize> {
+    let font = egui::FontId::proportional(12.5);
+    let pad = egui::vec2(11.0, 4.0);
+    let galleys: Vec<_> = items
+        .iter()
+        .map(|(label, _, on)| {
+            ui.painter().layout_no_wrap(label.clone(), font.clone(), if *on { c.text } else { c.text2 })
+        })
+        .collect();
+    let h = 26.0;
+    let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 2.0 * pad.x).collect();
+    let total = widths.iter().sum::<f32>() + 4.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(total, h), egui::Sense::hover());
+    let p = ui.painter().clone();
+    p.rect_filled(rect, 7.0, c.segment);
+    let mut x = rect.left() + 2.0;
+    let mut clicked = None;
+    for (i, ((_, a11y, on), g)) in items.iter().zip(galleys).enumerate() {
+        let seg = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 2.0), egui::vec2(widths[i], h - 4.0));
+        let r = ui.interact(seg, ui.scope_id().with(("segment", i)), egui::Sense::click());
+        name(&r, Role::Button, a11y.as_str());
+        if *on {
+            p.rect_filled(seg.translate(egui::vec2(0.0, 0.5)), 5.0, egui::Color32::from_black_alpha(40));
+            p.rect_filled(seg, 5.0, c.segment_on);
+        } else if r.hovered() {
+            p.rect_filled(seg, 5.0, c.hover);
+        }
+        p.galley(seg.center() - g.size() / 2.0, g, c.text);
+        if r.clicked() {
+            clicked = Some(i);
+        }
+        x += widths[i];
+    }
+    clicked
+}

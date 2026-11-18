@@ -5574,6 +5574,7 @@ dependencies = [
  "glam",
  "image",
  "pollster 1.0.2",
+ "resvg",
  "schemars",
  "serde",
  "serde_json",

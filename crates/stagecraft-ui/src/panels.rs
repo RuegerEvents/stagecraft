@@ -7,7 +7,7 @@ use stagecraft_core::{Id, Layer};
 use crate::app::Studio;
 use crate::i18n::{t, tf};
 use crate::state::{FileRequest, Tool, View};
-use crate::widgets::{self, Icon, button, edit_field, icon_button};
+use crate::widgets::{self, Icon, edit_field, icon_button};
 
 /// Room the macOS window buttons take at the toolbar's left with the inset title bar.
 pub const TRAFFIC_LIGHTS: f32 = 72.0;
@@ -30,68 +30,179 @@ pub fn save(s: &mut Studio, save_as: bool) {
     }
 }
 
+/// Height of the tool/title bar.
+pub const BAR_HEIGHT: f32 = 40.0;
+const TOOL_BUTTON: egui::Vec2 = egui::vec2(30.0, 28.0);
+const TOOL_ICON: f32 = 18.0;
+
+/// The tool groups of the toolbar, in order; Calibrate only with an underlay.
+pub fn tool_groups(s: &Studio) -> Vec<Vec<Tool>> {
+    if s.ui.view == View::Sheets {
+        return Vec::new();
+    }
+    let underlays = s.engine.doc().objects.values().any(|o| o.kind.type_name() == "underlay");
+    let mut draw = vec![Tool::Floor, Tool::Wall, Tool::Dimension];
+    if underlays || s.ui.tool == Tool::Calibrate {
+        draw.push(Tool::Calibrate);
+    }
+    vec![
+        vec![Tool::Select, Tool::Move, Tool::Rotate],
+        draw,
+        vec![Tool::Truss, Tool::Run, Tool::Fixture],
+        vec![Tool::Batten, Tool::Curtain, Tool::Proscenium, Tool::Wings],
+        vec![Tool::Platform, Tool::Support, Tool::Hoist, Tool::Ceiling],
+    ]
+}
+
+/// "Wall (W)": what a tool's tooltip says.
+pub fn tool_tip(tool: Tool) -> String {
+    let label = t(tool.key());
+    match tool.shortcut() {
+        Some(k) => tf("tool.tip", &[("tool", &label), ("key", &format!("{k:?}"))]),
+        None => label.to_owned(),
+    }
+}
+
+fn icon_style(c: &crate::theme::Chrome) -> craft_ui::buttons::IconButtonStyle {
+    use craft_ui::buttons::{ButtonVisuals, IconButtonStyle};
+    let v = |fill, icon| ButtonVisuals { fill, stroke: egui::Stroke::NONE, icon };
+    IconButtonStyle {
+        normal: v(egui::Color32::TRANSPARENT, c.icon),
+        hovered: v(c.hover, c.text),
+        pressed: Some(v(c.pressed, c.text)),
+        selected: v(c.accent, c.on_accent),
+        corner_radius: egui::CornerRadius::same(6),
+        focus_stroke: egui::Stroke::new(1.5, c.accent),
+    }
+}
+
+/// One icon button: icon, tooltip "Name (key)", accessible name "Tool Name".
+fn tool_button(ui: &mut Ui, s: &mut Studio, tool: Tool, style: &craft_ui::buttons::IconButtonStyle) {
+    let label = t(tool.key());
+    let a11y = tf("a11y.tool", &[("tool", &label)]);
+    let r = ui
+        .push_id(("tool", tool.key()), |ui| {
+            craft_ui::buttons::IconButton::new(&a11y, TOOL_BUTTON, style)
+                .selected(s.ui.tool == tool)
+                .show(ui, |ui, rect, colour| {
+                    crate::icons::paint(ui, rect, crate::icons::tool_icon(tool), TOOL_ICON, colour)
+                })
+        })
+        .inner;
+    if r.on_hover_text(tool_tip(tool)).clicked() {
+        let _ = s.run("ui.set_tool", json!({ "tool": tool }));
+    }
+}
+
+fn group_width(n: usize, spacing: f32) -> f32 {
+    n as f32 * TOOL_BUTTON.x + n.saturating_sub(1) as f32 * spacing
+}
+
+/// The tool/title bar: tool groups (the ones that do not fit go into a » menu), the view
+/// switch and the command palette.
 pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
-    ui.add_space(3.0);
+    let c = crate::theme::chrome(ui.visuals().dark_mode);
+    let bar = ui.max_rect();
     if s.ui.inset_title_bar {
         // The strip is the window's title bar: drags on its empty parts move the window.
-        let strip = ui.max_rect();
-        craft_window::title_bar::empty_area(ui, strip);
+        craft_window::title_bar::empty_area(ui, bar);
     }
-    ui.horizontal(|ui| {
-        if s.ui.inset_title_bar {
-            ui.add_space(TRAFFIC_LIGHTS);
+    let style = icon_style(&c);
+    let groups = tool_groups(s);
+    let spacing = 2.0;
+    let gap = 13.0;
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().item_spacing.x = spacing;
+        ui.add_space(if s.ui.inset_title_bar { TRAFFIC_LIGHTS } else { 6.0 });
+        // The right end: view switch and palette, measured first so the tools know their room.
+        let right = 300.0;
+        let avail = (ui.available_width() - right).max(0.0);
+        let widths: Vec<f32> = groups.iter().map(|g| group_width(g.len(), spacing) + gap).collect();
+        let fit = craft_ui::layout::fit_toolbar(&widths, avail, 0.0, TOOL_BUTTON.x + gap).unwrap_or_else(|| {
+            craft_ui::layout::ToolbarFit { overflow: (0..groups.len()).collect(), ..Default::default() }
+        });
+        for (n, (i, _)) in fit.shown.iter().enumerate() {
+            if n > 0 {
+                separator(ui, &c, gap);
+            }
+            for &tool in &groups[*i] {
+                tool_button(ui, s, tool, &style);
+            }
         }
-        let groups: Vec<&[Tool]> =
-            if s.ui.view == View::Sheets { Vec::new() } else { vec![&Tool::DRAW[..], &Tool::STAGE[..]] };
-        // Calibrate only matters with an underlay in the document.
-        let underlays = s.engine.doc().objects.values().any(|o| o.kind.type_name() == "underlay");
-        ui.spacing_mut().item_spacing.x = 5.0;
-        for (i, group) in groups.into_iter().enumerate() {
-            if i > 0 {
-                ui.separator();
+        if !fit.overflow.is_empty() {
+            if !fit.shown.is_empty() {
+                separator(ui, &c, gap);
             }
-            for &tool in group {
-                if tool == Tool::Calibrate && !underlays && s.ui.tool != Tool::Calibrate {
-                    continue;
-                }
-                let label = t(tool.key());
-                let r = ui.selectable_label(s.ui.tool == tool, label);
-                widgets::name(&r, Role::Button, tf("a11y.tool", &[("tool", &label)]));
-                let tip = match tool.shortcut() {
-                    Some(k) => tf("tool.tip", &[("tool", &label), ("key", &format!("{k:?}"))]),
-                    None => label.to_owned(),
-                };
-                if r.on_hover_text(tip).clicked() {
-                    let _ = s.run("ui.set_tool", json!({ "tool": tool }));
-                }
-            }
+            let more: Vec<Tool> = fit.overflow.iter().flat_map(|i| groups[*i].iter().copied()).collect();
+            overflow_menu(ui, s, &more, &style);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if button(ui, t("palette.button"), "Command palette").clicked() {
+            ui.add_space(8.0);
+            let search = t("palette.search_tip");
+            let r = craft_ui::buttons::IconButton::new("Command palette", TOOL_BUTTON, &style)
+                .show(ui, |ui, rect, colour| crate::icons::paint(ui, rect, "search", 17.0, colour));
+            if r.on_hover_text(search).clicked() {
                 s.ui.palette.open();
             }
-            ui.separator();
-            for (view, key) in [
-                (View::Sheets, "view.sheets"),
-                (View::Split, "view.split"),
-                (View::ThreeD, "view.3d"),
+            ui.add_space(6.0);
+            let views = [
                 (View::Plan, "view.plan"),
-            ] {
-                let label = t(key);
-                let r = ui.selectable_label(s.ui.view == view, label);
-                widgets::name(&r, Role::Button, tf("a11y.view", &[("view", &label)]));
-                if r.clicked() {
-                    let _ = s.run("ui.set_view", json!({ "view": view }));
-                }
+                (View::ThreeD, "view.3d"),
+                (View::Split, "view.split"),
+                (View::Sheets, "view.sheets"),
+            ];
+            let items: Vec<(String, String, bool)> = views
+                .iter()
+                .map(|(v, key)| {
+                    let label = t(key).to_owned();
+                    (label.clone(), tf("a11y.view", &[("view", &label)]), s.ui.view == *v)
+                })
+                .collect();
+            if let Some(i) = crate::widgets::segmented(ui, &c, &items) {
+                let _ = s.run("ui.set_view", json!({ "view": views[i].0 }));
             }
         });
     });
-    if s.ui.view == View::Sheets {
-        ui.label(RichText::new(t("hint.sheets")).weak());
-    } else {
-        ui.horizontal(|ui| tool_options(ui, s));
-    }
-    ui.add_space(3.0);
+}
+
+fn separator(ui: &mut Ui, c: &crate::theme::Chrome, gap: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(gap, 20.0), egui::Sense::hover());
+    ui.painter().vline(rect.center().x.round() + 0.5, rect.y_range(), egui::Stroke::new(1.0, c.separator));
+}
+
+/// The tools that did not fit, as a menu of icons with names.
+fn overflow_menu(ui: &mut Ui, s: &mut Studio, tools: &[Tool], style: &craft_ui::buttons::IconButtonStyle) {
+    let r = craft_ui::buttons::IconButton::new("More tools", TOOL_BUTTON, style).show(ui, |ui, rect, colour| {
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "»", egui::FontId::proportional(16.0), colour);
+    });
+    let r = r.on_hover_text(t("toolbar.more"));
+    egui::Popup::menu(&r).show(|ui| {
+        for &tool in tools {
+            let label = t(tool.key());
+            let text = match tool.shortcut() {
+                Some(k) => format!("{label}    {k:?}"),
+                None => label.to_owned(),
+            };
+            let b = ui.add(egui::Button::selectable(s.ui.tool == tool, text));
+            crate::widgets::name(&b, Role::Button, format!("Menu tool {label}"));
+            if b.clicked() {
+                let _ = s.run("ui.set_tool", json!({ "tool": tool }));
+                ui.close();
+            }
+        }
+    });
+}
+
+/// The row under the tool bar: the active tool's options and what it expects next.
+pub fn options_bar(ui: &mut Ui, s: &mut Studio) {
+    ui.horizontal_centered(|ui| {
+        ui.add_space(4.0);
+        if s.ui.view == View::Sheets {
+            ui.label(RichText::new(t("hint.sheets")).color(crate::theme::chrome(ui.visuals().dark_mode).text2));
+        } else {
+            tool_options(ui, s);
+        }
+    });
 }
 
 fn tool_options(ui: &mut Ui, s: &mut Studio) {
@@ -189,7 +300,7 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
     ) {
         ui.separator();
     }
-    ui.label(RichText::new(t(hint_key(s.ui.tool))).weak());
+    ui.label(RichText::new(t(hint_key(s.ui.tool))).color(crate::theme::chrome(ui.visuals().dark_mode).text2));
 }
 
 fn mm_option(ui: &mut Ui, s: &mut Studio, label: &str, field: &str, value: f64) {
