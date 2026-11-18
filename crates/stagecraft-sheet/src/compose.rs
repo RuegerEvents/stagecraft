@@ -6,9 +6,11 @@ use std::collections::{BTreeMap, HashMap};
 
 use glam::DVec3;
 use stagecraft_core::model::{Document, Object, ObjectKind};
+use stagecraft_core::sheet::text::tr;
 use stagecraft_core::sheet::{
     LabelTemplate, Sheet, Side, TagLines, TextAlign, TitleBlock, TitleItem, ViewKind, Viewport, base64_decode,
 };
+use stagecraft_core::units::{Language, LengthFormat};
 use stagecraft_core::{Id, geom};
 use stagecraft_geom::section::Plane;
 use stagecraft_geom::{Detail, FillClass, LineClass, MaterialClass, PlanPrim, PlanStyle, TextAnchor, math};
@@ -20,6 +22,12 @@ use crate::view::{EdgeClass, VectorViewSource, ViewOptions, ViewSpec};
 
 /// Distance of the frame from the paper edge, mm.
 pub const MARGIN: f64 = 10.0;
+/// Zoned borders: the outer line's distance from the paper edge, mm.
+pub const ZONE_OUTER: f64 = 5.0;
+/// Zoned borders: the inner frame's distance from the paper edge, mm.
+pub const ZONE_INNER: f64 = 13.0;
+/// Zoned borders aim at zones about this size, mm.
+pub const ZONE_SIZE: f64 = 140.0;
 /// Size of a rendered viewport without a crop, paper mm.
 pub const RENDERED_SIZE: P2 = [180.0, 120.0];
 
@@ -470,7 +478,7 @@ fn compose_viewport(doc: &Document, vp: &Viewport, inputs: &Inputs) -> Option<Co
                 inner.push(Prim::line([rect[0][0], rect[1][1]], [rect[1][0], rect[0][1]], grey));
                 let mut t = Prim::text(
                     [(rect[0][0] + rect[1][0]) / 2.0, (rect[0][1] + rect[1][1]) / 2.0],
-                    "3D view — rendered in the app",
+                    tr(doc.meta.sheet_language, "rendered_placeholder"),
                     3.0,
                 );
                 if let Prim::Text { h, v, color, .. } = &mut t {
@@ -509,7 +517,7 @@ pub const DIM_TEXT: f64 = 2.0;
 /// The dimensions a plan viewport shows, in world mm, sized for its scale.
 pub fn viewport_dims(doc: &Document, vp: &Viewport) -> Vec<stagecraft_geom::dims::DimDraw> {
     let shown = |l: &Id| !vp.hidden_layers.contains(l) && doc.layers.get(l).is_some_and(|l| l.visible);
-    let st = stagecraft_geom::dims::DimStyle::for_scale(1.0 / vp.scale, 1.2);
+    let st = stagecraft_geom::dims::DimStyle::for_scale(1.0 / vp.scale, 1.2).with_format(LengthFormat::of(&doc.meta));
     let mut dims = Vec::new();
     if vp.sketch_dimensions {
         for (layer, s) in doc.sketches.iter().filter(|(l, _)| shown(l)) {
@@ -551,12 +559,13 @@ pub fn scale_bar_step(scale: f64) -> f64 {
     steps.iter().copied().find(|s| s / scale >= 8.0).unwrap_or(100000.0)
 }
 
-fn metres(mm: f64) -> String {
+fn metres(mm: f64, f: &LengthFormat) -> String {
     let m = mm / 1000.0;
-    if (m - m.round()).abs() < 1e-9 { format!("{m:.0}") } else { format!("{m}") }
+    f.number(&if (m - m.round()).abs() < 1e-9 { format!("{m:.0}") } else { format!("{m}") })
 }
 
-fn viewport_title(vp: &Viewport, rect: [P2; 2], out: &mut Vec<Prim>) {
+fn viewport_title(doc: &Document, vp: &Viewport, rect: [P2; 2], out: &mut Vec<Prim>) {
+    let f = LengthFormat::of(&doc.meta);
     if !vp.show_title {
         return;
     }
@@ -587,7 +596,7 @@ fn viewport_title(vp: &Viewport, rect: [P2; 2], out: &mut Vec<Prim>) {
             out.push(Prim::rect(a, b, Some(Pen::solid(0.18)), Some(fill)));
         }
         for i in [0, 2, 4] {
-            let mut t = Prim::text([x0 + seg * i as f64, y0 + h + 1.0], metres(step * i as f64), 1.6);
+            let mut t = Prim::text([x0 + seg * i as f64, y0 + h + 1.0], metres(step * i as f64, &f), 1.6);
             if let Prim::Text { h, .. } = &mut t {
                 *h = HAlign::Center;
             }
@@ -618,7 +627,19 @@ pub fn fixture_type(doc: &Document, o: &Object) -> String {
 }
 
 fn fixture_table(doc: &Document, vp: &Viewport) -> (Vec<Prim>, [P2; 2]) {
-    let cols = ["FID", "Name", "Type", "Mode", "Ch", "Address", "Gel", "Circuit", "Note"];
+    let lang = doc.meta.sheet_language;
+    let cols = [
+        "col_fid",
+        "col_name",
+        "col_type",
+        "col_mode",
+        "col_channels",
+        "col_address",
+        "col_gel",
+        "col_circuit",
+        "col_note",
+    ]
+    .map(|k| tr(lang, k));
     let rows: Vec<[String; 9]> = fixtures_of(doc, vp)
         .into_iter()
         .map(|o| {
@@ -684,27 +705,82 @@ pub fn placeholders(doc: &Document, sheet: &Sheet) -> Vec<(&'static str, String)
             }
         }
     }
+    let lang = m.sheet_language;
+    // Sheet number and revision (and the drawing date when production dates take
+    // its place) for one small line.
+    let mut sheet_rev = Vec::new();
+    if !sheet.number.is_empty() {
+        sheet_rev.push(format!("{} {}", tr(lang, "sheet"), sheet.number));
+    }
+    if !m.revision.is_empty() {
+        sheet_rev.push(format!("{} {}", tr(lang, "revision"), m.revision));
+    }
+    if !m.production_dates.is_empty() && !m.date.is_empty() {
+        sheet_rev.push(m.date.clone());
+    }
     vec![
         ("project", m.project.clone()),
         ("venue", m.venue.clone()),
+        ("venue_address", m.venue_address.clone()),
         ("drawn_by", m.drawn_by.clone()),
         ("date", m.date.clone()),
+        ("production_dates", m.production_dates.clone()),
         ("scale", scales.join(", ")),
         ("revision", m.revision.clone()),
         ("sheet_name", sheet.name.clone()),
         ("sheet_number", sheet.number.clone()),
+        ("sheet_rev", sheet_rev.join("  ·  ")),
         ("company", m.company.clone()),
+        ("website", m.website.clone()),
         ("paper", sheet.paper.name()),
     ]
 }
 
-/// `{key}` replaced by its value.
+/// `{key}` replaced by its value, `{a|b}` by `b` when `a` is empty, `{t:key}` by the
+/// sheet-text catalog's word in English. Unknown keys stay as they are.
 pub fn fill(text: &str, values: &[(&str, String)]) -> String {
-    let mut s = text.to_owned();
-    for (k, v) in values {
-        s = s.replace(&format!("{{{k}}}"), v);
+    fill_in(text, values, Language::En)
+}
+
+/// [`fill`] with catalog words in `lang`.
+pub fn fill_in(text: &str, values: &[(&str, String)], lang: Language) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('{') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('}') else {
+            out.push_str(&rest[start..]);
+            rest = "";
+            break;
+        };
+        let key = &after[..end];
+        if let Some(k) = key.strip_prefix("t:") {
+            out.push_str(tr(lang, k));
+        } else {
+            let mut known = false;
+            let mut value = "";
+            for k in key.split('|') {
+                if let Some((_, v)) = values.iter().find(|(n, _)| *n == k) {
+                    known = true;
+                    if !v.trim().is_empty() {
+                        value = v;
+                        break;
+                    }
+                }
+            }
+            if known {
+                out.push_str(value);
+            } else {
+                out.push('{');
+                out.push_str(key);
+                out.push('}');
+            }
+        }
+        rest = &after[end + 1..];
     }
-    s.trim().to_owned()
+    out.push_str(rest);
+    out.trim().to_owned()
 }
 
 fn title_block(doc: &Document, sheet: &Sheet, tb: &TitleBlock, origin: P2, out: &mut Vec<Prim>) {
@@ -717,9 +793,42 @@ fn title_block(doc: &Document, sheet: &Sheet, tb: &TitleBlock, origin: P2, out: 
             TitleItem::Rect { min, max, weight } => {
                 out.push(Prim::rect(at(*min), at(*max), Some(Pen::solid(*weight)), None))
             }
-            TitleItem::Text { pos, text, size, bold, align } => {
-                let s = fill(text, &values);
+            TitleItem::Text { pos, text, size, bold, align, wrap, max_lines, upward } => {
+                let s = fill_in(text, &values, doc.meta.sheet_language);
                 if s.is_empty() {
+                    continue;
+                }
+                let h = match align {
+                    TextAlign::Left => HAlign::Left,
+                    TextAlign::Center => HAlign::Center,
+                    TextAlign::Right => HAlign::Right,
+                };
+                if wrap.is_some() || s.contains('\n') {
+                    let width = wrap.unwrap_or(f64::INFINITY).min(tb.width - pos[0]).max(1.0);
+                    let mut size = *size;
+                    let mut lines = crate::fonts::wrap(&s, size, *bold, width);
+                    let max = max_lines.map_or(usize::MAX, |m| m.max(1) as usize);
+                    while (lines.len() > max || lines.iter().any(|l| text_width(l, size, *bold) > width)) && size > 0.6
+                    {
+                        size *= 0.93;
+                        lines = crate::fonts::wrap(&s, size, *bold, width);
+                    }
+                    let lines: Vec<String> = lines.into_iter().filter(|l| !l.trim().is_empty()).take(max).collect();
+                    let pitch = size * 1.42;
+                    let n = lines.len();
+                    for (k, line) in lines.into_iter().enumerate() {
+                        let dy = if *upward { (n - 1 - k) as f64 * pitch } else { -(k as f64) * pitch };
+                        out.push(Prim::Text {
+                            pos: at([pos[0], pos[1] + dy]),
+                            text: line,
+                            size,
+                            angle: 0.0,
+                            h,
+                            v: VAlign::Baseline,
+                            bold: *bold,
+                            color: Rgb::BLACK,
+                        });
+                    }
                     continue;
                 }
                 // Shrink text that would run into the next cell.
@@ -750,11 +859,7 @@ fn title_block(doc: &Document, sheet: &Sheet, tb: &TitleBlock, origin: P2, out: 
                     text: s,
                     size,
                     angle: 0.0,
-                    h: match align {
-                        TextAlign::Left => HAlign::Left,
-                        TextAlign::Center => HAlign::Center,
-                        TextAlign::Right => HAlign::Right,
-                    },
+                    h,
                     v: VAlign::Baseline,
                     bold: *bold,
                     color: Rgb::BLACK,
@@ -794,31 +899,39 @@ fn legend(doc: &Document, sheet: &Sheet, right: f64, bottom: f64, width: f64, ou
     if counts.is_empty() {
         return;
     }
-    let row = 8.0;
-    let h = row * (counts.len() as f64 + 1.0) + 2.0;
+    let lang = doc.meta.sheet_language;
+    // Same thin black style as the compact title block, which it sits on.
+    let (head, row, text) = (6.0, 7.0, 1.6);
+    let h = head + row * counts.len() as f64;
     let min = [right - width, bottom];
     let max = [right, bottom + h];
-    out.push(Prim::rect(min, max, Some(Pen::solid(0.35)), Some(Rgb::WHITE)));
-    let mut t = Prim::text([min[0] + 3.0, max[1] - 5.5], "LEGEND", 2.2);
+    out.push(Prim::rect(min, max, Some(Pen::solid(0.25)), Some(Rgb::WHITE)));
+    out.push(Prim::line([min[0], max[1] - head], [max[0], max[1] - head], Pen::solid(0.18)));
+    let mut t = Prim::text([min[0] + 1.2, max[1] - head + 1.9], tr(lang, "legend"), 2.1);
     if let Prim::Text { bold, .. } = &mut t {
         *bold = true;
     }
     out.push(t);
     let total: usize = counts.values().map(|c| c.0).sum();
-    let mut tt = Prim::text([max[0] - 3.0, max[1] - 5.5], format!("{total} fixtures"), 1.8);
+    let word = tr(lang, if total == 1 { "fixture" } else { "fixtures" });
+    let mut tt = Prim::text([max[0] - 1.2, max[1] - head + 1.9], format!("{total} {word}"), 1.4);
     if let Prim::Text { h, .. } = &mut tt {
         *h = HAlign::Right;
     }
     out.push(tt);
     for (i, (name, (n, example, footprint))) in counts.iter().enumerate() {
-        let y = max[1] - row * (i as f64 + 2.0) - 0.5;
-        legend_symbol(doc, *example, [min[0] + 6.5, y + 2.4], out);
+        let y = max[1] - head - row * (i as f64 + 1.0);
+        legend_symbol(doc, *example, [min[0] + 6.0, y + row / 2.0], out);
         let mut label = name.clone();
         if let Some(fp) = footprint {
-            label = format!("{label}  ({fp} ch)");
+            label = format!("{label}  ({fp} {})", tr(lang, "channels"));
         }
-        out.push(Prim::text([min[0] + 13.0, y + 1.6], label, 2.2));
-        let mut c = Prim::text([max[0] - 3.0, y + 1.6], format!("× {n}"), 2.2);
+        let count = format!("× {n}");
+        let room = width - 12.0 - 3.0 - text_width(&count, text, false) - 3.0;
+        let w = text_width(&label, text, false);
+        let size = if w > room && room > 0.0 { text * room / w } else { text };
+        out.push(Prim::text([min[0] + 12.0, y + row / 2.0 - text / 2.0], label, size));
+        let mut c = Prim::text([max[0] - 1.2, y + row / 2.0 - text / 2.0], count, text);
         if let Prim::Text { h, .. } = &mut c {
             *h = HAlign::Right;
         }
@@ -826,22 +939,80 @@ fn legend(doc: &Document, sheet: &Sheet, right: f64, bottom: f64, width: f64, ou
     }
 }
 
-/// A fixture type's plan symbol fitted into a 9 × 7 mm box at `c` (paper mm), front up.
+/// The sheet border with grid reference zones: an outer and an inner line, numbers
+/// across top and bottom, letters down both sides (A at the top), as on Vectorworks
+/// sheets.
+fn zoned_border(w: f64, h: f64, out: &mut Vec<Prim>) {
+    let (o, i) = (ZONE_OUTER, ZONE_INNER);
+    let thin = Pen::solid(0.18);
+    out.push(Prim::rect([o, o], [w - o, h - o], Some(thin.clone()), None));
+    out.push(Prim::rect([i, i], [w - i, h - i], Some(Pen::solid(0.25)), None));
+    let (iw, ih) = (w - 2.0 * i, h - 2.0 * i);
+    let nx = ((iw / ZONE_SIZE).round() as usize).max(2);
+    let ny = ((ih / ZONE_SIZE).round() as usize).max(2);
+    let band = (o + i) / 2.0;
+    let mark = |pos: P2, text: String, out: &mut Vec<Prim>| {
+        out.push(Prim::Text {
+            pos,
+            text,
+            size: 2.8,
+            angle: 0.0,
+            h: HAlign::Center,
+            v: VAlign::Middle,
+            bold: false,
+            color: Rgb::BLACK,
+        })
+    };
+    for k in 0..nx {
+        let x0 = i + iw * k as f64 / nx as f64;
+        if k > 0 {
+            out.push(Prim::line([x0, o], [x0, i], thin.clone()));
+            out.push(Prim::line([x0, h - i], [x0, h - o], thin.clone()));
+        }
+        let xc = x0 + iw / nx as f64 / 2.0;
+        mark([xc, h - band], (k + 1).to_string(), out);
+        mark([xc, band], (k + 1).to_string(), out);
+    }
+    for k in 0..ny {
+        let y0 = h - i - ih * k as f64 / ny as f64;
+        if k > 0 {
+            out.push(Prim::line([o, y0], [i, y0], thin.clone()));
+            out.push(Prim::line([w - i, y0], [w - o, y0], thin.clone()));
+        }
+        let yc = y0 - ih / ny as f64 / 2.0;
+        let letter = zone_letter(k);
+        mark([band, yc], letter.clone(), out);
+        mark([w - band, yc], letter, out);
+    }
+}
+
+/// A, B … Z, AA, AB …
+fn zone_letter(k: usize) -> String {
+    let a = (b'A' + (k % 26) as u8) as char;
+    if k < 26 { a.to_string() } else { format!("{}{a}", zone_letter(k / 26 - 1)) }
+}
+
+/// Distance of the drawing frame from the paper edge for a title block's border.
+pub fn frame_inset(tb: &TitleBlock) -> f64 {
+    if tb.zones { ZONE_INNER } else { MARGIN }
+}
+
+/// A fixture type's plan symbol fitted into an 8 × 5.6 mm box at `c` (paper mm), front up.
 fn legend_symbol(doc: &Document, fixture: Id, c: P2, out: &mut Vec<Prim>) {
     let Some(o) = doc.objects.get(&fixture) else { return };
     let Some(sym) = stagecraft_geom::gdtf::symbol(doc, o) else {
         // The generic box.
         out.push(Prim::rect(
-            [c[0] - 2.6, c[1] - 3.4],
-            [c[0] + 2.6, c[1] + 3.4],
+            [c[0] - 2.0, c[1] - 2.6],
+            [c[0] + 2.0, c[1] + 2.6],
             Some(Pen::solid(0.35)),
             Some(Rgb::WHITE),
         ));
-        out.push(Prim::line([c[0] - 2.6, c[1] + 2.6], [c[0] + 2.6, c[1] + 2.6], Pen::solid(0.5)));
+        out.push(Prim::line([c[0] - 2.0, c[1] + 2.0], [c[0] + 2.0, c[1] + 2.0], Pen::solid(0.35)));
         return;
     };
     let (lo, hi) = sym.bounds;
-    let k = (9.0 / (hi[0] - lo[0]).max(1e-6)).min(7.0 / (hi[1] - lo[1]).max(1e-6));
+    let k = (8.0 / (hi[0] - lo[0]).max(1e-6)).min(5.6 / (hi[1] - lo[1]).max(1e-6));
     let mid = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
     let map = |p: &P2| [c[0] + (p[0] - mid[0]) * k, c[1] + (p[1] - mid[1]) * k];
     let pen = |l: LineClass| {
@@ -879,22 +1050,27 @@ pub fn compose(doc: &Document, sheet: Id, inputs: &Inputs) -> Option<Page> {
     for vp in &sheet.viewports {
         let Some(c) = compose_viewport(doc, vp, inputs) else { continue };
         prims.extend(c.prims);
-        viewport_title(vp, c.rect, &mut prims);
+        viewport_title(doc, vp, c.rect, &mut prims);
         viewports.push(ViewportHit { id: vp.id, min: c.rect[0], max: c.rect[1] });
         labels.extend(c.labels);
     }
-    prims.push(Prim::rect([MARGIN, MARGIN], [w - MARGIN, h - MARGIN], Some(Pen::solid(0.7)), None));
-    let generic = TitleBlock::generic();
-    let tb = sheet.title_block.and_then(|t| doc.title_blocks.get(&t)).unwrap_or(&generic);
-    let (tb_w, tb_top) = if sheet.show_title_block {
-        let origin = [w - MARGIN - tb.width, MARGIN];
-        title_block(doc, sheet, tb, origin, &mut prims);
-        (tb.width, MARGIN + tb.height)
+    let tb = TitleBlock::for_sheet(doc, sheet);
+    let inset = frame_inset(&tb);
+    if tb.zones {
+        zoned_border(w, h, &mut prims);
     } else {
-        (180.0, MARGIN)
+        prims.push(Prim::rect([MARGIN, MARGIN], [w - MARGIN, h - MARGIN], Some(Pen::solid(0.7)), None));
+    }
+    // The legend sits directly on the title block, as wide as it.
+    let (tb_w, tb_top) = if sheet.show_title_block {
+        let origin = [w - inset - tb.width, inset];
+        title_block(doc, sheet, &tb, origin, &mut prims);
+        (tb.width, inset + tb.height)
+    } else {
+        (tb.width, inset)
     };
     if sheet.show_legend {
-        legend(doc, sheet, w - MARGIN, tb_top, tb_w, &mut prims);
+        legend(doc, sheet, w - inset, tb_top, tb_w, &mut prims);
     }
     Some(Page { size: [w, h], prims, viewports, labels })
 }

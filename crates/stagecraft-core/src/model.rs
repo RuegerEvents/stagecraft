@@ -162,6 +162,24 @@ pub struct Meta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(skip)]
     pub logo: Option<String>,
+    /// Venue address for title blocks, lines separated by `\n`.
+    #[serde(default)]
+    pub venue_address: String,
+    /// Production dates, free text (e.g. `02.05.2025 – 05.05.2025`).
+    #[serde(default)]
+    pub production_dates: String,
+    /// Website shown in title blocks.
+    #[serde(default)]
+    pub website: String,
+    /// Language of sheet text (title block labels, legend, view names). Default English.
+    #[serde(default)]
+    pub sheet_language: crate::units::Language,
+    /// How dimension values are written in plan and on sheets.
+    #[serde(default)]
+    pub dimension_format: crate::units::DimFormat,
+    /// Decimal separator of lengths; `None` = the sheet language's (en `.`, de `,`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decimal_separator: Option<char>,
 }
 
 /// A spatial layer: a storey or area. Root objects on it sit at its elevation.

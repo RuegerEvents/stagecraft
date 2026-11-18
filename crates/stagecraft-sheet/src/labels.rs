@@ -331,7 +331,7 @@ pub fn field_value(doc: &Document, o: &Object, field: &str) -> String {
 }
 
 /// A fixture's type for labels, legends and lists: the library's `Manufacturer
-/// Name`, else the stored key, else "Generic fixture".
+/// Name`, else the stored key, else "Generic fixture" in the sheet language.
 pub fn type_name(doc: &Document, o: &Object) -> String {
     match &o.kind {
         ObjectKind::Fixture { gdtf: Some(g), .. } => match doc.fixture_types.get(g) {
@@ -341,7 +341,7 @@ pub fn type_name(doc: &Document, o: &Object) -> String {
                 base.strip_suffix(".gdtf").unwrap_or(base).replace(['_', '@'], " ")
             }
         },
-        _ => "Generic fixture".into(),
+        _ => stagecraft_core::sheet::text::tr(doc.meta.sheet_language, "generic_fixture").to_owned(),
     }
 }
 

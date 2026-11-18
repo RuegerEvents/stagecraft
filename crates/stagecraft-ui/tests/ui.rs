@@ -610,3 +610,26 @@ fn sheet_panel_buttons_create_sheets_and_viewports() {
     assert_eq!(h.state().ui.plan_labels, Some(t.id));
     assert!(h.state_mut().run("ui.sheet", json!({ "sheet": "nope" })).is_err());
 }
+
+/// The inspector's Document section sets the sheet language, the dimension format and
+/// the new title block fields through `doc.set_meta`.
+#[test]
+fn document_section_sets_sheet_language_and_fields() {
+    let mut h = harness(Engine::new());
+    h.get_by_label("Inspector sheet language").click();
+    h.run_steps(6);
+    h.get_by_label("Deutsch").click();
+    h.run_steps(6);
+    assert_eq!(h.state().engine.doc().meta.sheet_language, stagecraft_core::units::Language::De);
+    h.get_by_label("Inspector dimension format").click();
+    h.run_steps(6);
+    h.get_by_label("Millimetres (6155)").click();
+    h.run_steps(6);
+    assert_eq!(h.state().engine.doc().meta.dimension_format, stagecraft_core::units::DimFormat::Mm);
+    h.get_by_label("Inspector Venue address").click();
+    h.run_steps(6);
+    h.get_by_label("Inspector Venue address").type_text("1 Street / 12345 Town");
+    h.key_press(Key::Enter);
+    h.run_steps(6);
+    assert_eq!(h.state().engine.doc().meta.venue_address, "1 Street\n12345 Town");
+}

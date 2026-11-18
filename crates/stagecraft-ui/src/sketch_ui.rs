@@ -14,6 +14,7 @@ use stagecraft_core::sketch::{
     self as sk, Anchor, ConstraintState, EntityState, PointId, Sketch, SolveOptions, Status, constraint_edges,
     constraint_points, measure_edges, measure_points,
 };
+use stagecraft_core::units::{LengthFormat, SUP_SCALE, superscript_runs};
 use stagecraft_core::{Document, Id};
 use stagecraft_geom::dims::{self, DimDraw, DimSource, DimStyle};
 
@@ -165,7 +166,7 @@ pub fn visible_layers(doc: &Document) -> Vec<Id> {
 
 /// Every dimension drawn in the plan, in world mm, sized for the zoom.
 pub fn plan_dims(doc: &Document, cam: &Camera) -> Vec<DimDraw> {
-    let st = DimStyle::for_scale(cam.scale, 5.0);
+    let st = DimStyle::for_scale(cam.scale, 5.0).with_format(LengthFormat::of(&doc.meta));
     let layers = visible_layers(doc);
     let mut out = Vec::new();
     for l in &layers {
@@ -593,7 +594,7 @@ pub fn draw_dim(p: &egui::Painter, cam: &Camera, pal: &Palette, d: &DimDraw, col
     if hide_text {
         return;
     }
-    let galley = p.layout_no_wrap(d.text.clone(), theme::proportional(LABEL_PX), colour);
+    let galley = p.fonts_mut(|f| f.layout_job(dim_text_job(&d.text, LABEL_PX, colour)));
     let c = label_center(cam, d);
     let angle = -(d.rotation.to_radians()) as f32;
     let size = galley.size();
@@ -605,6 +606,22 @@ pub fn draw_dim(p: &egui::Painter, cam: &Camera, pal: &Palette, d: &DimDraw, col
         p.rect_filled(r, 2.0, pal.canvas.gamma_multiply(0.85));
     }
     p.add(TextShape::new(c + rotated, galley, colour).with_angle(angle));
+}
+
+/// A dimension value as a layout: superscript digits (`6.15⁵`) smaller and raised.
+pub fn dim_text_job(text: &str, px: f32, colour: Color32) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    for (run, sup) in superscript_runs(text) {
+        let size = if sup { px * SUP_SCALE as f32 } else { px };
+        let format = egui::TextFormat {
+            font_id: theme::proportional(size),
+            color: colour,
+            valign: if sup { egui::Align::TOP } else { egui::Align::BOTTOM },
+            ..Default::default()
+        };
+        job.append(&run, if sup { px * 0.05 } else { 0.0 }, format);
+    }
+    job
 }
 
 /// The `fixed` constraints on a point.

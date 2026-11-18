@@ -1,7 +1,8 @@
 //! Sheets, viewports, label templates, title blocks: commands and undo.
 
 use serde_json::{Value, json};
-use stagecraft_core::sheet::{LabelRotation, Orientation, Paper, Side, ViewKind};
+use stagecraft_core::sheet::{LabelRotation, Orientation, Paper, Side, TitleBlock, ViewKind};
+use stagecraft_core::units::{DimFormat, Language, LengthFormat};
 use stagecraft_core::{Engine, Id};
 
 fn run(e: &mut Engine, name: &str, args: Value) -> Value {
@@ -127,10 +128,11 @@ fn labels_templates_and_manual_offsets() {
 fn title_blocks_and_meta() {
     let mut e = Engine::new();
     let list = run(&mut e, "titleblock.list", json!(null));
-    assert_eq!(list[0]["name"], "Generic");
+    assert_eq!(list[0]["name"], "Compact");
+    assert_eq!(list[1]["name"], "Generic");
     let tb = id(&run(&mut e, "titleblock.create", json!({ "name": "Tour", "height": 40 })));
     assert_eq!(e.doc().title_blocks[&tb].height, 40.0);
-    assert!(!e.doc().title_blocks[&tb].items.is_empty(), "copied from the generic block");
+    assert!(!e.doc().title_blocks[&tb].items.is_empty(), "copied from the compact block");
     let s = id(&run(&mut e, "sheet.create", json!({ "title_block": "Tour" })));
     assert_eq!(e.doc().sheets[&s].title_block, Some(tb));
     run(&mut e, "sheet.update", json!({ "sheet": s, "title_block": "none" }));
@@ -142,6 +144,48 @@ fn title_blocks_and_meta() {
     run(&mut e, "doc.set_meta", json!({ "company": "Example Co", "date": "2026-11-18" }));
     assert_eq!(e.doc().meta.company, "Example Co");
     assert!(e.execute("doc.set_meta", json!({ "logo_file": "/no/such/file.png" })).is_err());
+
+    // The built-ins: generic by name, compact as the default; neither can change.
+    run(&mut e, "sheet.update", json!({ "sheet": s, "title_block": "generic" }));
+    assert_eq!(e.doc().sheets[&s].title_block, Some(TitleBlock::GENERIC_ID));
+    assert_eq!(TitleBlock::for_sheet(e.doc(), &e.doc().sheets[&s]).name, "Generic");
+    run(&mut e, "sheet.update", json!({ "sheet": s, "title_block": "Compact" }));
+    assert_eq!(e.doc().sheets[&s].title_block, None);
+    assert!(TitleBlock::for_sheet(e.doc(), &e.doc().sheets[&s]).zones);
+    assert!(e.execute("titleblock.update", json!({ "template": "Generic", "width": 100 })).is_err());
+    assert!(e.execute("titleblock.delete", json!({ "template": "Compact" })).is_err());
+    assert!(e.execute("titleblock.create", json!({ "name": "compact" })).is_err());
+    let g = id(&run(&mut e, "titleblock.create", json!({ "name": "Mine", "from": "generic" })));
+    assert!(!e.doc().title_blocks[&g].zones);
+}
+
+#[test]
+fn sheet_language_and_dimension_format() {
+    let mut e = Engine::new();
+    let s = id(&run(&mut e, "sheet.create", json!({})));
+    run(&mut e, "viewport.create", json!({ "sheet": s, "view": "plan" }));
+    run(&mut e, "viewport.create", json!({ "sheet": s, "view": "front", "name": "My front" }));
+    assert_eq!(e.doc().meta.sheet_language, Language::En);
+    let r = run(
+        &mut e,
+        "doc.set_meta",
+        json!({ "sheet_language": "de", "venue_address": "Street 1\nTown", "production_dates": "1.–3. Mai",
+                "website": "example.org" }),
+    );
+    assert_eq!(r["sheet_language"], "de");
+    let names: Vec<_> = e.doc().sheets[&s].viewports.iter().map(|v| v.name.clone()).collect();
+    assert_eq!(names, ["Grundriss", "My front"], "default names follow the language, own names stay");
+    let f = LengthFormat::of(&e.doc().meta);
+    assert_eq!(f.length(6155.0), "6,15⁵", "German defaults to a comma");
+    run(&mut e, "viewport.create", json!({ "sheet": s, "view": "section_y" }));
+    assert!(e.doc().sheets[&s].viewports.iter().any(|v| v.name == "Schnitt"));
+    run(&mut e, "doc.set_meta", json!({ "decimal_separator": ".", "dimension_format": "m" }));
+    assert_eq!(LengthFormat::of(&e.doc().meta).length(6155.0), "6.155 m");
+    assert!(e.execute("doc.set_meta", json!({ "decimal_separator": ";" })).is_err());
+    assert!(e.execute("doc.set_meta", json!({ "dimension_format": "feet" })).is_err());
+    run(&mut e, "history.undo", json!({}));
+    assert_eq!(e.doc().meta.dimension_format, DimFormat::MSupMm);
+    assert_eq!(e.doc().meta.website, "example.org");
 }
 
 #[test]

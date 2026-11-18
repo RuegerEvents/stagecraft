@@ -87,7 +87,11 @@ fn a_sheet_has_frame_title_block_viewports_labels_and_legend() {
     assert_eq!(page.viewports.len(), 4);
     let mut t = Vec::new();
     texts(&page.prims, &mut t);
-    for want in ["Test show", "Hall", "Lighting plan", "L-1", "1:50, 1:100", "2026-11-18 A", "LEGEND", "× 7"] {
+    // The compact block (the default): venue stands in for the missing address, the
+    // date for the missing production dates.
+    for want in
+        ["Test show", "Hall", "Lighting plan", "Sheet L-1  ·  Rev. A", "1:50, 1:100", "2026-11-18", "Legend", "× 7"]
+    {
         assert!(t.iter().any(|x| x == want), "missing `{want}` in {t:?}");
     }
     // Labels: FIDs, gels and addresses of the hung fixtures.
@@ -116,6 +120,80 @@ fn a_sheet_has_frame_title_block_viewports_labels_and_legend() {
     for v in &page.viewports {
         assert!(v.min[0] >= 10.0 && v.min[1] >= 10.0 && v.max[0] <= 410.0 && v.max[1] <= 287.0, "{v:?}");
     }
+    // Zoned border: 1–3 across, A–B down, each twice.
+    for want in ["1", "2", "3", "A", "B"] {
+        assert!(t_count(&page.prims, want) >= 2, "zone {want}");
+    }
+}
+
+fn t_count(prims: &[Prim], want: &str) -> usize {
+    let mut t = Vec::new();
+    texts(prims, &mut t);
+    t.iter().filter(|x| *x == want).count()
+}
+
+/// Title block fields, German sheet text, comma decimals; the generic block stays
+/// selectable; the legend sits on the title block, as wide.
+#[test]
+fn compact_block_in_german_and_the_generic_one() {
+    let (mut e, s) = rig();
+    run(
+        &mut e,
+        "doc.set_meta",
+        json!({ "project": "A long production name that has to wrap onto a second line", "company": "Example Lighting GmbH",
+                "website": "example.org", "venue_address": "Street 1\n12345 Town", "production_dates": "01.05.2026 – 03.05.2026",
+                "sheet_language": "de" }),
+    );
+    let rasters = Default::default();
+    let inputs = Inputs { source: &stagecraft_sheet::FallbackSource, rasters: &rasters };
+    let page = compose(e.doc(), s, &inputs).unwrap();
+    let mut t = Vec::new();
+    texts(&page.prims, &mut t);
+    for want in [
+        "Produktion",
+        "Zeichnung",
+        "Legende",
+        "Example Lighting GmbH",
+        "example.org",
+        "Street 1",
+        "12345 Town",
+        "01.05.2026 – 03.05.2026",
+        "Blatt L-1  ·  Rev. A  ·  2026-11-18",
+        "Typ",
+        "Grundriss",
+        "Ansicht vorne",
+    ] {
+        assert!(t.iter().any(|x| x == want), "missing `{want}` in {t:?}");
+    }
+    // The name wrapped: no line of it runs past the left column.
+    let name_lines: Vec<_> =
+        text_prims(&page.prims).into_iter().filter(|p| p.2 > 2.0 && p.0[0] > 300.0 && p.0[1] < 40.0).collect();
+    assert!(name_lines.len() >= 2, "{name_lines:?}");
+    // Back to English renames the default view names again.
+    run(&mut e, "doc.set_meta", json!({ "sheet_language": "en" }));
+    let mut t = Vec::new();
+    texts(&compose(e.doc(), s, &inputs).unwrap().prims, &mut t);
+    assert!(t.iter().any(|x| x == "Front elevation") && t.iter().any(|x| x == "Production"), "{t:?}");
+
+    run(&mut e, "sheet.update", json!({ "sheet": s, "title_block": "generic" }));
+    let page = compose(e.doc(), s, &inputs).unwrap();
+    let mut t = Vec::new();
+    texts(&page.prims, &mut t);
+    assert!(t.iter().any(|x| x == "Drawn by") && !t.iter().any(|x| x == "Production"), "{t:?}");
+    assert_eq!(t_count(&page.prims, "A"), 0, "no zones on the generic border");
+}
+
+/// (position, text, size) of every text.
+fn text_prims(prims: &[Prim]) -> Vec<([f64; 2], String, f64)> {
+    let mut out = Vec::new();
+    for p in prims {
+        match p {
+            Prim::Text { pos, text, size, .. } => out.push((*pos, text.clone(), *size)),
+            Prim::Clip { prims, .. } => out.extend(text_prims(prims)),
+            _ => {}
+        }
+    }
+    out
 }
 
 #[test]
@@ -260,6 +338,25 @@ fn plan_viewports_draw_sketch_and_reference_dimensions() {
     for want in ["10.00", "8.00", "(5.00)"] {
         assert!(t.iter().any(|x| x == want), "missing `{want}` in {t:?}");
     }
+    // Formats: metres with raised millimetres and a comma, plain millimetres.
+    let sk = run(&mut e, "sketch.get", Value::Null);
+    let width = sk["sketch"]["dimensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["value"].as_f64() == Some(10000.0))
+        .map(|d| d["id"].clone())
+        .expect("the 10 m dimension");
+    run(&mut e, "dimension.set_value", json!({ "id": width, "value": 10155 }));
+    run(&mut e, "doc.set_meta", json!({ "decimal_separator": "," }));
+    let mut t = Vec::new();
+    texts(&compose(e.doc(), sh, &inputs).unwrap().prims, &mut t);
+    assert!(t.iter().any(|x| x == "10,15⁵"), "{t:?}");
+    run(&mut e, "doc.set_meta", json!({ "dimension_format": "mm" }));
+    let mut t = Vec::new();
+    texts(&compose(e.doc(), sh, &inputs).unwrap().prims, &mut t);
+    assert!(t.iter().any(|x| x == "10155"), "{t:?}");
+    run(&mut e, "doc.set_meta", json!({ "dimension_format": "m_sup_mm", "decimal_separator": "auto" }));
     if let Ok(dir) = std::env::var("STAGECRAFT_SHEETS") {
         std::fs::create_dir_all(&dir).unwrap();
         run(&mut e, "sheet.export_pdf", json!({ "path": format!("{dir}/room-dimensions.pdf"), "sheet": sh }));

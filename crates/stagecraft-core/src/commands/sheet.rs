@@ -53,15 +53,20 @@ pub(super) fn register(r: &mut Registry) {
         "Drag a fixture's label in one viewport by hand (offset in paper mm), or reset it",
         label_move,
     );
-    r.add("titleblock.list", Kind::Query, "Title block templates, the built-in generic one first", tb_list);
+    r.add(
+        "titleblock.list",
+        Kind::Query,
+        "Title block templates: the built-in compact (default) and generic ones, then the document's",
+        tb_list,
+    );
     r.add(
         "titleblock.create",
         Kind::Edit,
-        "Create a title block template (a copy of the generic one by default)",
+        "Create a title block template (a copy of the compact one by default)",
         tb_create,
     );
     r.add("titleblock.update", Kind::Edit, "Change a title block template's name, size or items", tb_update);
-    r.add("titleblock.delete", Kind::Edit, "Delete a title block template; its sheets use the generic one", tb_delete);
+    r.add("titleblock.delete", Kind::Edit, "Delete a title block template; its sheets use the compact one", tb_delete);
     r.add(
         "object.set_attrs",
         Kind::Edit,
@@ -105,7 +110,7 @@ fn resolve_label(doc: &Document, r: &str) -> Result<Id, CmdError> {
 
 fn resolve_title_block(doc: &Document, r: &str) -> Result<Id, CmdError> {
     if let Ok(id) = r.parse::<Id>()
-        && doc.title_blocks.contains_key(&id)
+        && (doc.title_blocks.contains_key(&id) || TitleBlock::builtin(id).is_some())
     {
         return Ok(id);
     }
@@ -140,7 +145,7 @@ fn paper_from(name: &str, width: Option<f64>, height: Option<f64>) -> Result<Pap
 
 fn sheet_json(doc: &Document, s: &Sheet) -> Value {
     let [w, h] = s.size();
-    let tb = s.title_block.and_then(|t| doc.title_blocks.get(&t)).map_or("Generic".to_owned(), |t| t.name.clone());
+    let tb = TitleBlock::for_sheet(doc, s).name;
     json!({
         "id": s.id, "name": s.name, "number": s.number, "paper": s.paper.name(),
         "orientation": s.orientation, "size": [w, h], "order": s.order,
@@ -185,23 +190,26 @@ struct CreateArgs {
     /// Default landscape.
     #[serde(default)]
     orientation: Orientation,
-    /// Title block template id or name, `generic` (default) or `none`.
+    /// Title block template id or name, `compact` (default), `generic` or `none`.
     title_block: Option<String>,
 }
 
 /// `(template, shown)` from a title block argument.
 fn title_block_arg(doc: &Document, r: &str) -> Result<(Option<Id>, bool), CmdError> {
-    match r {
-        "generic" | "" => Ok((None, true)),
-        "none" => Ok((None, false)),
-        r => Ok((Some(resolve_title_block(doc, r)?), true)),
+    match r.to_ascii_lowercase().as_str() {
+        "compact" | "" => return Ok((None, true)),
+        "generic" => return Ok((Some(TitleBlock::GENERIC_ID), true)),
+        "none" => return Ok((None, false)),
+        _ => {}
     }
+    let id = resolve_title_block(doc, r)?;
+    Ok(((id != TitleBlock::COMPACT_ID).then_some(id), true))
 }
 
 fn create(ctx: &mut Ctx, a: CreateArgs) -> CmdResult {
     let doc = ctx.doc();
     let paper = paper_from(a.paper.as_deref().unwrap_or("a3"), a.width, a.height)?;
-    let (title_block, show_title_block) = title_block_arg(doc, a.title_block.as_deref().unwrap_or("generic"))?;
+    let (title_block, show_title_block) = title_block_arg(doc, a.title_block.as_deref().unwrap_or("compact"))?;
     let number = match a.number {
         Some(n) => n,
         None => (1..).map(|i: u32| i.to_string()).find(|n| !doc.sheets.values().any(|s| &s.number == n)).expect("free"),
@@ -238,7 +246,7 @@ struct UpdateArgs {
     width: Option<f64>,
     height: Option<f64>,
     orientation: Option<Orientation>,
-    /// Title block template id or name, `generic` or `none`.
+    /// Title block template id or name, `compact`, `generic` or `none`.
     title_block: Option<String>,
     /// Show the legend of fixture types.
     legend: Option<bool>,
@@ -476,20 +484,8 @@ fn d50() -> f64 {
     50.0
 }
 
-fn default_name(v: &ViewKind) -> String {
-    match v {
-        ViewKind::Plan => "Plan".into(),
-        ViewKind::Elevation { side } => match side {
-            Side::Front => "Front elevation".into(),
-            Side::Back => "Back elevation".into(),
-            Side::Left => "Left elevation".into(),
-            Side::Right => "Right elevation".into(),
-        },
-        ViewKind::Section { .. } => "Section".into(),
-        ViewKind::PlanFrom3d { .. } => "Plan from 3D".into(),
-        ViewKind::Rendered { .. } => "3D view".into(),
-        ViewKind::FixtureList => "Fixture list".into(),
-    }
+fn default_name(doc: &Document, v: &ViewKind) -> String {
+    crate::sheet::text::view_name(doc.meta.sheet_language, v)
 }
 
 fn vp_create(ctx: &mut Ctx, a: VpCreateArgs) -> CmdResult {
@@ -508,7 +504,7 @@ fn vp_create(ctx: &mut Ctx, a: VpCreateArgs) -> CmdResult {
     let position = a.position.unwrap_or([(w - 190.0).max(w / 2.0) / 2.0 + 5.0, h / 2.0 + 10.0]);
     let vp = Viewport {
         id: Uuid::new_v4(),
-        name: a.name.unwrap_or_else(|| default_name(&view)),
+        name: a.name.unwrap_or_else(|| default_name(doc, &view)),
         view,
         scale: a.scale,
         crop,
@@ -825,7 +821,7 @@ fn label_move(ctx: &mut Ctx, a: LabelMoveArgs) -> CmdResult {
 // ---- title blocks ----
 
 fn tb_list(ctx: &mut Ctx, _: NoArgs) -> CmdResult {
-    let mut v = vec![json!(TitleBlock::generic())];
+    let mut v: Vec<Value> = TitleBlock::builtins().iter().map(|t| json!(t)).collect();
     let mut own: Vec<_> = ctx.doc().title_blocks.values().cloned().collect();
     own.sort_by(|a, b| a.name.cmp(&b.name));
     v.extend(own.into_iter().map(|t| json!(t)));
@@ -845,27 +841,34 @@ fn check_tb(width: f64, height: f64, items: &[TitleItem]) -> Result<(), CmdError
 #[derive(Deserialize, JsonSchema)]
 struct TbCreateArgs {
     name: String,
-    /// Copy this template (id or name); default the generic one.
+    /// Copy this template (id or name, `compact` or `generic`); default the compact
+    /// one.
     from: Option<String>,
     /// mm; default from the copied template.
     width: Option<f64>,
     height: Option<f64>,
     /// Replace the items.
     items: Option<Vec<TitleItem>>,
+    /// Sheet border with grid reference zones; default from the copied template.
+    zones: Option<bool>,
 }
 
 fn tb_create(ctx: &mut Ctx, a: TbCreateArgs) -> CmdResult {
     let doc = ctx.doc();
     let name = a.name.trim().to_owned();
-    if name.is_empty() || name == "Generic" {
-        return Err(CmdError::invalid_args("give the title block a name other than Generic"));
+    if name.is_empty() || TitleBlock::builtins().iter().any(|t| t.name.eq_ignore_ascii_case(&name)) {
+        return Err(CmdError::invalid_args("give the title block a name other than Compact or Generic"));
     }
     if doc.title_blocks.values().any(|t| t.name == name) {
         return Err(CmdError::invalid(format!("a title block named `{name}` exists")));
     }
-    let base = match a.from.as_deref() {
-        None | Some("generic") | Some("Generic") => TitleBlock::generic(),
-        Some(r) => doc.title_blocks[&resolve_title_block(doc, r)?].clone(),
+    let base = match a.from.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("compact") => TitleBlock::compact(),
+        Some("generic") => TitleBlock::generic(),
+        Some(_) => {
+            let id = resolve_title_block(doc, a.from.as_deref().unwrap_or_default())?;
+            doc.title_blocks.get(&id).cloned().or_else(|| TitleBlock::builtin(id)).expect("resolved")
+        }
     };
     let t = TitleBlock {
         id: Uuid::new_v4(),
@@ -873,6 +876,7 @@ fn tb_create(ctx: &mut Ctx, a: TbCreateArgs) -> CmdResult {
         width: a.width.unwrap_or(base.width),
         height: a.height.unwrap_or(base.height),
         items: a.items.unwrap_or(base.items),
+        zones: a.zones.unwrap_or(base.zones),
     };
     check_tb(t.width, t.height, &t.items)?;
     let id = t.id;
@@ -888,11 +892,15 @@ struct TbUpdateArgs {
     width: Option<f64>,
     height: Option<f64>,
     items: Option<Vec<TitleItem>>,
+    /// Sheet border with grid reference zones.
+    zones: Option<bool>,
 }
 
 fn tb_update(ctx: &mut Ctx, a: TbUpdateArgs) -> CmdResult {
     let id = resolve_title_block(ctx.doc(), &a.template)?;
-    let mut t = ctx.doc().title_blocks[&id].clone();
+    let Some(mut t) = ctx.doc().title_blocks.get(&id).cloned() else {
+        return Err(CmdError::invalid("built-in title blocks cannot change; copy one with titleblock.create"));
+    };
     if let Some(v) = a.name {
         t.name = v;
     }
@@ -904,6 +912,9 @@ fn tb_update(ctx: &mut Ctx, a: TbUpdateArgs) -> CmdResult {
     }
     if let Some(v) = a.items {
         t.items = v;
+    }
+    if let Some(v) = a.zones {
+        t.zones = v;
     }
     check_tb(t.width, t.height, &t.items)?;
     ctx.doc_mut().title_blocks.insert(id, t.clone());
@@ -918,6 +929,9 @@ struct TbRef {
 
 fn tb_delete(ctx: &mut Ctx, a: TbRef) -> CmdResult {
     let id = resolve_title_block(ctx.doc(), &a.template)?;
+    if !ctx.doc().title_blocks.contains_key(&id) {
+        return Err(CmdError::invalid("built-in title blocks cannot be deleted"));
+    }
     let doc = ctx.doc_mut();
     doc.title_blocks.remove(&id);
     let ids: Vec<Id> = doc.sheets.values().filter(|s| s.title_block == Some(id)).map(|s| s.id).collect();

@@ -967,17 +967,11 @@ fn document_fields(ui: &mut Ui, s: &mut Studio) {
     ui.label(RichText::new(t("inspector.document")).strong());
     let meta = s.engine.doc().meta.clone();
     egui::Grid::new("inspector_doc").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        for (key, field_name, v) in [
-            ("meta.project", "project", meta.project),
-            ("meta.venue", "venue", meta.venue),
-            ("meta.drawn_by", "drawn_by", meta.drawn_by),
-            ("meta.revision", "revision", meta.revision),
-            ("meta.date", "date", meta.date),
-            ("meta.company", "company", meta.company),
-        ] {
+        for (key, field_name, v) in crate::sheets::meta_texts(&meta) {
             if let Some(v) = field(ui, key, field_name, Some(v)) {
-                let _ = s.run("doc.set_meta", json!({ field_name: v }));
+                let _ = s.run("doc.set_meta", json!({ field_name: crate::sheets::meta_value(field_name, v) }));
             }
         }
+        crate::sheets::sheet_text_rows(ui, s, "Inspector");
     });
 }

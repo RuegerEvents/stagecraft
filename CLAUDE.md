@@ -147,7 +147,17 @@ avoidance, leaders), `view.rs` (`VectorViewSource`, `ViewSpec`; `FallbackSource`
 draws mesh outlines without hidden-line removal, kept for tests), `hlr.rs`
 (`HlrSource`, the default: meshes per object and material run into
 `stagecraft-hlr`, cached per view and document revision = identity of the `imbl`
-maps), `render.rs` (krilla PDF with embedded Roboto, SVG). Vector viewports are
+maps), `render.rs` (krilla PDF with embedded Arimo, SVG). Sheet text is Arimo
+(OFL, Helvetica metrics) in PDF, SVG and the Sheets mode (`theme::sheet_font`).
+Title blocks: `None` = the built-in compact one (zoned border, legend on top of it,
+same width), `TitleBlock::GENERIC_ID` the old one; template text takes
+`{field}`, `{a|b}` and `{t:key}`. Every word StageCraft prints on a sheet comes from
+`stagecraft_core::sheet::text` (en/de, `meta.sheet_language`). Lengths on drawings go
+through `stagecraft_core::units::LengthFormat::of(&doc.meta)` (`m_sup_mm` 6.15⁵,
+`m`, `mm`; separator from the language unless set): `m_sup_mm` writes the mm digit
+as a Unicode superscript, and every renderer (PDF, SVG, Sheets mode via
+`render::text_runs`, plan canvas via `sketch_ui::dim_text_job`) draws superscript
+runs smaller and raised. Vector viewports are
 `elevation`, `section` (cut faces hatched by material) and `plan_3d` (top view from
 meshes, optional cut height, labels as in `plan`); `hidden_lines` adds dashed
 hidden edges, `tag_lines` restyles objects by tag. Core cannot depend on it, so

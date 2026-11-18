@@ -8,6 +8,8 @@ use crate::command::{CmdError, CmdResult, Kind, Registry};
 use crate::engine::Ctx;
 use crate::file;
 use crate::model::Document;
+use crate::sheet::text;
+use crate::units::{DimFormat, Language};
 
 pub(super) fn register(r: &mut Registry) {
     r.add("doc.info", Kind::Query, "File, dirty flag, counts, meta", info);
@@ -17,7 +19,7 @@ pub(super) fn register(r: &mut Registry) {
     r.add(
         "doc.set_meta",
         Kind::Edit,
-        "Set project, venue, drawn-by, revision, company, date, logo (title block fields)",
+        "Set title block fields (project, venue, address, dates, company, drawn-by, website, logo …), sheet language and dimension format",
         set_meta,
     );
 }
@@ -105,6 +107,20 @@ struct MetaArgs {
     date: Option<String>,
     /// PNG or JPEG file for the title block logo; empty string removes the logo.
     logo_file: Option<PathBuf>,
+    /// Venue address, lines separated by `\n`.
+    venue_address: Option<String>,
+    /// Production dates, free text, e.g. `02.05.2025 – 05.05.2025`. Compact title
+    /// blocks show the date instead while this is empty.
+    production_dates: Option<String>,
+    website: Option<String>,
+    /// Language of sheet text: `en` (default) or `de`. Viewports still named by
+    /// default ("Plan", "Section" …) are renamed into the new language.
+    sheet_language: Option<Language>,
+    /// Dimension text: `m_sup_mm` (6.15⁵, default), `m` (6.155 m) or `mm` (6155).
+    dimension_format: Option<DimFormat>,
+    /// Decimal separator of lengths: `.` or `,`; `auto` (or empty) follows the sheet
+    /// language (en `.`, de `,`).
+    decimal_separator: Option<String>,
 }
 
 fn set_meta(ctx: &mut Ctx, a: MetaArgs) -> CmdResult {
@@ -121,7 +137,40 @@ fn set_meta(ctx: &mut Ctx, a: MetaArgs) -> CmdResult {
             Some(Some(crate::sheet::base64_encode(&data)))
         }
     };
+    let separator = match a.decimal_separator.as_deref() {
+        None => None,
+        Some("" | "auto") => Some(None),
+        Some(".") => Some(Some('.')),
+        Some(",") => Some(Some(',')),
+        Some(other) => {
+            return Err(CmdError::invalid_args(format!("decimal separator `{other}`: use `.`, `,` or `auto`")));
+        }
+    };
+    if let Some(lang) = a.sheet_language {
+        let old = ctx.doc().meta.sheet_language;
+        if old != lang {
+            rename_default_views(ctx.doc_mut(), old, lang);
+        }
+    }
     let m = &mut ctx.doc_mut().meta;
+    if let Some(v) = a.sheet_language {
+        m.sheet_language = v;
+    }
+    if let Some(v) = a.dimension_format {
+        m.dimension_format = v;
+    }
+    if let Some(v) = separator {
+        m.decimal_separator = v;
+    }
+    if let Some(v) = a.venue_address {
+        m.venue_address = v;
+    }
+    if let Some(v) = a.production_dates {
+        m.production_dates = v;
+    }
+    if let Some(v) = a.website {
+        m.website = v;
+    }
     if let Some(v) = a.company {
         m.company = v;
     }
@@ -143,6 +192,20 @@ fn set_meta(ctx: &mut Ctx, a: MetaArgs) -> CmdResult {
     if let Some(v) = a.revision {
         m.revision = v;
     }
-    Ok(json!({ "project": m.project, "venue": m.venue, "drawn_by": m.drawn_by, "revision": m.revision,
-               "company": m.company, "date": m.date, "logo": m.logo.is_some() }))
+    let mut out = serde_json::to_value(&*m).unwrap_or_default();
+    out["logo"] = json!(m.logo.is_some());
+    Ok(out)
+}
+
+/// Viewports whose name is the default for their view in `from` get the one in `to`.
+fn rename_default_views(doc: &mut Document, from: Language, to: Language) {
+    let ids: Vec<_> = doc.sheets.keys().copied().collect();
+    for id in ids {
+        let s = doc.sheets.get_mut(&id).expect("listed");
+        for v in &mut s.viewports {
+            if v.name == text::view_name(from, &v.view) {
+                v.name = text::view_name(to, &v.view);
+            }
+        }
+    }
 }

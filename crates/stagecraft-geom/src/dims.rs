@@ -4,6 +4,7 @@
 
 use stagecraft_core::model::P2;
 use stagecraft_core::sketch::{ConstraintId, DimAxis, EdgeGeom, Measure, RefDimension, Sketch, p2};
+use stagecraft_core::units::LengthFormat;
 use stagecraft_core::{Document, Id};
 
 use crate::math;
@@ -47,13 +48,20 @@ pub struct DimStyle {
     pub gap: f64,
     /// How far extension lines and the dimension line run past each other.
     pub overshoot: f64,
+    /// How values are written (the document's `LengthFormat::of(&doc.meta)`).
+    pub format: LengthFormat,
 }
 
 impl DimStyle {
     /// Sizes for `px` screen points or paper mm per world mm.
     pub fn for_scale(units_per_mm: f64, tick: f64) -> Self {
         let k = 1.0 / units_per_mm.max(1e-9);
-        DimStyle { tick: tick * k, gap: tick * 0.6 * k, overshoot: tick * k }
+        DimStyle { tick: tick * k, gap: tick * 0.6 * k, overshoot: tick * k, format: LengthFormat::default() }
+    }
+
+    /// The same sizes with the document's value format.
+    pub fn with_format(self, format: LengthFormat) -> Self {
+        DimStyle { format, ..self }
     }
 }
 
@@ -66,8 +74,13 @@ pub fn format_value(v: f64, angle: bool) -> String {
     if (mm % 10.0).abs() < 1e-9 { format!("{:.2}", v / 1000.0) } else { format!("{:.3}", v / 1000.0) }
 }
 
-fn text_for(v: f64, angle: bool, driving: bool) -> String {
-    let t = format_value(v, angle);
+/// A value as drawings show it, in the given format.
+pub fn format_shown(v: f64, angle: bool, f: &LengthFormat) -> String {
+    if angle { f.angle(v) } else { f.length(v) }
+}
+
+fn text_for(v: f64, angle: bool, driving: bool, f: &LengthFormat) -> String {
+    let t = format_shown(v, angle, f);
     if driving { t } else { format!("({t})") }
 }
 
@@ -155,8 +168,8 @@ pub fn sketch_dims(layer: Id, s: &Sketch, st: &DimStyle) -> Vec<DimDraw> {
         let Some((lines, label, up, rotation)) = r else { continue };
         let angle = d.measure.is_angle();
         let text = match d.measure {
-            Measure::Radius { .. } => format!("R{}", text_for(value, false, d.driving)),
-            _ => text_for(value, angle, d.driving),
+            Measure::Radius { .. } => format!("R{}", text_for(value, false, d.driving, &st.format)),
+            _ => text_for(value, angle, d.driving, &st.format),
         };
         out.push(DimDraw {
             source: DimSource::Sketch { layer, id: d.id },
@@ -213,7 +226,7 @@ pub fn reference_dims(doc: &Document, st: &DimStyle, keep: impl Fn(&RefDimension
             driving: false,
             value,
             angle: false,
-            text: text_for(value, false, false),
+            text: text_for(value, false, false, &st.format),
             name: d.name.clone(),
             label,
             up,
@@ -258,7 +271,7 @@ pub fn preview(a: P2, b: P2, axis: DimAxis, label: P2, st: &DimStyle) -> Option<
         driving: true,
         value,
         angle: false,
-        text: format_value(value, false),
+        text: format_shown(value, false, &st.format),
         name: None,
         label,
         up,
@@ -286,7 +299,7 @@ mod tests {
         let (_, e) = s.add_polyline(&[Vec2::new(0.0, 0.0), Vec2::new(4000.0, 0.0)], false);
         let d = s.add_dimension(Measure::Length { line: e[0] }, 4000.0);
         s.dimension_mut(d).unwrap().label_offset = Vec2::new(0.0, -600.0);
-        let st = DimStyle { tick: 50.0, gap: 30.0, overshoot: 50.0 };
+        let st = DimStyle { tick: 50.0, gap: 30.0, overshoot: 50.0, format: LengthFormat::default() };
         let v = sketch_dims(Id::nil(), &s, &st);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].text, "4.00");

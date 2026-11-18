@@ -18,6 +18,7 @@ pub mod mvr;
 pub mod patch;
 pub mod sheet;
 pub mod sketch;
+pub mod units;
 
 pub use command::{CmdError, CmdResult, CommandInfo, Kind, Registry, registry};
 pub use engine::{Engine, JournalEntry};

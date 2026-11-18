@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Id, P2, P3};
+use crate::model::{Document, Id, P2, P3};
+
+pub mod text;
 
 /// A drawing sheet.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -21,7 +23,8 @@ pub struct Sheet {
     pub number: String,
     pub paper: Paper,
     pub orientation: Orientation,
-    /// Title block template; `None` = the built-in generic one.
+    /// Title block template; `None` = the built-in compact one (the default). The
+    /// built-in generic one is [`TitleBlock::GENERIC_ID`].
     #[serde(default)]
     pub title_block: Option<Id>,
     #[serde(default = "yes")]
@@ -320,8 +323,11 @@ pub enum TitleItem {
         #[serde(default = "pen")]
         weight: f64,
     },
-    /// Text with placeholders: {project}, {venue}, {drawn_by}, {date}, {scale},
-    /// {revision}, {sheet_name}, {sheet_number}, {company}, {paper}.
+    /// Text with placeholders: {project}, {venue}, {venue_address}, {drawn_by},
+    /// {date}, {production_dates}, {scale}, {revision}, {sheet_name}, {sheet_number},
+    /// {sheet_rev}, {company}, {website}, {paper}. `{a|b}` takes `b` when `a` is
+    /// empty; `{t:key}` is a word from the sheet-text catalog in the document's sheet
+    /// language (`{t:production}`, `{t:drawing}`, `{t:scale}` …).
     Text {
         pos: P2,
         text: String,
@@ -333,6 +339,16 @@ pub enum TitleItem {
         /// `left`, `center` or `right` of `pos`. Default left.
         #[serde(default)]
         align: TextAlign,
+        /// Wrap into lines of at most this width, mm. Lines also break at `\n`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wrap: Option<f64>,
+        /// More lines than this shrink the text until it fits. Default unlimited.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_lines: Option<u32>,
+        /// Lines stack upwards, the last one on `pos` (default: the first on `pos`,
+        /// further lines below).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        upward: bool,
     },
     /// The document's logo, fitted into the box keeping its aspect ratio.
     Logo { min: P2, max: P2 },
@@ -364,25 +380,118 @@ pub struct TitleBlock {
     pub width: f64,
     pub height: f64,
     pub items: Vec<TitleItem>,
+    /// Draw the sheet border with grid reference zones (1, 2, 3 … across, A, B …
+    /// down) instead of the plain frame.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub zones: bool,
+}
+
+/// A text item, left aligned, single line.
+fn text_item(pos: P2, text: &str, size: f64, bold: bool) -> TitleItem {
+    TitleItem::Text {
+        pos,
+        text: text.into(),
+        size,
+        bold,
+        align: TextAlign::Left,
+        wrap: None,
+        max_lines: None,
+        upward: false,
+    }
 }
 
 impl TitleBlock {
-    /// The built-in generic block: 180 × 50 mm, no company in it.
-    pub fn generic() -> Self {
-        let t = |pos: P2, text: &str, size: f64, bold: bool| TitleItem::Text {
+    /// Id of the built-in generic block (`Sheet::title_block`).
+    pub const GENERIC_ID: Id = Id::from_u128(1);
+    /// Id of the built-in compact block; sheets without a template use it.
+    pub const COMPACT_ID: Id = Id::from_u128(2);
+
+    /// The built-in blocks: compact (the default) then generic.
+    pub fn builtins() -> [TitleBlock; 2] {
+        [TitleBlock::compact(), TitleBlock::generic()]
+    }
+
+    /// A built-in block by id.
+    pub fn builtin(id: Id) -> Option<TitleBlock> {
+        TitleBlock::builtins().into_iter().find(|t| t.id == id)
+    }
+
+    /// The template a sheet uses: its own, a built-in, or compact.
+    pub fn for_sheet(doc: &Document, sheet: &Sheet) -> TitleBlock {
+        match sheet.title_block {
+            Some(id) => doc.title_blocks.get(&id).cloned().or_else(|| TitleBlock::builtin(id)),
+            None => None,
+        }
+        .unwrap_or_else(TitleBlock::compact)
+    }
+
+    /// The built-in compact block, 95 × 28 mm, in the style of a Vectorworks sheet:
+    /// sheet title and scale on top, production (name, venue address, dates) left,
+    /// drawing (company, drawer, website) right. The sheet gets a zoned border.
+    pub fn compact() -> Self {
+        let (w, h, top, split) = (95.0, 28.0, 20.5, 63.0);
+        let line = |from: P2, to: P2| TitleItem::Line { from, to, weight: 0.18 };
+        let label = 1.15;
+        let small = 1.25;
+        let wrapped =
+            |pos: P2, text: &str, size: f64, bold: bool, wrap: f64, lines: u32, upward: bool| TitleItem::Text {
+                pos,
+                text: text.into(),
+                size,
+                bold,
+                align: TextAlign::Left,
+                wrap: Some(wrap),
+                max_lines: Some(lines),
+                upward,
+            };
+        let right = |pos: P2, text: &str, size: f64| TitleItem::Text {
             pos,
             text: text.into(),
             size,
-            bold,
-            align: TextAlign::Left,
+            bold: true,
+            align: TextAlign::Right,
+            wrap: None,
+            max_lines: None,
+            upward: false,
         };
+        TitleBlock {
+            id: TitleBlock::COMPACT_ID,
+            name: "Compact".into(),
+            width: w,
+            height: h,
+            zones: true,
+            items: vec![
+                TitleItem::Rect { min: [0.0, 0.0], max: [w, h], weight: 0.25 },
+                line([0.0, top], [w, top]),
+                line([split, 0.0], [split, top]),
+                // Row 1: sheet title, scale.
+                wrapped([1.2, 22.9], "{sheet_name}", 2.1, true, 72.0, 1, false),
+                right([w - 1.2, 22.9], "{scale}", 2.1),
+                // Production.
+                text_item([1.2, 17.9], "{t:production}", label, false),
+                wrapped([1.2, 14.2], "{project}", 2.3, true, split - 3.0, 2, false),
+                wrapped([1.2, 1.1], "{venue_address|venue}", small, false, 30.0, 3, true),
+                right([split - 1.0, 1.1], "{production_dates|date}", 1.6),
+                // Drawing.
+                text_item([split + 1.0, 17.9], "{t:drawing}", label, false),
+                wrapped([split + 1.0, 15.0], "{company}", small, true, w - split - 2.0, 2, false),
+                wrapped([split + 1.0, 10.4], "{drawn_by}\n{website}", small, true, w - split - 2.0, 2, false),
+                wrapped([split + 1.0, 1.1], "{sheet_rev}", label, false, w - split - 2.0, 1, false),
+            ],
+        }
+    }
+
+    /// The built-in generic block: 180 × 50 mm, no company in it.
+    pub fn generic() -> Self {
+        let t = text_item;
         let line = |from: P2, to: P2| TitleItem::Line { from, to, weight: 0.25 };
         let small = 1.6;
         TitleBlock {
-            id: Id::nil(),
+            id: TitleBlock::GENERIC_ID,
             name: "Generic".into(),
             width: 180.0,
             height: 50.0,
+            zones: false,
             items: vec![
                 TitleItem::Rect { min: [0.0, 0.0], max: [180.0, 50.0], weight: 0.5 },
                 line([0.0, 34.0], [180.0, 34.0]),
@@ -392,24 +501,24 @@ impl TitleBlock {
                 line([95.0, 0.0], [95.0, 17.0]),
                 line([150.0, 0.0], [150.0, 17.0]),
                 // Project and venue.
-                t([3.0, 45.5], "PROJECT", small, false),
+                t([3.0, 45.5], "{t:project}", small, false),
                 t([3.0, 37.5], "{project}", 4.0, true),
-                t([3.0, 28.5], "VENUE", small, false),
+                t([3.0, 28.5], "{t:venue}", small, false),
                 t([3.0, 21.0], "{venue}", 3.0, false),
                 // Sheet name, drawn by, number.
-                t([3.0, 12.0], "SHEET", small, false),
+                t([3.0, 12.0], "{t:sheet}", small, false),
                 t([3.0, 4.0], "{sheet_name}", 3.0, true),
-                t([58.0, 12.0], "DRAWN BY", small, false),
+                t([58.0, 12.0], "{t:drawn_by}", small, false),
                 t([58.0, 4.0], "{drawn_by}", 2.2, false),
-                t([98.0, 12.0], "No.", small, false),
+                t([98.0, 12.0], "{t:number}", small, false),
                 t([98.0, 4.0], "{sheet_number}", 3.5, true),
                 // Right column: company/logo, scale, date, revision.
                 TitleItem::Logo { min: [122.0, 35.5], max: [178.0, 48.5] },
-                t([123.0, 28.5], "COMPANY", small, false),
+                t([123.0, 28.5], "{t:company}", small, false),
                 t([123.0, 21.0], "{company}", 2.5, false),
-                t([123.0, 12.0], "SCALE", small, false),
+                t([123.0, 12.0], "{t:scale}", small, false),
                 t([123.0, 4.0], "{scale}", 2.5, false),
-                t([153.0, 12.0], "DATE / REV", small, false),
+                t([153.0, 12.0], "{t:date_rev}", small, false),
                 t([153.0, 4.0], "{date} {revision}", 2.2, false),
             ],
         }

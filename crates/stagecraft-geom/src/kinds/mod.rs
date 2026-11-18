@@ -85,6 +85,15 @@ pub fn plan(doc: &Document, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
             }
         }
     }
+    // Platform levels are lengths: they follow the document's decimal separator.
+    if matches!(obj.kind, ObjectKind::Platform { .. }) {
+        let f = stagecraft_core::units::LengthFormat::of(&doc.meta);
+        for p in &mut prims {
+            if let PlanPrim::Text { text, .. } = p {
+                *text = f.number(text);
+            }
+        }
+    }
     prims
 }
 

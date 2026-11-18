@@ -258,7 +258,13 @@ pub fn engine() -> Engine {
 /// Gels and circuits on the fixtures, two label templates and two sheets: the
 /// lighting plan with labels, legend and fixture list, and elevations/sections.
 fn sheets(e: &mut Engine) {
-    run(e, "doc.set_meta", json!({ "drawn_by": "StageCraft demo", "date": "2026-11-18", "revision": "A" }));
+    run(
+        e,
+        "doc.set_meta",
+        json!({ "drawn_by": "StageCraft demo", "date": "2026-11-18", "revision": "A", "company": "Example Stage Lighting",
+                "website": "stagecraft.example", "venue_address": "1 Theatre Street\n12345 Example Town",
+                "production_dates": "18.11.2026 – 22.11.2026" }),
+    );
     let mut fixtures: Vec<(u32, stagecraft_core::Id, String)> = e
         .doc()
         .objects

@@ -128,6 +128,11 @@ pub fn bold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("bold".into()))
 }
 
+/// The sheet font (Arimo), for drawing sheets like the PDF.
+pub fn sheet_font(size: f32, bold: bool) -> FontId {
+    FontId::new(size, FontFamily::Name(if bold { "sheet_bold" } else { "sheet" }.into()))
+}
+
 fn fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let mut add = |name: &str, bytes: &'static [u8]| {
@@ -142,6 +147,13 @@ fn fonts() -> FontDefinitions {
     let mut bold = vec!["Roboto Bold".to_string()];
     bold.extend(fonts.families[&FontFamily::Proportional].iter().cloned());
     fonts.families.insert(FontFamily::Name("bold".into()), bold);
+    add("Arimo", include_bytes!("../../../assets/fonts/Arimo-Regular.ttf"));
+    add("Arimo Bold", include_bytes!("../../../assets/fonts/Arimo-Bold.ttf"));
+    for (family, face) in [("sheet", "Arimo"), ("sheet_bold", "Arimo Bold")] {
+        let mut list = vec![face.to_string()];
+        list.extend(fonts.families[&FontFamily::Proportional].iter().cloned());
+        fonts.families.insert(FontFamily::Name(family.into()), list);
+    }
     fonts
 }
 

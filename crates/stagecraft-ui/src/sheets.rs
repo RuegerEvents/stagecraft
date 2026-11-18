@@ -14,7 +14,8 @@ use egui::{
 };
 use serde_json::{Value, json};
 use stagecraft_core::model::P2;
-use stagecraft_core::sheet::{LabelField, LabelRotation, Orientation, Paper, Side, ViewKind, Viewport};
+use stagecraft_core::sheet::{LabelField, LabelRotation, Orientation, Paper, Side, TitleBlock, ViewKind, Viewport};
+use stagecraft_core::units::{DimFormat, Language};
 use stagecraft_core::{Document, Id};
 use stagecraft_sheet::prim::{ImageData, Page, Pen, Prim, Rgb};
 
@@ -301,16 +302,19 @@ pub fn paint_prims(painter: &Painter, cam: &PaperCam, prims: &[Prim]) {
                 if px < 1.6 {
                     continue;
                 }
-                let font_size = px * 1.55;
-                let font = if *bold { theme::bold(font_size) } else { theme::proportional(font_size) };
-                let o = stagecraft_sheet::render::text_origin(*pos, text, *size, *angle, *h, *v, *bold);
-                let base = cam.to_screen(o);
-                let galley = painter.layout_no_wrap(text.clone(), font, colour(*color));
+                // The sheet font (Arimo) at its em size; runs put superscript digits
+                // smaller and raised, as in the PDF.
                 let a = -(angle.to_radians()) as f32;
                 let up = vec2(a.sin(), -a.cos());
-                let asc = font_size * 0.79;
-                let top_left = base + up * asc;
-                painter.add(Shape::Text(TextShape::new(top_left, galley, colour(*color)).with_angle(a)));
+                for (o, run, size) in stagecraft_sheet::render::text_runs(*pos, text, *size, *angle, *h, *v, *bold) {
+                    let font_size = (stagecraft_sheet::fonts::em(size) * cam.scale) as f32;
+                    let font = theme::sheet_font(font_size, *bold);
+                    let base = cam.to_screen(o);
+                    let galley = painter.layout_no_wrap(run, font, colour(*color));
+                    let asc = font_size * stagecraft_sheet::fonts::ascent_ratio() as f32;
+                    let top_left = base + up * asc;
+                    painter.add(Shape::Text(TextShape::new(top_left, galley, colour(*color)).with_angle(a)));
+                }
             }
             Prim::Image { min, max, angle, opacity, data } => {
                 let (w, h) = (max[0] - min[0], max[1] - min[1]);
@@ -1067,14 +1071,13 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
         });
         ui.end_row();
         ui.label(t("sheets.title_block"));
-        let cur = if !sh.show_title_block {
-            t("sheets.none_block").to_owned()
-        } else {
-            sh.title_block.and_then(|t| doc.title_blocks.get(&t)).map_or("Generic".to_owned(), |t| t.name.clone())
-        };
+        let current = TitleBlock::for_sheet(doc, &sh);
+        let cur = if !sh.show_title_block { t("sheets.none_block").to_owned() } else { current.name.clone() };
         egui::ComboBox::from_id_salt("sheet_tb").selected_text(cur).show_ui(ui, |ui| {
-            if ui.selectable_label(false, "Generic").clicked() {
-                up(s, json!({ "title_block": "generic" }));
+            for (tb, arg) in TitleBlock::builtins().into_iter().zip(["compact", "generic"]) {
+                if ui.selectable_label(sh.show_title_block && current.id == tb.id, &tb.name).clicked() {
+                    up(s, json!({ "title_block": arg }));
+                }
             }
             for tb in doc.title_blocks.values() {
                 if ui.selectable_label(sh.title_block == Some(tb.id), &tb.name).clicked() {
@@ -1108,22 +1111,16 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
     ui.label(RichText::new(t("sheets.title_fields")).strong());
     let meta = doc.meta.clone();
     egui::Grid::new("sheet_meta").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        for (key, field, v) in [
-            ("meta.project", "project", meta.project),
-            ("meta.venue", "venue", meta.venue),
-            ("meta.drawn_by", "drawn_by", meta.drawn_by),
-            ("meta.date", "date", meta.date),
-            ("meta.revision", "revision", meta.revision),
-            ("meta.company", "company", meta.company),
-        ] {
+        for (key, field, v) in meta_texts(&meta) {
             ui.label(t(key));
             if let Some(v) =
                 edit_field(ui, egui::Id::new(("sheet_meta", field)), &v, 170.0, &format!("Title block {field}"))
             {
-                let _ = s.run("doc.set_meta", json!({ field: v }));
+                let _ = s.run("doc.set_meta", json!({ field: meta_value(field, v) }));
             }
             ui.end_row();
         }
+        sheet_text_rows(ui, s, "Sheets");
         ui.label(t("meta.logo"));
         ui.horizontal(|ui| {
             if button(ui, t("sheets.choose_logo"), "Choose logo").clicked() {
@@ -1135,6 +1132,71 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
         });
         ui.end_row();
     });
+}
+
+/// The document's text fields for title blocks: (i18n key, `doc.set_meta` field,
+/// value as edited; the venue address shows its lines joined by " / ").
+pub fn meta_texts(m: &stagecraft_core::model::Meta) -> Vec<(&'static str, &'static str, String)> {
+    vec![
+        ("meta.project", "project", m.project.clone()),
+        ("meta.venue", "venue", m.venue.clone()),
+        ("meta.venue_address", "venue_address", m.venue_address.replace('\n', " / ")),
+        ("meta.production_dates", "production_dates", m.production_dates.clone()),
+        ("meta.drawn_by", "drawn_by", m.drawn_by.clone()),
+        ("meta.company", "company", m.company.clone()),
+        ("meta.website", "website", m.website.clone()),
+        ("meta.date", "date", m.date.clone()),
+        ("meta.revision", "revision", m.revision.clone()),
+    ]
+}
+
+/// An edited field back into what `doc.set_meta` takes (address lines from " / ").
+pub fn meta_value(field: &str, v: String) -> String {
+    if field == "venue_address" { v.split(" / ").map(str::trim).collect::<Vec<_>>().join("\n") } else { v }
+}
+
+/// Grid rows for sheet language, dimension format and decimal separator.
+pub fn sheet_text_rows(ui: &mut Ui, s: &mut Studio, who: &str) {
+    let meta = s.engine.doc().meta.clone();
+    ui.label(t("meta.sheet_language"));
+    let r = egui::ComboBox::from_id_salt((who, "sheet_language")).selected_text(meta.sheet_language.name()).show_ui(
+        ui,
+        |ui| {
+            for l in Language::ALL {
+                if ui.selectable_label(meta.sheet_language == l, l.name()).clicked() {
+                    let _ = s.run("doc.set_meta", json!({ "sheet_language": l }));
+                }
+            }
+        },
+    );
+    widgets::name(&r.response, egui::WidgetType::ComboBox, format!("{who} sheet language"));
+    ui.end_row();
+    ui.label(t("meta.dimension_format"));
+    let key = |f: DimFormat| format!("meta.dim.{}", f.code());
+    let r = egui::ComboBox::from_id_salt((who, "dimension_format"))
+        .selected_text(t(&key(meta.dimension_format)))
+        .show_ui(ui, |ui| {
+            for f in DimFormat::ALL {
+                if ui.selectable_label(meta.dimension_format == f, t(&key(f))).clicked() {
+                    let _ = s.run("doc.set_meta", json!({ "dimension_format": f }));
+                }
+            }
+        });
+    widgets::name(&r.response, egui::WidgetType::ComboBox, format!("{who} dimension format"));
+    ui.end_row();
+    ui.label(t("meta.decimal_separator"));
+    let options =
+        [(None, "auto", "meta.sep.auto"), (Some('.'), ".", "meta.sep.point"), (Some(','), ",", "meta.sep.comma")];
+    let shown = options.iter().find(|o| o.0 == meta.decimal_separator).map_or("meta.sep.auto", |o| o.2);
+    let r = egui::ComboBox::from_id_salt((who, "decimal_separator")).selected_text(t(shown)).show_ui(ui, |ui| {
+        for (v, arg, label) in options {
+            if ui.selectable_label(meta.decimal_separator == v, t(label)).clicked() {
+                let _ = s.run("doc.set_meta", json!({ "decimal_separator": arg }));
+            }
+        }
+    });
+    widgets::name(&r.response, egui::WidgetType::ComboBox, format!("{who} decimal separator"));
+    ui.end_row();
 }
 
 const FIELDS: [&str; 12] =

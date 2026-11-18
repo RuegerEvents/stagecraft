@@ -1,4 +1,4 @@
-//! Pages to files: vector PDF through krilla (Roboto embedded and subset), and SVG.
+//! Pages to files: vector PDF through krilla (Arimo embedded and subset), and SVG.
 //! Both turn paper mm (y up) into their own y-down space.
 
 use std::fmt::Write as _;
@@ -32,6 +32,25 @@ pub fn text_origin(pos: P2, text: &str, size: f64, angle: f64, h: HAlign, v: VAl
     };
     let (s, c) = angle.to_radians().sin_cos();
     [pos[0] + dx * c - dy * s, pos[1] + dx * s + dy * c]
+}
+
+/// A text's runs as drawn (superscript digits smaller and raised): baseline start on
+/// paper, text, cap height.
+pub fn text_runs(
+    pos: P2,
+    text: &str,
+    size: f64,
+    angle: f64,
+    h: HAlign,
+    v: VAlign,
+    bold: bool,
+) -> Vec<(P2, String, f64)> {
+    let o = text_origin(pos, text, size, angle, h, v, bold);
+    let (s, c) = angle.to_radians().sin_cos();
+    fonts::runs(text, size, bold)
+        .into_iter()
+        .map(|r| ([o[0] + r.dx * c - r.dy * s, o[1] + r.dx * s + r.dy * c], r.text, r.size))
+        .collect()
 }
 
 /// PNG bytes of straight RGBA pixels.
@@ -101,21 +120,22 @@ fn svg_prims(prims: &[Prim], h: f64, clip: &mut usize, out: &mut String) {
                 );
             }
             Prim::Text { pos, text, size, angle, h: ha, v, bold, color } => {
-                let o = text_origin(*pos, text, *size, *angle, *ha, *v, *bold);
-                let (ox, oy) = (o[0], y(o[1]));
-                let rot = if angle.abs() > 1e-9 {
-                    format!(" transform=\"rotate({:.3} {ox:.3} {oy:.3})\"", -angle)
-                } else {
-                    String::new()
-                };
-                let _ = writeln!(
-                    out,
-                    "<text x=\"{ox:.3}\" y=\"{oy:.3}\" font-family=\"Roboto, Helvetica, Arial, sans-serif\" font-size=\"{:.3}\" font-weight=\"{}\" fill=\"{}\"{rot}>{}</text>",
-                    em(*size),
-                    if *bold { 700 } else { 400 },
-                    svg_color(*color),
-                    esc(text)
-                );
+                for (o, run, size) in text_runs(*pos, text, *size, *angle, *ha, *v, *bold) {
+                    let (ox, oy) = (o[0], y(o[1]));
+                    let rot = if angle.abs() > 1e-9 {
+                        format!(" transform=\"rotate({:.3} {ox:.3} {oy:.3})\"", -angle)
+                    } else {
+                        String::new()
+                    };
+                    let _ = writeln!(
+                        out,
+                        "<text x=\"{ox:.3}\" y=\"{oy:.3}\" font-family=\"Arimo, Helvetica, Arial, sans-serif\" font-size=\"{:.3}\" font-weight=\"{}\" fill=\"{}\"{rot}>{}</text>",
+                        em(size),
+                        if *bold { 700 } else { 400 },
+                        svg_color(*color),
+                        esc(&run)
+                    );
+                }
             }
             Prim::Image { min, max, angle, opacity, data } => {
                 let (mime, bytes) = match data {
@@ -238,17 +258,29 @@ fn pdf_prims(s: &mut Surface, prims: &[Prim], h: f64, fonts: &Fonts) {
                 draw(s, pb.finish(), pen, fill);
             }
             Prim::Text { pos, text, size, angle, h: ha, v, bold, color } => {
-                let o = text_origin(*pos, text, *size, *angle, *ha, *v, *bold);
-                let (x, y) = pt(o);
-                // Counter-clockwise on paper is clockwise in the y-down page space.
-                let (sn, cs) = (-angle).to_radians().sin_cos();
-                let t = Transform::from_row(cs as f32, sn as f32, -sn as f32, cs as f32, x, y);
-                s.push_transform(&t);
-                s.set_stroke(None);
-                s.set_fill(Some(Fill { paint: paint(*color), opacity: NormalizedF32::ONE, rule: FillRule::NonZero }));
-                let font = if *bold { fonts.bold.clone() } else { fonts.regular.clone() };
-                s.draw_text(Point::from_xy(0.0, 0.0), font, (em(*size) * PT) as f32, text, false, TextDirection::Auto);
-                s.pop();
+                for (o, run, size) in text_runs(*pos, text, *size, *angle, *ha, *v, *bold) {
+                    let (x, y) = pt(o);
+                    // Counter-clockwise on paper is clockwise in the y-down page space.
+                    let (sn, cs) = (-angle).to_radians().sin_cos();
+                    let t = Transform::from_row(cs as f32, sn as f32, -sn as f32, cs as f32, x, y);
+                    s.push_transform(&t);
+                    s.set_stroke(None);
+                    s.set_fill(Some(Fill {
+                        paint: paint(*color),
+                        opacity: NormalizedF32::ONE,
+                        rule: FillRule::NonZero,
+                    }));
+                    let font = if *bold { fonts.bold.clone() } else { fonts.regular.clone() };
+                    s.draw_text(
+                        Point::from_xy(0.0, 0.0),
+                        font,
+                        (em(size) * PT) as f32,
+                        &run,
+                        false,
+                        TextDirection::Auto,
+                    );
+                    s.pop();
+                }
             }
             Prim::Image { min, max, angle, opacity, data } => {
                 let img = match data {
@@ -296,8 +328,8 @@ fn pdf_prims(s: &mut Surface, prims: &[Prim], h: f64, fonts: &Fonts) {
 /// Pages as one PDF; `title` goes into the metadata.
 pub fn pdf(pages: &[Page], title: &str) -> Result<Vec<u8>, String> {
     let fonts = Fonts {
-        regular: Font::new(fonts::REGULAR.into(), 0).ok_or("embedded Roboto does not load")?,
-        bold: Font::new(fonts::BOLD.into(), 0).ok_or("embedded Roboto Bold does not load")?,
+        regular: Font::new(fonts::REGULAR.into(), 0).ok_or("embedded Arimo does not load")?,
+        bold: Font::new(fonts::BOLD.into(), 0).ok_or("embedded Arimo Bold does not load")?,
     };
     let mut doc = krilla::Document::new();
     doc.set_metadata(krilla::metadata::Metadata::new().title(title.to_owned()).creator("StageCraft".into()));

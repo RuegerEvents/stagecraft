@@ -439,6 +439,31 @@ fn sketch_room() {
                 h.run();
             }
             save(&mut h, &dir, "35-sketch-sheet-light");
+
+            // German sheet text and a width with odd millimetres: 6,15⁵ in plan and
+            // on the sheet; the title block close up in the Sheets mode.
+            run(
+                &mut h,
+                "doc.set_meta",
+                json!({ "sheet_language": "de", "project": "Beispielproduktion mit einem langen Namen 2026",
+                        "venue_address": "Theaterstraße 1\n12345 Beispielstadt", "production_dates": "01.05.2026 – 03.05.2026",
+                        "company": "Beispiel Licht GmbH", "drawn_by": "StageCraft", "website": "stagecraft.example" }),
+            );
+            run(&mut h, "dimension.set_value", json!({ "id": "room width", "value": 6155 }));
+            for _ in 0..20 {
+                h.run();
+            }
+            h.state_mut().ui.sheets.cam.center = [360.0, 40.0];
+            h.state_mut().ui.sheets.cam.scale = 9.0;
+            save(&mut h, &dir, "36-sheet-titleblock-light");
+            h.state_mut().ui.sheets.cam.center = [190.0, 160.0];
+            h.state_mut().ui.sheets.cam.scale = 6.0;
+            save(&mut h, &dir, "37-sheet-dims-light");
+            run(&mut h, "ui.set_view", json!({ "view": "plan" }));
+            run(&mut h, "ui.zoom_to_fit", json!({}));
+            save(&mut h, &dir, "38-plan-dims-de-light");
+            let pdf = format!("{dir}/room-de.pdf");
+            run(&mut h, "sheet.export_pdf", json!({ "path": pdf }));
         }
     }
 }
