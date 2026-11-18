@@ -14,7 +14,7 @@ sha2.workspace = true
 imbl.workspace = true
 schemars = { workspace = true, features = ["uuid1"] }
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true
 uuid.workspace = true
 zip.workspace = true

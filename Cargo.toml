@@ -1,7 +1,5 @@
 [workspace]
 resolver = "2"
-# Developed standalone in parallel; joins the workspace when integrated.
-exclude = ["crates/stagecraft-sketch"]
 members = [
     "crates/stagecraft-core",
     "crates/stagecraft-gdtf",
@@ -9,6 +7,7 @@ members = [
     "crates/stagecraft-hlr",
     "crates/stagecraft-mvr",
     "crates/stagecraft-sheet",
+    "crates/stagecraft-sketch",
     "crates/stagecraft-control",
     "crates/stagecraft-ui",
     "crates/stagecraft-app",
@@ -28,8 +27,11 @@ stagecraft-geom = { path = "crates/stagecraft-geom" }
 stagecraft-sheet = { path = "crates/stagecraft-sheet" }
 stagecraft-hlr = { path = "crates/stagecraft-hlr" }
 stagecraft-mvr = { path = "crates/stagecraft-mvr" }
+stagecraft-sketch = { path = "crates/stagecraft-sketch" }
 stagecraft-ui = { path = "crates/stagecraft-ui" }
 anyhow = "1"
+ezpz = "0.2.29"
+faer = { version = "0.24", default-features = false, features = ["std"] }
 earcutr = "0.5"
 rayon = "1.11"
 egui = "0.36.2"
@@ -60,3 +62,12 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 # Hidden-line removal runs on every sheet change; keep it fast in debug builds too.
 [profile.dev.package.stagecraft-hlr]
 opt-level = 2
+
+# The sketch solver: faer's generic dense QR is monomorphised into stagecraft-sketch and
+# is ~500x slower unoptimised (6 s instead of 12 ms for a 200-point room analysis).
+[profile.dev.package.stagecraft-sketch]
+opt-level = 2
+[profile.dev.package.faer]
+opt-level = 3
+[profile.dev.package.ezpz]
+opt-level = 3

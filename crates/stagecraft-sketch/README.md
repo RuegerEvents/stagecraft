@@ -5,15 +5,15 @@ points, lines and arcs with geometric constraints and driving or reference dimen
 solved with [ezpz](https://github.com/KittyCAD/ezpz) 0.2.29 by Zoo. Closed loops become
 floors; edges carry an opaque tag for wall properties.
 
-Standalone for now (excluded from the workspace, no StageCraft dependencies). Builds for
+A workspace member without StageCraft dependencies; `stagecraft-core` stores one sketch
+per layer and maps the `sketch.*` / `dimension.*` commands onto [`Edit`]s. Builds for
 `wasm32-unknown-unknown`. Every public type is `serde` + `schemars::JsonSchema`, so the
 sketch can be document data and edits can be command arguments.
 
 ```sh
-cd crates/stagecraft-sketch
-CARGO_TARGET_DIR=../../target-sketch cargo test
-CARGO_TARGET_DIR=../../target-sketch cargo test --release --test perf -- --nocapture
-CARGO_TARGET_DIR=../../target-sketch cargo check --target wasm32-unknown-unknown
+cargo test -p stagecraft-sketch
+cargo test -p stagecraft-sketch --release --test perf -- --nocapture
+cargo check -p stagecraft-sketch --target wasm32-unknown-unknown
 ```
 
 Units: millimetres and degrees. Axes as in StageCraft (x right, y upstage).
@@ -163,4 +163,54 @@ dimension change 0.3 ms; full solve with analysis ~17 ms (the dense QR analysis 
 
 ## Limits
 
-See `DECISIONS.md` for the reasoning behind each choice and the known weak spots.
+The reasoning behind each choice is in `docs/spec/decisions.md` (rows "Sketch: …").
+
+### Weak spots
+
+- **Redundancy is numeric.** Dependence is judged from the Jacobian at the current
+  position with fixed tolerances (rank 1e-9 relative, participation 1e-6). Special
+  positions (collinear points, zero-length lines) can make independent constraints look
+  redundant, and the analysis cost grows with the cube of the sketch size (dense QR; no
+  splitting into independent components yet).
+- **Conflict sets** are the constraints left unsatisfied by the least-squares solve. If
+  ezpz stops before the least-squares optimum, a bystander can be included or a member
+  missed. `culprits` (what the edit touched) is reliable.
+- **Branch flips**: dimension ramps keep large changes on the visible branch in the tests,
+  but nothing detects a fold (e.g. a triangle flipping through its base) if the solver
+  lands there anyway.
+- **Angles are modulo 180°** (ezpz `LinesAtAngle`); an angle dimension cannot tell 60°
+  from 120° between the same line directions except through the initial geometry.
+- **Point-on-line** uses the infinite line; **point-on-arc** the full circle.
+- **No circles, no arc-arc tangency, no equal radius**; tangent only at a shared end point.
+- **Drag** of a held point runs two solves (weighted, then projection); with weight 1 the
+  dragged point ends where the projection puts it, which is close to but not exactly the
+  nearest reachable position.
+- **Loops**: no hole/island nesting; faces need real shared points (a T-junction made with
+  point-on-line does not split a face).
+
+## ezpz: what it offers (0.2.29)
+
+The crate was published as `kcl-ezpz` up to 0.2.18 and is now `ezpz` (0.2.29, same
+repo KittyCAD/ezpz, MIT). `ezpz` 0.0.1 on crates.io is an unrelated project generator;
+the version requirement `0.2.29` avoids it.
+
+- **Entities** (`datatypes::inputs`): `DatumPoint`, `DatumLineSegment`, `DatumCircle`
+  (centre + radius variable), `DatumCircularArc` (centre, start, end; counter-clockwise),
+  `DatumDistance` (a free scalar).
+- **Constraints**: `Fixed` (one scalar), `PointsCoincident`, `Horizontal`, `Vertical`,
+  `Distance`, `DistanceVar`, `HorizontalDistance` / `VerticalDistance` (signed:
+  `p.x − q.x = d`), `LinesAtAngle` (`Parallel`, `Perpendicular`, `Other(angle)`; modulo
+  180°), `PointsAtAngle` (oriented angle at a vertex), `LinesEqualLength`, `Midpoint`,
+  `PointLineDistance` (signed, left of p0→p1 positive), `Vertical/HorizontalPointLineDistance`,
+  `Symmetric`, `ScalarEqual`, `Arc` (start/end equidistant from centre), `ArcRadius`,
+  `ArcLength`, `ArcAngle`, `PointArcCoincident`, `CircleRadius`, `LineTangentToCircle`,
+  `CircleTangentToCircle`.
+- **Solver**: Levenberg–Marquardt on a sparse Jacobian (faer 0.24), convergence when the
+  largest residual ≤ 1e-8. Priorities (lower number first; a lower priority that cannot
+  be met is dropped) and per-request weights. Variable ids must be `0..n` and the
+  guesses given in id order (`Layout::index_of(id) = id`).
+- **Analysis**: `solve_analysis` returns under-constrained variable ids (dense QR of the
+  Jacobian). There is no redundancy/conflict analysis; a failed system only reports
+  which constraints stayed unsatisfied.
+- **WASM**: pure Rust (faer without default features, libm); builds for
+  `wasm32-unknown-unknown`.
