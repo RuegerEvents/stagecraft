@@ -113,7 +113,6 @@ fn body(ui: &mut Ui, s: &mut Studio) {
         widgets::name(&r, egui::Role::Label, format!("Settings example {}", u.with_unit(6155.0)));
         ui.end_row();
     });
-    ui.add(egui::Label::new(RichText::new(t("settings.units_note")).small().color(c.text3)).wrap());
 
     widgets::section(ui, t("settings.sheet_text"));
     egui::Grid::new("settings_sheet_text").num_columns(2).spacing([6.0, 4.0]).show(ui, |ui| {

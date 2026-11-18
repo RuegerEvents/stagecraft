@@ -938,7 +938,6 @@
   "settings.length_unit": "Length unit",
   "settings.precision": "Precision",
   "settings.example": "Example",
-  "settings.units_note": "Every length in the Inspector, tool options, heads-up boxes, table and status bar shows and is typed in this unit; a number without a unit is in it, an explicit unit (15m, 1500mm, 15' 6\") always wins. Files, commands, MCP and the CLI keep millimetres.",
   "settings.sheet_text": "Sheet text",
   "settings.title_block": "Title block",
   "settings.done": "Done",
