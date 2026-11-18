@@ -3,7 +3,9 @@
 //! ceiling, twelve battens with the main curtain (open), three wings of black
 //! masking, two lighting trusses and a lighting pipe, a black backdrop, a rostrum of
 //! Bütec decks with Nivoflex steps, an FOH truss run on a hoist and two stands on the
-//! forestage. Fixtures weigh 21 kg, so the load sums show real numbers.
+//! forestage. Fixtures are the three synthetic GDTFs in `testdata/gdtf` (profile,
+//! moving head spot, pixel bar), embedded in the document, so weights, footprints
+//! and geometry come from GDTF.
 
 use serde_json::{Value, json};
 use stagecraft_core::Engine;
@@ -12,7 +14,24 @@ fn run(e: &mut Engine, name: &str, args: Value) -> Value {
     e.execute(name, args).unwrap_or_else(|err| panic!("demo: {name} failed: {err}"))
 }
 
-const FIXTURE_KG: f64 = 21.0;
+/// The synthetic demo GDTFs, compiled in so the demo needs no files.
+pub const DEMO_GDTFS: [(&str, &[u8]); 3] = [
+    ("StageCraft Demo@Profile 750.gdtf", include_bytes!("../../../testdata/gdtf/StageCraft Demo@Profile 750.gdtf")),
+    ("StageCraft Demo@Spot 300.gdtf", include_bytes!("../../../testdata/gdtf/StageCraft Demo@Spot 300.gdtf")),
+    ("StageCraft Demo@Pixel Bar 8.gdtf", include_bytes!("../../../testdata/gdtf/StageCraft Demo@Pixel Bar 8.gdtf")),
+];
+
+pub const PROFILE: &str = "StageCraft Demo@Profile 750";
+pub const SPOT: &str = "StageCraft Demo@Spot 300";
+pub const BAR: &str = "StageCraft Demo@Pixel Bar 8";
+
+/// Put the demo GDTFs into a document's library.
+pub fn import_types(e: &mut Engine) {
+    for (name, bytes) in DEMO_GDTFS {
+        let data = stagecraft_core::sheet::base64_encode(bytes);
+        run(e, "gdtf.import", json!({ "data_base64": data, "file_name": name }));
+    }
+}
 
 pub fn engine() -> Engine {
     let mut e = Engine::new();
@@ -114,19 +133,23 @@ pub fn engine() -> Engine {
         }),
     );
 
+    import_types(&mut e);
     let mut fid = 101;
-    let mut fixture = |e: &mut Engine, parent: &Value, name: &str, position: [f64; 3], rotation: [f64; 3]| {
-        let addr = 1 + (fid - 101) * 16;
-        run(
-            e,
-            "fixture.create",
-            json!({
-                "parent": parent, "position": position, "rotation": rotation, "fid": fid, "address": addr,
-                "mode": "Standard 16ch", "tags": ["light"], "name": name, "weight_kg": FIXTURE_KG
-            }),
-        );
-        fid += 1;
-    };
+    let mut fixture =
+        |e: &mut Engine, parent: &Value, name: &str, ty: (&str, &str), position: [f64; 3], rotation: [f64; 3]| {
+            run(
+                e,
+                "fixture.create",
+                json!({
+                    "parent": parent, "position": position, "rotation": rotation, "fid": fid,
+                    "gdtf": ty.0, "mode": ty.1, "tags": ["light"], "name": name
+                }),
+            );
+            fid += 1;
+        };
+    let profile = (PROFILE, "Dimmer 16 bit");
+    let spot = (SPOT, "Standard");
+    let bar = (BAR, "Split");
     // FOH: an 8 m run on one hoist (with a bridle) over the house.
     let hoist = run(
         &mut e,
@@ -145,11 +168,12 @@ pub fn engine() -> Engine {
     for piece in foh["pieces"].as_array().unwrap().clone().iter() {
         for x in [700.0, 2100.0] {
             n += 1;
-            fixture(&mut e, piece, &format!("FOH {n}"), [x, 0.0, -150.0], [0.0, 0.0, 0.0]);
+            // Tilted 50° towards the stage.
+            fixture(&mut e, piece, &format!("FOH {n}"), profile, [x, 0.0, -150.0], [50.0, 0.0, 0.0]);
         }
     }
     // LX1 and LX3: truss under battens 4 and 10; LX2 straight on batten 7.
-    for (name, batten, n) in [("LX1", 3usize, 8), ("LX3", 9, 6)] {
+    for (name, batten, n, ty) in [("LX1", 3usize, 8, spot), ("LX3", 9, 6, bar)] {
         let t = run(
             &mut e,
             "truss.create",
@@ -160,12 +184,13 @@ pub fn engine() -> Engine {
         );
         for i in 0..n {
             let x = 12000.0 * (i as f64 + 0.5) / n as f64;
-            fixture(&mut e, &t["id"], &format!("{name} {}", i + 1), [x, 0.0, -150.0], [0.0, 0.0, 180.0]);
+            fixture(&mut e, &t["id"], &format!("{name} {}", i + 1), ty, [x, 0.0, -150.0], [0.0, 0.0, 180.0]);
         }
     }
     for i in 0..6 {
         let x = -5000.0 + 2000.0 * i as f64;
-        fixture(&mut e, &ids[6], &format!("LX2 {}", i + 1), [x, 0.0, -60.0], [0.0, 0.0, 180.0]);
+        // Turned to face the audience and tilted down 40°.
+        fixture(&mut e, &ids[6], &format!("LX2 {}", i + 1), profile, [x, 0.0, -60.0], [40.0, 0.0, 180.0]);
     }
     // Stands on the forestage with two fixtures each.
     for (side, x) in [("SL", 7300.0), ("SR", -7300.0)] {
@@ -175,7 +200,7 @@ pub fn engine() -> Engine {
             json!({ "name": format!("Stand {side}"), "preset": "Wind-up stand", "position": [x, -1000, 0] }),
         );
         for dx in [-150.0, 150.0] {
-            fixture(&mut e, &st["id"], &format!("Boom {side}"), [dx, 0.0, 3000.0], [180.0, 0.0, 0.0]);
+            fixture(&mut e, &st["id"], &format!("Boom {side}"), spot, [dx * 2.0, 0.0, 3000.0], [180.0, 0.0, 0.0]);
         }
     }
 
@@ -206,7 +231,21 @@ pub fn engine() -> Engine {
     );
     // A floor fixture on a base plate upstage.
     let plate = run(&mut e, "support.create", json!({ "preset": "Base plate 600", "position": [-6500, 10800, 0] }));
-    fixture(&mut e, &plate["id"], "Floor wash", [0.0, 0.0, 10.0], [180.0, 0.0, 0.0]);
+    fixture(&mut e, &plate["id"], "Floor wash", (BAR, "8px RGB"), [0.0, 0.0, 10.0], [180.0, 0.0, 0.0]);
+
+    // Patch everything in FID order from 1.001.
+    let mut by_fid: Vec<(u32, stagecraft_core::Id)> = e
+        .doc()
+        .objects
+        .values()
+        .filter_map(|o| match o.kind {
+            stagecraft_core::ObjectKind::Fixture { fid: Some(f), .. } => Some((f, o.id)),
+            _ => None,
+        })
+        .collect();
+    by_fid.sort();
+    let ids_in_order: Vec<_> = by_fid.iter().map(|x| x.1).collect();
+    run(&mut e, "patch.auto", json!({ "ids": ids_in_order, "start": "1.001" }));
 
     sheets(&mut e);
 

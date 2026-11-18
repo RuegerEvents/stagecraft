@@ -44,11 +44,15 @@ pub struct Symbol {
     pub source: SymbolSource,
 }
 
+/// Extreme points per mesh part, see [`outline_points`].
+pub type Outline = Arc<Vec<Vec<Vec3>>>;
+
 #[derive(Default)]
 struct Cache {
     gdtf: HashMap<String, Option<Arc<Gdtf>>>,
     meshes: HashMap<(String, String, Lod), Arc<Mesh>>,
     symbols: HashMap<(String, String, Option<String>), Option<Arc<Symbol>>>,
+    outlines: HashMap<(String, String), Option<Outline>>,
 }
 
 fn cache() -> &'static Mutex<Cache> {
@@ -267,6 +271,101 @@ fn gdtf_svg_symbol(g: &Gdtf, mode: Option<&str>) -> Vec<LocalPrim> {
             [q.x as f64, q.y as f64]
         };
         out.extend(shapes_to_prims(&svg, &map, LineClass::Thin));
+    }
+    out
+}
+
+/// Extreme points per mesh part (fixture frame, neutral pose, mm): the points
+/// furthest along 66 directions, which outline the part's convex hull from any
+/// side. The plan projects them through the fixture's full world transform, so a
+/// tilted fixture shows its real top view.
+pub fn outline_points(doc: &Document, obj: &Object) -> Option<Outline> {
+    let (t, mode) = type_of(doc, obj)?;
+    let key = (t.asset.clone(), mode.clone());
+    if let Some(o) = cache().lock().ok()?.outlines.get(&key) {
+        return o.clone();
+    }
+    let out = parsed(doc, t).map(|g| {
+        let fm = g.mesh((!mode.is_empty()).then_some(mode.as_str()), stagecraft_gdtf::Lod::Low);
+        let ts = fm.posed_transforms(&|_, _| Mat4::IDENTITY);
+        let dirs = directions();
+        let parts: Vec<Vec<Vec3>> = fm
+            .parts
+            .iter()
+            .zip(&ts)
+            .filter_map(|(p, t)| {
+                let m = p.mesh.as_ref()?;
+                let pts: Vec<Vec3> = m.positions.iter().map(|q| t.transform_point3(Vec3::from_array(*q))).collect();
+                if pts.is_empty() {
+                    return None;
+                }
+                let mut ext: Vec<Vec3> = dirs
+                    .iter()
+                    .map(|d| *pts.iter().max_by(|a, b| a.dot(*d).total_cmp(&b.dot(*d))).expect("non-empty"))
+                    .collect();
+                ext.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)).then(a.z.total_cmp(&b.z)));
+                ext.dedup_by(|a, b| a.distance_squared(*b) < 1e-6);
+                Some(ext)
+            })
+            .collect();
+        Arc::new(parts)
+    });
+    let mut c = cache().lock().ok()?;
+    if c.outlines.len() > MAX_ENTRIES {
+        c.outlines.clear();
+    }
+    c.outlines.insert(key, out.clone());
+    out
+}
+
+/// 66 unit directions: the 26 of a cube's faces, edges and corners plus 40 on a
+/// Fibonacci sphere.
+fn directions() -> Vec<Vec3> {
+    let mut v = Vec::new();
+    for x in -1..=1 {
+        for y in -1..=1 {
+            for z in -1..=1 {
+                if (x, y, z) != (0, 0, 0) {
+                    v.push(Vec3::new(x as f32, y as f32, z as f32).normalize());
+                }
+            }
+        }
+    }
+    let n = 40;
+    let golden = std::f32::consts::PI * (3.0 - 5f32.sqrt());
+    for i in 0..n {
+        let y = 1.0 - 2.0 * (i as f32 + 0.5) / n as f32;
+        let r = (1.0 - y * y).sqrt();
+        let a = golden * i as f32;
+        v.push(Vec3::new(r * a.cos(), y, r * a.sin()));
+    }
+    v
+}
+
+/// The silhouette seen from above with the fixture's world transform: overall hull
+/// (filled body) and one hull per part (thin), world plan mm.
+pub fn world_silhouette(parts: &[Vec<Vec3>], w: &glam::DAffine3) -> Vec<crate::PlanPrim> {
+    use glam::Vec2;
+    let proj = |p: &Vec3| {
+        let q = w.transform_point3(p.as_dvec3());
+        Vec2::new(q.x as f32, q.y as f32)
+    };
+    let to_p2 = |h: Vec<Vec2>| h.into_iter().map(|p| [p.x as f64, p.y as f64]).collect::<Vec<P2>>();
+    let all: Vec<Vec2> = parts.iter().flatten().map(proj).collect();
+    let mut out = Vec::new();
+    let hull = stagecraft_gdtf::silhouette::convex_hull(&all);
+    if hull.len() >= 3 {
+        out.push(crate::PlanPrim::Polygon {
+            points: to_p2(hull),
+            fill: FillClass::Body,
+            line: Some(LineClass::Medium),
+        });
+    }
+    for p in parts {
+        let h = stagecraft_gdtf::silhouette::convex_hull(&p.iter().map(proj).collect::<Vec<_>>());
+        if h.len() >= 3 {
+            out.push(crate::PlanPrim::Polyline { points: to_p2(h), closed: true, line: LineClass::Thin });
+        }
     }
     out
 }

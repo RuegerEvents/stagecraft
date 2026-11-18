@@ -178,3 +178,32 @@ fn real_gdtfs_load_and_draw() {
     }
     eprintln!("{n} fixtures");
 }
+
+/// The silhouette follows the fixture's tilt: a profile hanging straight down is a
+/// short shape from above; tilted 50° its barrel shows its length.
+#[test]
+fn silhouettes_follow_tilt() {
+    let mut e = Engine::new();
+    demo(&mut e);
+    let down = id(&run(&mut e, "fixture.create", json!({ "gdtf": PROFILE, "position": [0, 0, 6000] })));
+    let tilted = id(&run(
+        &mut e,
+        "fixture.create",
+        json!({ "gdtf": PROFILE, "position": [3000, 0, 6000], "rotation": [50, 0, 0] }),
+    ));
+    let extent_y = |f: Id| {
+        let p = plan(&e, f);
+        let ys: Vec<f64> = p
+            .iter()
+            .flat_map(|q| match q {
+                PlanPrim::Polygon { points, .. } => points.iter().map(|p| p[1]).collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+        ys.iter().copied().fold(f64::MIN, f64::max) - ys.iter().copied().fold(f64::MAX, f64::min)
+    };
+    let (a, b) = (extent_y(down), extent_y(tilted));
+    assert!(a < 260.0, "{a}");
+    // 650 mm barrel at 50°: about 0.77 × 650 = 500 mm in plan.
+    assert!(b > 420.0, "{b}");
+}

@@ -44,6 +44,15 @@ pub fn plan(doc: &Document, w: &DAffine3, obj: &Object, style: &PlanStyle) -> Ve
     let mut out = Vec::new();
     let mut label_at = [0.0, -20.0];
     match crate::gdtf::symbol(doc, obj) {
+        Some(sym)
+            if sym.source == crate::gdtf::SymbolSource::Silhouette
+                && let Some(parts) = crate::gdtf::outline_points(doc, obj) =>
+        {
+            // The true top view of the turned and tilted model.
+            out.extend(crate::gdtf::world_silhouette(&parts, w));
+            let (lo, hi) = sym.bounds;
+            label_at = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
+        }
         Some(sym) => {
             for lp in &sym.prims {
                 out.push(match lp {

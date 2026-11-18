@@ -360,16 +360,30 @@ fn number(ctx: &mut Ctx, a: NumberArgs) -> CmdResult {
 #[derive(Deserialize, JsonSchema)]
 struct ImportArgs {
     /// Path to a `.gdtf` file.
-    path: PathBuf,
+    path: Option<PathBuf>,
+    /// The file's bytes, base64, instead of `path` (browser, scripts).
+    data_base64: Option<String>,
+    /// File name to record with `data_base64`. Default `fixture.gdtf`.
+    file_name: Option<String>,
     /// Library key. Default `Manufacturer@Name` from the file. Importing a key that
     /// exists replaces that type (its fixtures follow; the symbol stays).
     key: Option<String>,
 }
 
 fn import(ctx: &mut Ctx, a: ImportArgs) -> CmdResult {
-    let bytes = std::fs::read(&a.path).map_err(|e| CmdError::io(format!("{}: {e}", a.path.display())))?;
-    let file_name =
-        a.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "fixture.gdtf".into());
+    let (file_name, bytes) = match (&a.path, &a.data_base64) {
+        (Some(p), None) => {
+            let bytes = std::fs::read(p).map_err(|e| CmdError::io(format!("{}: {e}", p.display())))?;
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "fixture.gdtf".into());
+            (name, bytes)
+        }
+        (None, Some(b)) => {
+            let bytes =
+                crate::sheet::base64_decode(b).ok_or_else(|| CmdError::invalid_args("data_base64 is not base64"))?;
+            (a.file_name.clone().unwrap_or_else(|| "fixture.gdtf".into()), bytes)
+        }
+        _ => return Err(CmdError::invalid_args("give either `path` or `data_base64`")),
+    };
     import_bytes(ctx, &file_name, bytes, a.key.as_deref())
 }
 

@@ -26,5 +26,6 @@ serde_json.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+stagecraft-gdtf = { workspace = true, features = ["share"] }
 egui_kittest.workspace = true
 tempfile.workspace = true
