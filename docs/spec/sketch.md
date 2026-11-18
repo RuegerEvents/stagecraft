@@ -59,3 +59,9 @@ of outputs (`hall_a.stagecraft`, `.pdf`, plan/3D/house/side PNGs); the 13 → 15
 portal check runs inside it and is undone. Open: where "21 m" starts (read from the
 portal line, the only reading that gives the V with 9 m + 13 m), whether the loose-chair
 area rises (photos: flat), and the guessed sizes in notes A1–A11.
+
+Round 3 (user's answers, same day): "21 m" ends at the cross aisle's rear edge; the
+cross aisle has a straight middle as wide as the tribune's middle block, so "13 m to the
+middle" is the leg plus half of it; the knees lie behind the middle and the hall's rear
+wall is straight. Seats are real `seat_row` objects with the user's counts (535 in all);
+the front rows stand on 0.25 m tiers, the stage is 1.00 m above the pit floor.
