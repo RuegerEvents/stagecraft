@@ -82,6 +82,56 @@ fn window_buttons(img: &mut image::RgbaImage) {
     }
 }
 
+/// The command palette: groups with recents, suggestions for a selection, a group, flat
+/// search, aliases, the inline form, object search and `>` mode.
+#[test]
+fn palette_screens() {
+    let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") else { return };
+    std::fs::create_dir_all(&dir).expect("screenshot dir");
+    for (theme, tn) in [(ThemePref::Light, "light"), (ThemePref::Dark, "dark")] {
+        let mut h = harness(theme);
+        let shot = |h: &mut Harness<'static, Studio>, query: &str, name: &str| {
+            h.state_mut().ui.palette.open();
+            h.run();
+            h.state_mut().ui.palette.query = query.into();
+            save(h, &dir, &format!("{name}-{tn}"));
+        };
+        h.state_mut().ui.recent =
+            vec!["patch.auto".into(), "ui.set_view {\"view\":\"3d\"}".into(), "app.export_pdf".into()];
+        shot(&mut h, "", "70-palette-groups");
+        let doc = h.state().engine.doc().clone();
+        let foh: Vec<_> = doc
+            .objects
+            .values()
+            .filter(|o| o.name.starts_with("FOH") && o.kind.type_name() == "fixture")
+            .map(|o| o.id)
+            .collect();
+        h.state_mut().run("selection.set", json!({ "ids": foh })).unwrap();
+        shot(&mut h, "", "71-palette-selection");
+        h.state_mut().ui.palette.open();
+        h.state_mut().ui.palette.group = Some(stagecraft_ui::command_meta::Group::Rigging);
+        h.run();
+        save(&mut h, &dir, &format!("72-palette-group-{tn}"));
+        shot(&mut h, "truss", "73-palette-search");
+        shot(&mut h, "zug", "74-palette-alias");
+        shot(&mut h, "101", "76-palette-objects");
+        shot(&mut h, "> ui.", "77-palette-commands");
+        h.state_mut().ui.palette.open();
+        h.run();
+        stagecraft_ui::palette::choose(h.state_mut(), "patch.auto");
+        h.run();
+        save(&mut h, &dir, &format!("75-palette-form-{tn}"));
+        h.state_mut().ui.palette.close();
+        h.state_mut().run("selection.clear", json!(null)).unwrap();
+        h.state_mut().ui.palette.open();
+        h.run();
+        stagecraft_ui::palette::choose(h.state_mut(), "truss.create");
+        h.run();
+        save(&mut h, &dir, &format!("78-palette-form-truss-{tn}"));
+        h.state_mut().ui.palette.close();
+    }
+}
+
 /// The window at the size of the Craft suite's reference screenshots (1200 × 750).
 #[test]
 fn craft_size() {
@@ -98,9 +148,12 @@ fn craft_size() {
         h.state_mut().run("ui.set_tool", json!({ "tool": "wall" })).unwrap();
         save(&mut h, &dir, &format!("52-craft-wall-tool-{tn}"));
         h.state_mut().run("ui.set_tool", json!({ "tool": "select" })).unwrap();
+        // As in the other overviews: the house ceiling would lie over the stage in the iso view.
+        h.state_mut().run("ui.set_tag_visible", json!({ "tag": "ceiling", "visible": false })).unwrap();
         h.state_mut().run("ui.set_view", json!({ "view": "3d" })).unwrap();
         h.state_mut().run("ui.camera", json!({ "view": "iso" })).unwrap();
         save(&mut h, &dir, &format!("53-craft-3d-{tn}"));
+        h.state_mut().run("ui.set_tag_visible", json!({ "tag": "ceiling", "visible": true })).unwrap();
         h.state_mut().run("ui.set_view", json!({ "view": "sheets" })).unwrap();
         for _ in 0..30 {
             h.step();

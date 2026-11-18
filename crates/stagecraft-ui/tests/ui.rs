@@ -241,13 +241,186 @@ fn the_palette_lists_ui_commands_and_runs_them_without_a_form() {
     let mut h = harness(stagecraft_ui::demo::engine());
     h.state_mut().ui.palette.open();
     h.run();
+    // Technical commands only show after `>`, with their titles.
     h.get_by_label("Search commands").type_text("ui.state");
     h.run();
-    assert!(h.query_by_label("ui.state").is_some());
-    h.get_by_label("ui.state").click();
+    assert!(h.query_by_label("UI State").is_none());
+    h.state_mut().ui.palette.query.clear();
+    h.run();
+    h.get_by_label("Search commands").type_text("> ui.state");
+    h.run();
+    h.get_by_label("UI State").click();
     h.run();
     assert!(!h.state().ui.palette.open);
-    assert!(h.state().ui.status.as_ref().unwrap().0.starts_with("ui.state"));
+    assert!(h.state().ui.status.as_ref().unwrap().0.starts_with("UI State"), "{:?}", h.state().ui.status);
+}
+
+fn open_palette(h: &mut Harness<'static, Studio>) {
+    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    h.run();
+    assert!(h.state().ui.palette.open);
+}
+
+fn type_query(h: &mut Harness<'static, Studio>, text: &str) {
+    h.get_by_label("Search commands").type_text(text);
+    h.run();
+}
+
+/// The first row's item.
+fn first_row(h: &Harness<'static, Studio>) -> stagecraft_ui::palette::Item {
+    stagecraft_ui::palette::rows(h.state())[0].item
+}
+
+fn first_title(h: &Harness<'static, Studio>) -> String {
+    match first_row(h) {
+        stagecraft_ui::palette::Item::Command(i) => stagecraft_ui::command_meta::META[i].title().to_owned(),
+        other => format!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_palette_opens_groups_and_goes_back() {
+    use stagecraft_ui::command_meta::Group;
+    let mut h = harness(stagecraft_ui::demo::engine());
+    open_palette(&mut h);
+    // Nothing run yet, nothing selected: the groups, File first.
+    assert_eq!(first_row(&h), stagecraft_ui::palette::Item::Group(Group::File));
+    assert!(h.query_by_label("Group Rigging").is_some());
+    assert!(h.query_by_label("Group Advanced").is_none(), "technical commands have no group of their own");
+    // → opens the highlighted group, ← goes back.
+    h.key_press(Key::ArrowRight);
+    h.run();
+    assert_eq!(h.state().ui.palette.group, Some(Group::File));
+    assert!(h.query_by_label("Export Sheets as PDF…").is_some());
+    h.key_press(Key::ArrowLeft);
+    h.run();
+    assert_eq!(h.state().ui.palette.group, None);
+    // A click opens one too; Backspace on the empty query goes back.
+    h.get_by_label("Group Rigging").click();
+    h.run();
+    assert_eq!(h.state().ui.palette.group, Some(Group::Rigging));
+    assert!(h.query_by_label("Create Truss Piece…").is_some());
+    assert!(h.query_by_label("Draw Wall").is_none(), "only the group's commands");
+    h.key_press(Key::Backspace);
+    h.run();
+    assert_eq!(h.state().ui.palette.group, None);
+    // Esc closes from the top.
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(!h.state().ui.palette.open);
+}
+
+#[test]
+fn the_palette_finds_by_title_alias_and_fid() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    open_palette(&mut h);
+    type_query(&mut h, "auto patch");
+    assert_eq!(first_title(&h), "Auto-Patch Fixtures…");
+    h.state_mut().ui.palette.query.clear();
+    h.run();
+    // German and Vectorworks names.
+    for (alias, wanted) in [("Zug", "batten"), ("Traverse", "truss"), ("Podest", "platform"), ("Klasse", "tag")] {
+        h.state_mut().ui.palette.query.clear();
+        h.run();
+        type_query(&mut h, alias);
+        let stagecraft_ui::palette::Item::Command(i) = first_row(&h) else { panic!("{alias}: {:?}", first_row(&h)) };
+        assert!(stagecraft_ui::command_meta::META[i].key_str().contains(wanted), "{alias}: {}", first_title(&h));
+    }
+    // A FID finds the fixture; Enter selects it and closes the palette.
+    h.state_mut().ui.palette.query.clear();
+    h.run();
+    type_query(&mut h, "101");
+    let doc = h.state().engine.doc().clone();
+    let foh1 = doc
+        .objects
+        .values()
+        .find(|o| matches!(o.kind, ObjectKind::Fixture { fid: Some(101), .. }))
+        .expect("FID 101 in the demo")
+        .id;
+    assert_eq!(first_row(&h), stagecraft_ui::palette::Item::Object(foh1));
+    h.key_press(Key::Enter);
+    h.run();
+    assert!(!h.state().ui.palette.open);
+    assert_eq!(h.state().engine.selection(), [foh1]);
+    // `@` searches objects only, `#` tags.
+    open_palette(&mut h);
+    type_query(&mut h, "#light");
+    assert!(matches!(first_row(&h), stagecraft_ui::palette::Item::Tag(_)));
+}
+
+#[test]
+fn technical_commands_need_the_prefix() {
+    let mut h = harness(Engine::new());
+    open_palette(&mut h);
+    type_query(&mut h, "batch");
+    assert!(h.query_by_label("Batch").is_none());
+    h.state_mut().ui.palette.query.clear();
+    h.run();
+    type_query(&mut h, ">batch");
+    assert!(h.query_by_label("Batch").is_some());
+    // `>` alone lists every command of both registries.
+    h.state_mut().ui.palette.query = ">".into();
+    h.run();
+    let n = stagecraft_ui::palette::rows(h.state()).len();
+    let registered =
+        stagecraft_core::registry().entries().len() + stagecraft_ui::commands::ui_registry().entries().len();
+    assert!(n >= registered, "{n} rows for {registered} commands");
+}
+
+#[test]
+fn the_palette_runs_a_form_inline_and_remembers_it() {
+    let mut e = Engine::new();
+    let b = id(&e.execute("batten.create", json!({ "name": "Zug 1", "y": 2000, "trim": 8000 })).unwrap());
+    let mut h = harness(e);
+    // Without a batten selected the command is greyed and says why.
+    open_palette(&mut h);
+    type_query(&mut h, "edit batten");
+    assert_eq!(first_title(&h), "Edit Batten…");
+    h.key_press(Key::Enter);
+    h.run();
+    assert!(h.state().ui.palette.chosen.is_none());
+    assert_eq!(h.state().ui.palette.error.as_deref(), Some("Select one batten first"));
+    h.key_press(Key::Escape);
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(!h.state().ui.palette.open);
+
+    run(&mut h, "selection.set", json!({ "ids": [b] }));
+    open_palette(&mut h);
+    // With the batten selected it is suggested first.
+    let rows = stagecraft_ui::palette::rows(h.state());
+    assert!(
+        rows.iter().any(|r| r.section == stagecraft_ui::palette::Section::Suggested
+            && matches!(r.item, stagecraft_ui::palette::Item::Command(i) if stagecraft_ui::command_meta::META[i].id == "batten.update")),
+        "batten.update suggested for a batten"
+    );
+    type_query(&mut h, "edit batten");
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(h.state().ui.palette.chosen.as_deref(), Some("batten.update"));
+    assert_eq!(h.state().ui.palette.values.get("id"), Some(&b.to_string()), "the id comes from the selection");
+    // Esc goes back to the list, Enter opens the form again.
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(h.state().ui.palette.chosen.is_none() && h.state().ui.palette.open);
+    assert_eq!(h.state().ui.palette.query, "edit batten");
+    h.key_press(Key::Enter);
+    h.run();
+    h.get_by_label("Argument trim").click();
+    h.run();
+    h.get_by_label("Argument trim").type_text("7500");
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    assert!(!h.state().ui.palette.open);
+    let o = &h.state().engine.doc().objects[&b];
+    assert_eq!(o.placement.position[2], 7500.0);
+    assert_eq!(h.state().ui.recent.first().map(String::as_str), Some("batten.update"));
+    // The next time it is under Recent, and the settings keep it.
+    assert_eq!(h.state().prefs.get().palette.recent.first().map(String::as_str), Some("batten.update"));
+    open_palette(&mut h);
+    let rows = stagecraft_ui::palette::rows(h.state());
+    assert_eq!(rows[0].section, stagecraft_ui::palette::Section::Recent);
 }
 
 #[test]
@@ -738,4 +911,13 @@ fn tools_sit_in_the_palette_and_tool_bar_commands_that_do_not_fit_go_into_a_menu
     h.run();
     assert!(h.state().ui.tutorial.active);
     assert_eq!(stagecraft_ui::panels::tool_tip(stagecraft_ui::Tool::Wall), "Wall (W)");
+}
+
+#[test]
+fn table_columns_resize_by_dragging_the_header() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    let handle = h.get_by_label("Resize Name").rect().center();
+    drag(&mut h, handle, handle + vec2(60.0, 0.0));
+    let w = h.state().ui.table.widths.get(&stagecraft_ui::table::Col::Name).copied().expect("dragged width");
+    assert!(w > stagecraft_ui::table::Col::Name.width(), "{w}");
 }

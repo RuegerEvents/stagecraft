@@ -26,7 +26,7 @@ pub struct CmdLine {
     pub cursor: usize,
 }
 
-/// What the command line can complete to: a tool or a command.
+/// What the command line can complete to: a tool or a command (its ID and title).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Completion {
     Tool(Tool),
@@ -42,29 +42,40 @@ impl Completion {
     }
 }
 
-/// Completions for the first word of `text`, best first.
+/// Completions for what is typed, best first: tool names, then commands by title, alias
+/// or ID (as the palette finds them). Nothing once a known command is followed by
+/// arguments.
 pub fn complete(text: &str) -> Vec<Completion> {
-    let word = text.split_whitespace().next().unwrap_or("");
-    // Arguments are being typed: nothing to complete.
-    if word.is_empty() || text.trim_start().contains(char::is_whitespace) {
+    let first = text.split_whitespace().next().unwrap_or("");
+    if first.is_empty() || (crate::palette::is_command(first) && text.trim_start().contains(char::is_whitespace)) {
         return Vec::new();
     }
+    let query = text.trim();
     let mut tools: Vec<(i32, Completion)> = Tool::ALL
         .iter()
         .filter_map(|tool| {
             let name = t(tool.key()).to_lowercase();
-            crate::fuzzy::subsequence(word, &name)
-                .filter(|_| name.starts_with(&word.to_lowercase()))
+            crate::fuzzy::subsequence(query, &name)
+                .filter(|_| name.starts_with(&query.to_lowercase()))
                 .map(|sc| (sc + 40, Completion::Tool(*tool)))
         })
         .collect();
-    let commands = crate::palette::search(word)
-        .into_iter()
-        .take(12)
-        .enumerate()
-        .map(|(i, e)| (-(i as i32), Completion::Command(e.name, e.summary)));
     tools.sort_by_key(|x| std::cmp::Reverse(x.0));
-    tools.into_iter().map(|x| x.1).chain(commands.map(|x| x.1)).take(8).collect()
+    // Base rows only: a completion is an ID one can type.
+    let mut seen = Vec::new();
+    let commands = crate::palette::search_commands(query, query.contains('.'), None)
+        .into_iter()
+        .filter_map(|(i, _)| {
+            let m = &crate::command_meta::META[i];
+            if m.id.starts_with("app.") || seen.contains(&m.id) {
+                return None;
+            }
+            seen.push(m.id);
+            let base = crate::command_meta::of(m.id).unwrap_or(m);
+            Some(Completion::Command(m.id, base.title()))
+        })
+        .take(12);
+    tools.into_iter().map(|x| x.1).chain(commands).take(8).collect()
 }
 
 /// `key=value` pairs as a JSON object: values that read as JSON stay JSON, the rest are text.
@@ -97,15 +108,16 @@ pub fn parse(line: &str) -> Parsed {
     {
         return Parsed::Tool(*tool);
     }
-    let known = crate::palette::entries().into_iter().find(|e| e.name == name);
-    let Some(entry) = known else { return Parsed::Unknown(name.to_owned()) };
+    if !crate::palette::is_command(name) {
+        return Parsed::Unknown(name.to_owned());
+    }
     if rest.is_empty() {
-        let needs = crate::schema_form::fields(&crate::palette::schema_of(entry.name)).iter().any(|f| f.required);
-        return if needs { Parsed::Form(entry.name.to_owned()) } else { Parsed::Run(entry.name.to_owned(), json!({})) };
+        let needs = crate::schema_form::fields(&crate::palette::schema_of(name)).iter().any(|f| f.required);
+        return if needs { Parsed::Form(name.to_owned()) } else { Parsed::Run(name.to_owned(), json!({})) };
     }
     let args = if rest.starts_with('{') { serde_json::from_str(rest).ok() } else { pairs(rest) };
     match args {
-        Some(a) => Parsed::Run(entry.name.to_owned(), a),
+        Some(a) => Parsed::Run(name.to_owned(), a),
         None => Parsed::BadArgs(rest.to_owned()),
     }
 }
@@ -149,9 +161,26 @@ const INPUT: f32 = 24.0;
 pub fn show(ui: &mut Ui, s: &mut Studio, canvas: Rect) {
     let c = theme::of(ui);
     // Clear of the axis icon in the bottom left corner.
-    let width = (canvas.width() - 2.0 * 96.0).clamp(120.0, 560.0);
-    let lines = 1 + usize::from(s.ui.cmdline.echo.is_some());
-    let height = INPUT + ROW * lines as f32;
+    let width = (canvas.width() - 2.0 * 96.0).clamp(120.0, 640.0);
+    // The prompt wraps to two lines and is cut with "…" after that (the whole text is
+    // the tooltip); the echo of the last command takes one line.
+    let wrap = |text: String, colour, rows: usize| {
+        let mut job = egui::text::LayoutJob::single_section(text, egui::TextFormat::simple(theme::small(), colour));
+        job.wrap = egui::text::TextWrapping {
+            max_width: width - 16.0,
+            max_rows: rows,
+            break_anywhere: false,
+            overflow_character: Some('…'),
+        };
+        ui.fonts_mut(|f| f.layout_job(job))
+    };
+    let full_prompt = prompt(s);
+    let prompt_g = wrap(full_prompt.clone(), c.text, 2);
+    let echo_g =
+        s.ui.cmdline.echo.as_ref().map(|(text, err)| wrap(text.clone(), if *err { c.warning } else { c.text2 }, 1));
+    let pad = (ROW - prompt_g.rows.first().map_or(12.0, |r| r.height())) / 2.0;
+    let text_h = echo_g.as_ref().map_or(0.0, |g| g.size().y + 2.0) + prompt_g.size().y;
+    let height = INPUT + (text_h + 2.0 * pad).max(ROW);
     let rect = Rect::from_min_size(
         pos2(canvas.center().x - width / 2.0, canvas.bottom() - height - 12.0),
         vec2(width, height),
@@ -162,19 +191,19 @@ pub fn show(ui: &mut Ui, s: &mut Studio, canvas: Rect) {
     let p = ui.painter().clone();
     let history = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - INPUT));
     p.rect_filled(history, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, c.cmd_history);
-    let mut y = history.top() + ROW / 2.0;
-    let clip = p.with_clip_rect(history.shrink2(vec2(6.0, 0.0)));
-    if let Some((text, err)) = &s.ui.cmdline.echo {
-        clip.text(
-            pos2(history.left() + 8.0, y),
-            egui::Align2::LEFT_CENTER,
-            text,
-            theme::small(),
-            if *err { c.warning } else { c.text2 },
-        );
-        y += ROW;
+    let mut y = history.top() + pad;
+    if let Some(g) = echo_g {
+        let h = g.size().y;
+        p.galley(pos2(history.left() + 8.0, y), g, c.text2);
+        y += h + 2.0;
     }
-    clip.text(pos2(history.left() + 8.0, y), egui::Align2::LEFT_CENTER, prompt(s), theme::small(), c.text);
+    let elided = prompt_g.elided;
+    let prompt_rect = Rect::from_min_size(pos2(history.left() + 8.0, y), prompt_g.size());
+    p.galley(prompt_rect.min, prompt_g, c.text);
+    if elided {
+        let r = ui.interact(prompt_rect, egui::Id::unique("command_line_prompt"), egui::Sense::hover());
+        r.on_hover_text(full_prompt);
+    }
     let input = Rect::from_min_max(pos2(rect.left(), rect.bottom() - INPUT), rect.max);
     p.rect_filled(input, egui::CornerRadius { nw: 0, ne: 0, sw: 3, se: 3 }, c.cmd_bg);
     p.rect_stroke(input, 3.0, egui::Stroke::new(1.0, c.cmd_border), egui::StrokeKind::Inside);
@@ -233,9 +262,12 @@ pub fn show(ui: &mut Ui, s: &mut Studio, canvas: Rect) {
     }
     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
     if enter {
+        let first = cl.text.split_whitespace().next().unwrap_or("");
+        let typed_known = crate::palette::is_command(first)
+            || Tool::ALL.iter().any(|tool| t(tool.key()).eq_ignore_ascii_case(cl.text.trim()));
         let line = match completions.get(cl.cursor) {
-            // Enter on a half-typed word takes the highlighted completion.
-            Some(cmp) if !cl.text.contains(char::is_whitespace) && cmp.text() != cl.text.trim() => cmp.text(),
+            // Enter on half-typed words or a title takes the highlighted completion.
+            Some(cmp) if !typed_known && cmp.text() != cl.text.trim() => cmp.text(),
             _ => cl.text.clone(),
         };
         cl.text.clear();
@@ -265,19 +297,19 @@ fn list(ui: &mut Ui, s: &mut Studio, completions: &[Completion], bar: Rect) {
         if i == s.ui.cmdline.cursor {
             p.rect_filled(row, 2.0, c.list_row);
         }
-        let (name, note) = match cmp {
-            Completion::Tool(tool) => (t(tool.key()).to_lowercase(), t("cmdline.tool").to_owned()),
-            Completion::Command(name, summary) => ((*name).to_owned(), (*summary).to_owned()),
+        let (title, note) = match cmp {
+            Completion::Tool(tool) => (t(tool.key()).to_owned(), t("cmdline.tool").to_owned()),
+            Completion::Command(name, title) => ((*title).to_owned(), (*name).to_owned()),
         };
-        let name_g = p.layout_no_wrap(name, egui::FontId::monospace(11.0), c.text);
-        let w = name_g.size().x;
-        p.galley(pos2(row.left() + 6.0, row.center().y - name_g.size().y / 2.0), name_g, c.text);
+        let title_g = p.layout_no_wrap(title, theme::body(), c.text);
+        let w = title_g.size().x;
+        p.galley(pos2(row.left() + 6.0, row.center().y - title_g.size().y / 2.0), title_g, c.text);
         p.with_clip_rect(row).text(
-            pos2(row.left() + 16.0 + w, row.center().y),
+            pos2(row.left() + 14.0 + w, row.center().y),
             egui::Align2::LEFT_CENTER,
             note,
-            theme::small(),
-            c.text2,
+            egui::FontId::monospace(10.0),
+            c.text3,
         );
         y += ROW;
     }
@@ -306,10 +338,12 @@ mod tests {
     fn completion_offers_tools_and_every_registry() {
         let c = complete("wal");
         assert_eq!(c.first(), Some(&Completion::Tool(Tool::Wall)));
-        assert!(
-            complete("ui.set_th").contains(&Completion::Command("ui.set_theme", "Light, dark, or follow the system"))
-        );
+        assert!(complete("ui.set_th").contains(&Completion::Command("ui.set_theme", "Set Theme")));
         assert!(complete("layer.cre").iter().any(|c| matches!(c, Completion::Command("layer.create", _))));
+        // Titles and aliases complete to IDs.
+        assert!(complete("auto patch").iter().any(|c| matches!(c, Completion::Command("patch.auto", _))));
+        assert!(complete("traverse").iter().any(|c| matches!(c, Completion::Command(n, _) if n.starts_with("truss."))));
         assert!(complete("").is_empty());
+        assert!(complete("layer.create name=X").is_empty());
     }
 }

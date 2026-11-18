@@ -59,6 +59,14 @@ pub struct Tokens {
     /// Autocomplete list.
     pub list_bg: Color32,
     pub list_row: Color32,
+    /// The command palette: its card, the highlighted row, its border, key chips and
+    /// the shadow under it.
+    pub pal_bg: Color32,
+    pub pal_row: Color32,
+    pub pal_border: Color32,
+    pub pal_footer: Color32,
+    pub chip: Color32,
+    pub shadow: Color32,
     /// Patch conflicts and other problems.
     pub warning: Color32,
     /// Around the paper in the Sheets mode.
@@ -94,6 +102,12 @@ impl Tokens {
         cmd_history: rgba(0x2a303a, 0xc8),
         list_bg: rgb(0x2b313b),
         list_row: rgb(0x3a4250),
+        pal_bg: rgb(0x373e4b),
+        pal_row: rgb(0x46536b),
+        pal_border: rgb(0x525d70),
+        pal_footer: rgb(0x313742),
+        chip: rgb(0x4a5466),
+        shadow: rgba(0x000000, 110),
         warning: rgb(0xff6a52),
         desk: rgb(0x2b313a),
         axes: [rgb(0xe0605a), rgb(0x5cc46e), rgb(0x5a9bff)],
@@ -166,6 +180,12 @@ impl Tokens {
         cmd_history: rgba(0xf0f2f5, 0xdc),
         list_bg: rgb(0xfbfcfd),
         list_row: rgb(0xe3e8ef),
+        pal_bg: rgb(0xffffff),
+        pal_row: rgb(0xe6eefc),
+        pal_border: rgb(0xc9ced6),
+        pal_footer: rgb(0xf4f5f7),
+        chip: rgb(0xeceef2),
+        shadow: rgba(0x1d232b, 60),
         warning: rgb(0xd5381f),
         desk: rgb(0xd5d9df),
         axes: [rgb(0xd03a32), rgb(0x2a9a40), rgb(0x2f6fe0)],

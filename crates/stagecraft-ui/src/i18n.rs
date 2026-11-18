@@ -12,7 +12,7 @@ fn catalog() -> &'static HashMap<String, String> {
 }
 
 /// The text for `key`.
-pub fn t(key: &str) -> &str {
+pub fn t(key: &str) -> &'static str {
     catalog().get(key).map_or_else(|| leak(key), String::as_str)
 }
 
@@ -34,6 +34,18 @@ fn leak(key: &str) -> &'static str {
 
 pub fn has(key: &str) -> bool {
     catalog().contains_key(key)
+}
+
+/// Search aliases (`assets/i18n/aliases.json`): an English term of the titles and the
+/// words people also type for it, German and Vectorworks names included ("Zug",
+/// "Lattenzug", "pipe" for batten; "Klasse" for tag). All lower case.
+pub fn aliases() -> &'static [(String, Vec<String>)] {
+    static A: OnceLock<Vec<(String, Vec<String>)>> = OnceLock::new();
+    A.get_or_init(|| {
+        let m: std::collections::BTreeMap<String, Vec<String>> =
+            serde_json::from_str(include_str!("../assets/i18n/aliases.json")).expect("aliases.json is valid");
+        m.into_iter().map(|(k, v)| (k.to_lowercase(), v.into_iter().map(|a| a.to_lowercase()).collect())).collect()
+    })
 }
 
 #[cfg(test)]

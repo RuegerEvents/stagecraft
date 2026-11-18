@@ -324,3 +324,21 @@ fn sheets(e: &mut Engine) {
                 "hidden_tags": ["ceiling"], "crop": [[-8000, -5500], [8000, 5500]], "position": [320, 205] }),
     );
 }
+
+#[cfg(test)]
+mod tests {
+    /// The house ceiling is a level slab over the auditorium: 9.8 m above the House layer,
+    /// in front of the setting line, not over the stage.
+    #[test]
+    fn the_house_ceiling_lies_level_over_the_house() {
+        let e = super::engine();
+        let doc = e.doc();
+        let c = doc.objects.values().find(|o| o.name == "House ceiling").expect("ceiling");
+        let stagecraft_core::ObjectKind::Ceiling { thickness, .. } = c.kind else { unreachable!() };
+        let (lo, hi) = stagecraft_geom::world_mesh(doc, c, stagecraft_geom::Lod::Full).bounds().expect("mesh");
+        let layer = doc.layers[&c.layer].elevation as f32;
+        assert!((lo[2] - (layer + 9800.0)).abs() < 1.0, "{lo:?}");
+        assert!((hi[2] - lo[2] - thickness as f32).abs() < 1.0, "level, one slab thick: {lo:?} {hi:?}");
+        assert!(hi[1] <= -2500.0 + 1.0 && lo[1] >= -12000.0 - 1.0, "over the house: {lo:?} {hi:?}");
+    }
+}

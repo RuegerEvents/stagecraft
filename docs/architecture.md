@@ -52,7 +52,8 @@ so an AI can see the app.
   command names are English anyway.
 - Light and dark theme, following macOS by default, switchable (`ui.set_theme`).
   Sheets are always white paper.
-- Command palette (Cmd+K) lists every command of both registries.
+- Command palette (Cmd+K) reaches every command of both registries by title (technical
+  ones after `>`, with their IDs).
 - Typed dimensions while drawing.
 - UI tests with `egui_kittest`; widgets are found by accessible name. Screens can be
   rendered to PNG without a window (`STAGECRAFT_SCREENSHOTS=dir cargo test -p

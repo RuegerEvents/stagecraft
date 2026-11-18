@@ -413,6 +413,9 @@ pub struct UiState {
     pub options: ToolOptions,
     pub gesture: Gesture,
     pub palette: PaletteState,
+    /// Commands run from the palette, newest first (keys of `command_meta::Meta::key_str`);
+    /// saved per user.
+    pub recent: Vec<String>,
     pub table: TableState,
     /// The library panel: GDTF Share search and downloads.
     pub library: crate::library::LibraryState,
@@ -489,6 +492,7 @@ impl Default for UiState {
             options: ToolOptions::default(),
             gesture: Gesture::default(),
             palette: PaletteState::default(),
+            recent: Vec::new(),
             table: TableState::default(),
             library: Default::default(),
             status: None,

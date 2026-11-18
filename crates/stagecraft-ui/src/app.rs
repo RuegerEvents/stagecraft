@@ -40,6 +40,7 @@ impl Studio {
             layout: crate::dock::load(prefs.get().layout.workspace.clone()),
             theme: prefs.get().appearance.theme,
             options: prefs.get().tools.clone(),
+            recent: prefs.get().palette.recent.clone(),
             ..Default::default()
         };
         Self { engine, ui, offscreen: None, dialogs: crate::dialogs::queue(), prefs }
@@ -176,12 +177,18 @@ impl Studio {
             ..self.ui.options.clone()
         };
         let p = self.prefs.get();
-        if p.layout.workspace.as_ref() != Some(layout) || p.appearance.theme != theme || p.tools != tools {
-            let layout = layout.clone();
+        let recent = &self.ui.recent;
+        if p.layout.workspace.as_ref() != Some(layout)
+            || p.appearance.theme != theme
+            || p.tools != tools
+            || &p.palette.recent != recent
+        {
+            let (layout, recent) = (layout.clone(), recent.clone());
             self.prefs.update(|p| {
                 p.layout.workspace = Some(layout);
                 p.appearance.theme = theme;
                 p.tools = tools;
+                p.palette.recent = recent;
             });
         }
         let tick = self.prefs.tick(std::time::Instant::now());

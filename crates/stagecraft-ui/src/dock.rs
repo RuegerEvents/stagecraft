@@ -438,6 +438,14 @@ pub struct Prefs {
     /// The drawing tools' options (heights, sizes, profiles), without the fixture type,
     /// which belongs to a document's library.
     pub tools: crate::state::ToolOptions,
+    pub palette: PalettePrefs,
+}
+
+/// The command palette's memory: recently run commands, newest first.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PalettePrefs {
+    pub recent: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -498,6 +506,7 @@ mod tests {
             appearance: Appearance { theme: ThemePref::Dark },
             layout: SavedLayout { workspace: Some(ws) },
             tools,
+            palette: PalettePrefs { recent: vec!["patch.auto".into(), "ui.set_view {\"view\":\"3d\"}".into()] },
         };
         let dir = tempfile::tempdir().unwrap();
         {

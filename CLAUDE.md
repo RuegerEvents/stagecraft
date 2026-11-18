@@ -122,15 +122,34 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   (memory-only in tests). `ui.toggle_panel`, `ui.layout`, `ui.float_panel`,
   `ui.reset_layout` drive the docks. ⌘ keys from the native menu come back as key presses
   into `app.rs`'s `shortcuts`.
+- Command palette (⌘K, `palette.rs`): what people see of a command lives in
+  `command_meta.rs`, one `META` row per command of both registries (title key
+  `cmd.<name>`, `Group`, icon, shortcut, `hidden`, `Need`, `applies` kinds, `direct`)
+  plus presets (a command with fixed args: "3D View" = `ui.set_view {view: 3d}`, the tools)
+  and the menus' `app.*` actions. A new command needs a row and a title in `en.json`, or
+  `command_meta` tests fail; a visible command whose schema requires object `ids`/`id`
+  must say `Need::Selection`/`One`. MCP and CLI keep the IDs. Empty query: Recent
+  (`UiState.recent`, saved in `Prefs.palette`), commands for the selection, the groups
+  (→/Enter opens, ←/Backspace back, breadcrumb). Typing searches titles, aliases
+  (`assets/i18n/aliases.json`: German and Vectorworks words per English term), groups,
+  summaries and objects (name, FID), layers, tags, sheets; inside a group only the group.
+  `>` all commands incl. hidden ones with IDs, `@` objects, `#` tags. Greyed rows carry the
+  reason (`command_meta::available`, no command is run to find out). Arguments: an inline
+  form from `schema_form::fields_for` (units, enums, pickers for objects/layers/tags/
+  sheets/viewports/fixture types, x/y/z boxes, prefill from selection and defaults); Enter
+  runs, Esc goes back. Palette tests: `tests/ui.rs` (`the_palette_*`), screens `70-78`.
 - The command line (`cmdline.rs`) floats at the bottom of the canvas: the line above it is
-  the active tool's prompt (`panels::hint`), it completes tool names and every command of
-  both registries, runs `name {json}` or `name key=value`, opens the palette form for
-  commands that need arguments.
+  the active tool's prompt (`panels::hint`, two lines then "…" with the full text as
+  tooltip), it completes tool names and commands by title, alias or ID (shown as title +
+  ID), runs `name {json}` or `name key=value`, opens the palette form for commands that need
+  arguments.
 - Icons in `assets/icons/` (Lucide, ISC; own stage and constraint icons in the same
   grid), rasterised by `icons.rs`; `STAGECRAFT_ICONS=<dir> cargo test -p stagecraft-ui --lib
   icon_sheet` writes them as PNGs.
 - Give clickable things an accessible name (`widgets::name`); tests find them so.
-  Table cells are named `"<Column> <row>"`, e.g. `FID 1`; tool buttons `Tool Wall`, tool
+  Table cells are named `"<Column> <row>"`, e.g. `FID 1`, header resize handles
+  `Resize <Column>` (columns fill a wide panel, give way to 70 % in a narrow one, then the
+  table scrolls sideways; cut cells end in "…"); tool buttons `Tool Wall`, tool
   bar buttons `Toolbar Save`, palette sections `Section Stage`, status toggles `Toggle grid
   snap`, sheet tabs `Model tab` / `Sheet tab L-101`, panel menus `Panel menu Layers`.
 - Tools sit in `panels::tool_groups` (palette sections); tool options (`ToolOptions`,
@@ -241,8 +260,9 @@ menu row, window buttons painted in), including 3D iso,
 front, sections, a truss close-up, the stage from the house, the fly bar list and
 split, a rearranged dock layout with a floating panel (`40-dock-float-*`), the
 tutorial panel (`41-43-tutorial-*`), and `50-55-craft-*` at 1200 × 750, the size of the
-Craft suite's reference screenshots. kittest's 8 pt margin is cut off and the traffic
-lights are painted where AppKit puts them (`chrome::traffic_light_centres`). The overview shots hide the `ceiling` tag, which would cover the house. With
+Craft suite's reference screenshots, and `70-78-palette-*` (groups, selection, group,
+search, alias, form, objects, `>`). kittest's 8 pt margin is cut off and the traffic
+lights are painted where AppKit puts them (`chrome::traffic_light_centres`). The overview shots (`53-craft-3d` too) hide the `ceiling` tag, which would cover the house. With
 `testdata/private/vectorworks/sample_show.mvr` present it also renders that
 import in plan and 3D (`26-mvr-*`, `27-mvr-*`).
 

@@ -3,7 +3,7 @@
 //! selected cell; "Fill series" counts up from the first cell; ⌘V pastes TSV from
 //! Excel or Numbers. Selecting cells selects their objects in the plan.
 
-use egui::{Align2, Event, Key, Modifiers, RichText, Role, Sense, Ui, vec2};
+use egui::{Align2, Event, Key, Modifiers, RichText, Role, Sense, Ui, pos2, vec2};
 use serde_json::{Value, json};
 use stagecraft_core::model::{format_address, parse_address};
 use stagecraft_core::{Document, Id, Object, ObjectKind};
@@ -13,7 +13,7 @@ use crate::i18n::{t, tf};
 use crate::panels::{fmt_mm, parse_mm};
 use crate::widgets;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Col {
     Name,
     Type,
@@ -74,7 +74,12 @@ impl Col {
         }
     }
 
-    fn width(self) -> f32 {
+    /// Columns that take the room left over when the panel is wider than the table.
+    fn flexible(self) -> bool {
+        matches!(self, Col::Name | Col::Tags | Col::FixtureType | Col::Conflict | Col::Mode | Col::Layer)
+    }
+
+    pub fn width(self) -> f32 {
         match self {
             Col::Name => 140.0,
             Col::Tags => 140.0,
@@ -114,6 +119,8 @@ pub struct TableState {
     /// The table takes keys (after a click into it).
     pub focused: bool,
     focus_editor: bool,
+    /// Column widths the user dragged (pt); the others use their default.
+    pub widths: std::collections::BTreeMap<Col, f32>,
 }
 
 impl Default for TableState {
@@ -126,6 +133,7 @@ impl Default for TableState {
             editing: None,
             focused: false,
             focus_editor: false,
+            widths: Default::default(),
         }
     }
 }
@@ -587,7 +595,9 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             let r = ui.selectable_label(on, t(key));
             widgets::name(&r, Role::Button, format!("Show {}", t(key)));
             if r.clicked() && !on {
-                s.ui.table = TableState { kind: k.map(String::from), tag: s.ui.table.tag, ..Default::default() };
+                let widths = std::mem::take(&mut s.ui.table.widths);
+                s.ui.table =
+                    TableState { kind: k.map(String::from), tag: s.ui.table.tag, widths, ..Default::default() };
             }
         }
         ui.separator();
@@ -620,25 +630,63 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let sel_range = range(&rows, &s.ui.table);
     keys(ui, s, &rows, &cols);
 
-    // Header: a strip in the inset colour, hairlines between the columns.
+    // Header: a strip in the inset colour, hairlines between the columns; drag a hairline
+    // to resize, double-click it to go back to the default. The table scrolls sideways
+    // when its columns are wider than the panel.
     let tk = crate::theme::of(ui);
     ui.add_space(2.0);
+    let widths = fit_widths(&cols, &s.ui.table.widths, ui.available_width() - 12.0);
+    let table_w = NUM_W + widths.iter().sum::<f32>();
+    egui::ScrollArea::horizontal().id_salt("table_h").auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_min_width(table_w);
+        ui.vertical(|ui| body(ui, s, &doc, &rows, &cols, &widths, sel_range, tk));
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn body(
+    ui: &mut Ui,
+    s: &mut Studio,
+    doc: &Document,
+    rows: &[Id],
+    cols: &[Col],
+    widths: &[f32],
+    sel_range: Option<(usize, usize, usize, usize)>,
+    tk: crate::theme::Tokens,
+) {
+    ui.spacing_mut().item_spacing.y = 0.0;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        let strip = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), ROW_H));
+        let strip = egui::Rect::from_min_size(
+            ui.cursor().min,
+            vec2(ui.available_width().max(NUM_W + widths.iter().sum::<f32>()), ROW_H),
+        );
         ui.painter().rect_filled(strip, 0.0, tk.panel_dark);
         ui.painter().hline(strip.x_range(), strip.bottom() - 0.5, egui::Stroke::new(1.0, tk.separator));
-        ui.add_space(36.0);
-        for c in &cols {
-            let (r, p) = ui.allocate_painter(vec2(c.width(), ROW_H), Sense::hover());
+        ui.add_space(NUM_W);
+        for (ci, c) in cols.iter().enumerate() {
+            let (r, p) = ui.allocate_painter(vec2(widths[ci], ROW_H), Sense::hover());
             p.vline(r.rect.left().round() + 0.5, r.rect.y_range().shrink(3.0), egui::Stroke::new(1.0, tk.separator));
-            p.text(
+            p.with_clip_rect(r.rect.shrink2(vec2(2.0, 0.0))).text(
                 r.rect.left_center() + vec2(6.0, 0.0),
                 Align2::LEFT_CENTER,
                 t(c.key()),
                 crate::theme::medium(crate::theme::SMALL),
                 tk.text2,
             );
+            let handle = egui::Rect::from_center_size(r.rect.right_center(), vec2(7.0, ROW_H));
+            let h = ui.interact(handle, egui::Id::unique(("table_resize", *c)), Sense::click_and_drag());
+            widgets::name(&h, Role::Unknown, format!("Resize {}", t(c.key())));
+            if h.hovered() || h.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+            }
+            if h.dragged() {
+                let w = (widths[ci] + h.drag_delta().x).max(MIN_W);
+                s.ui.table.widths.insert(*c, w);
+            }
+            if h.double_clicked() {
+                s.ui.table.widths.remove(c);
+            }
         }
     });
     if rows.is_empty() {
@@ -646,7 +694,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         return;
     }
     let selected_objects: Vec<Id> = s.engine.selection().to_vec();
-    let conflicting = stagecraft_core::patch::conflicting(&doc);
+    let conflicting = stagecraft_core::patch::conflicting(doc);
     let mut picked: Option<String> = None;
     let mut clicked: Option<(Id, usize, Modifiers)> = None;
     let mut double: Option<(Id, usize)> = None;
@@ -658,7 +706,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             let o = &doc.objects[&id];
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                let (r, p) = ui.allocate_painter(vec2(36.0, ROW_H), Sense::hover());
+                let (r, p) = ui.allocate_painter(vec2(NUM_W, ROW_H), Sense::hover());
                 p.text(
                     r.rect.right_center() - vec2(6.0, 0.0),
                     Align2::RIGHT_CENTER,
@@ -667,9 +715,9 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                     ui.visuals().weak_text_color(),
                 );
                 for (ci, c) in cols.iter().enumerate() {
-                    let (rect, resp) = ui.allocate_exact_size(vec2(c.width(), ROW_H), Sense::click());
+                    let (rect, resp) = ui.allocate_exact_size(vec2(widths[ci], ROW_H), Sense::click());
                     let label = format!("{} {}", t(c.key()), ri + 1);
-                    let text = cell_text(&doc, o, *c);
+                    let text = cell_text(doc, o, *c);
                     widgets::name(&resp, Role::Unknown, label.clone());
                     let in_range =
                         sel_range.is_some_and(|(r0, r1, c0, c1)| (r0..=r1).contains(&ri) && (c0..=c1).contains(&ci));
@@ -702,7 +750,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                             egui::TextEdit::singleline(&mut buf).id(ed_id).margin(vec2(4.0, 2.0)),
                         );
                         widgets::name(&r, Role::TextInput, "Cell editor");
-                        let options = cell_options(&doc, o, *c);
+                        let options = cell_options(doc, o, *c);
                         if !options.is_empty() {
                             egui::Area::new(egui::Id::unique("table_choices"))
                                 .order(egui::Order::Foreground)
@@ -754,13 +802,23 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                     } else {
                         let warn = matches!(c, Col::Address | Col::Conflict) && conflicting.contains(&id);
                         let colour = if warn { crate::theme::of(ui).warning } else { ui.visuals().text_color() };
-                        ui.painter().with_clip_rect(rect.shrink(2.0)).text(
-                            rect.left_center() + vec2(6.0, 0.0),
-                            Align2::LEFT_CENTER,
-                            &text,
-                            egui::TextStyle::Body.resolve(ui.style()),
-                            colour,
+                        // Too long for the column: cut with "…", the whole text as the tooltip.
+                        let mut job = egui::text::LayoutJob::single_section(
+                            text.clone(),
+                            egui::TextFormat::simple(egui::TextStyle::Body.resolve(ui.style()), colour),
                         );
+                        job.wrap = egui::text::TextWrapping {
+                            max_width: (rect.width() - 10.0).max(4.0),
+                            max_rows: 1,
+                            break_anywhere: true,
+                            overflow_character: Some('…'),
+                        };
+                        let g = ui.fonts_mut(|f| f.layout_job(job));
+                        let elided = g.elided;
+                        ui.painter().galley(pos2(rect.left() + 6.0, rect.center().y - g.size().y / 2.0), g, colour);
+                        if elided && resp.hovered() {
+                            resp.clone().on_hover_text(&text);
+                        }
                     }
                     if resp.double_clicked() {
                         double = Some((id, ci));
@@ -787,17 +845,47 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             st.anchor = Some((id, ci));
             st.cursor = Some((id, ci));
         }
-        select_rows_in_plan(s, &rows);
+        select_rows_in_plan(s, rows);
     }
     if let Some((id, ci)) = double {
         let st = &mut s.ui.table;
         st.focused = true;
         st.anchor = Some((id, ci));
         st.cursor = Some((id, ci));
-        st.editing = Some(cell_text(&doc, &doc.objects[&id], cols[ci]));
+        st.editing = Some(cell_text(doc, &doc.objects[&id], cols[ci]));
         st.focus_editor = true;
-        select_rows_in_plan(s, &rows);
+        select_rows_in_plan(s, rows);
     }
+}
+
+/// Width of the row-number column.
+const NUM_W: f32 = 36.0;
+const MIN_W: f32 = 36.0;
+
+/// Column widths for a panel `avail` wide: dragged widths, else defaults; when the table
+/// is narrower than the panel the flexible columns (name, type, tags …) share the rest.
+/// Wider tables scroll sideways.
+pub fn fit_widths(cols: &[Col], user: &std::collections::BTreeMap<Col, f32>, avail: f32) -> Vec<f32> {
+    let mut w: Vec<f32> = cols.iter().map(|c| user.get(c).copied().unwrap_or(c.width())).collect();
+    let total: f32 = NUM_W + w.iter().sum::<f32>();
+    let flex: f32 = cols.iter().zip(&w).filter(|(c, _)| c.flexible() && !user.contains_key(c)).map(|x| *x.1).sum();
+    if total < avail && flex > 0.0 {
+        let extra = avail - total;
+        for (c, x) in cols.iter().zip(w.iter_mut()) {
+            if c.flexible() && !user.contains_key(c) {
+                *x += extra * *x / flex;
+            }
+        }
+    } else if total > avail && flex > 0.0 {
+        // Narrow: the flexible columns give up to 30 % of their width before the table scrolls.
+        let cut = ((total - avail) / flex).min(0.3);
+        for (c, x) in cols.iter().zip(w.iter_mut()) {
+            if c.flexible() && !user.contains_key(c) {
+                *x *= 1.0 - cut;
+            }
+        }
+    }
+    w
 }
 
 /// Keys while the table has focus and no cell is being edited.
@@ -883,6 +971,28 @@ mod tests {
         assert_eq!(fill_series(Col::Name, "Wash", None, 2), ["Wash", "Wash"]);
         assert_eq!(fill_series(Col::Address, "1.001", Some("1.017"), 3), ["1.001", "1.017", "1.033"]);
         assert_eq!(fill_series(Col::Address, "1.510", Some("1.511"), 4)[3], "2.001");
+    }
+
+    #[test]
+    fn columns_fill_a_wide_panel_and_keep_dragged_widths() {
+        let cols = columns(Some("fixture"));
+        let defaults: f32 = NUM_W + cols.iter().map(|c| c.width()).sum::<f32>();
+        // Wide: the flexible columns take the rest, the fixed ones keep their width.
+        let w = fit_widths(&cols, &Default::default(), defaults + 300.0);
+        assert!((NUM_W + w.iter().sum::<f32>() - (defaults + 300.0)).abs() < 0.5);
+        let addr = cols.iter().position(|c| *c == Col::Address).unwrap();
+        assert_eq!(w[addr], Col::Address.width());
+        // A bit narrow: the flexible columns give way, so the fixed ones still show.
+        let w = fit_widths(&cols, &Default::default(), defaults - 100.0);
+        assert!((NUM_W + w.iter().sum::<f32>() - (defaults - 100.0)).abs() < 0.5);
+        assert_eq!(w[addr], Col::Address.width());
+        // Very narrow: the table scrolls; a dragged width stays as dragged.
+        let mut user = std::collections::BTreeMap::new();
+        user.insert(Col::Name, 300.0);
+        let w = fit_widths(&cols, &user, 400.0);
+        assert_eq!(w[0], 300.0);
+        assert_eq!(w[addr], Col::Address.width());
+        assert!(NUM_W + w.iter().sum::<f32>() > 400.0);
     }
 
     #[test]
