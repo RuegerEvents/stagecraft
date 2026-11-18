@@ -11,6 +11,7 @@
 
 pub mod camera;
 pub mod gpu;
+pub mod offscreen;
 pub mod scene;
 
 use egui::{Align2, Color32, Event, MouseWheelUnit, PointerButton, Rgba, RichText, Sense, Ui, UiBuilder, WidgetType};
@@ -182,7 +183,7 @@ fn lin_alpha(c: Color32) -> [f32; 4] {
     [l.r(), l.g(), l.b(), a as f32 / 255.0]
 }
 
-fn uniforms(v: &View3d, pal: &Palette3d, ppp: f32) -> gpu::Uniforms {
+pub(crate) fn uniforms(v: &View3d, pal: &Palette3d, ppp: f32) -> gpu::Uniforms {
     let cam = &v.camera;
     let radius = v.scene.radius();
     let mut u = gpu::Uniforms { view_proj: cam.view_proj(radius).to_cols_array_2d(), ..Default::default() };

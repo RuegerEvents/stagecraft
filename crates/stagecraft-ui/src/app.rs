@@ -18,16 +18,22 @@ use crate::{canvas, palette, panels, table, theme, view3d};
 pub struct Studio {
     pub engine: Engine,
     pub ui: UiState,
+    /// Renders the 3D view into images for `rendered` sheet viewports. `None` without
+    /// a GPU: those viewports keep a placeholder.
+    pub offscreen: Option<view3d::offscreen::Offscreen>,
 }
 
 impl Studio {
     pub fn new(engine: Engine) -> Self {
         stagecraft_sheet::install();
-        Self { engine, ui: UiState::default() }
+        Self { engine, ui: UiState::default(), offscreen: None }
     }
 
     /// Run a command of either registry. Errors also go to the status bar.
     pub fn run(&mut self, name: &str, args: Value) -> Result<Value, CmdError> {
+        if matches!(name, "sheet.export_pdf" | "sheet.export_svg") {
+            self.render_sheet_images(None);
+        }
         let out = match ui_registry().get(name) {
             Some(e) => e.run(&mut UiCtx { engine: &mut self.engine, ui: &mut self.ui }, args),
             None => self.engine.execute(name, args),
@@ -37,6 +43,18 @@ impl Studio {
             Ok(_) => self.after(name),
         }
         out
+    }
+
+    /// Render the 3D images of `rendered` viewports on `sheet` (all sheets if `None`)
+    /// that are out of date. Does nothing without a GPU.
+    pub fn render_sheet_images(&mut self, sheet: Option<stagecraft_core::Id>) {
+        let Some(off) = &mut self.offscreen else { return };
+        let doc = self.engine.doc();
+        let ids: Vec<_> = match sheet {
+            Some(id) => vec![id],
+            None => doc.sheets.keys().copied().collect(),
+        };
+        off.render_sheets(doc, &ids);
     }
 
     /// UI consequences of a command, whoever ran it.
@@ -410,6 +428,7 @@ pub fn run(engine: Engine) -> Result<(), String> {
             };
             let mut studio = Studio::new(engine);
             studio.ui.native_dialogs = true;
+            studio.offscreen = cc.wgpu_render_state.as_ref().map(view3d::offscreen::Offscreen::from_render_state);
             Ok(Box::new(StageApp { studio, server, _registration: registration, shot_requested: false, title }))
         }),
     )

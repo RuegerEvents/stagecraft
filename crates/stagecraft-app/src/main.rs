@@ -183,6 +183,9 @@ fn exec(command: &str, args: Option<&str>, file: Option<PathBuf>) -> Result<()> 
     match file {
         Some(f) => {
             let mut engine = open_engine(Some(f))?;
+            if matches!(command, "sheet.export_pdf" | "sheet.export_svg") {
+                render_sheet_images(&engine);
+            }
             let out = engine.execute(command, args).map_err(|e| anyhow!("{e}"))?;
             if engine.dirty() {
                 engine.execute("doc.save", Value::Null).map_err(|e| anyhow!("{e}"))?;
@@ -197,6 +200,23 @@ fn exec(command: &str, args: Option<&str>, file: Option<PathBuf>) -> Result<()> 
         }
     }
     Ok(())
+}
+
+/// Rendered (3D) sheet viewports need a GPU; without a window one is created here.
+/// No GPU (or `STAGECRAFT_NO_GPU` set): the export shows placeholders.
+fn render_sheet_images(engine: &Engine) {
+    let doc = engine.doc();
+    let any = doc.sheets.values().flat_map(|s| &s.viewports).any(|v| v.view.name() == "rendered");
+    if !any || std::env::var_os("STAGECRAFT_NO_GPU").is_some() {
+        return;
+    }
+    match stagecraft_ui::view3d::offscreen::Offscreen::headless() {
+        Some(mut off) => {
+            let ids: Vec<_> = doc.sheets.keys().copied().collect();
+            off.render_sheets(doc, &ids);
+        }
+        None => eprintln!("stagecraft: no GPU, 3D viewports stay placeholders"),
+    }
 }
 
 fn run_remote(client: &mut Client, command: &str, args: Value) -> Result<Value> {

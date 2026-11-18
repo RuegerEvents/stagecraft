@@ -94,6 +94,7 @@ impl GpuBuffers {
 struct Target {
     size: [u32; 2],
     msaa: wgpu::TextureView,
+    resolve_tex: wgpu::Texture,
     resolve: wgpu::TextureView,
     depth: wgpu::TextureView,
     blit_group: wgpu::BindGroup,
@@ -296,27 +297,31 @@ impl Gpu3d {
         if self.target.as_ref().is_some_and(|t| t.size == size) {
             return;
         }
+        let texture = |label: &str, format, samples, usage| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
         let tex = |label: &str, format, samples, usage| {
-            device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some(label),
-                    size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
-                    mip_level_count: 1,
-                    sample_count: samples,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage,
-                    view_formats: &[],
-                })
-                .create_view(&wgpu::TextureViewDescriptor::default())
+            texture(label, format, samples, usage).create_view(&wgpu::TextureViewDescriptor::default())
         };
         let msaa = tex("stagecraft-3d msaa", COLOR_FORMAT, SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT);
-        let resolve = tex(
+        let resolve_tex = texture(
             "stagecraft-3d resolve",
             COLOR_FORMAT,
             1,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
         );
+        let resolve = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let depth = tex("stagecraft-3d depth", DEPTH_FORMAT, SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let blit_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("stagecraft-3d blit"),
@@ -326,30 +331,19 @@ impl Gpu3d {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
             ],
         });
-        self.target = Some(Target { size, msaa, resolve, depth, blit_group });
+        self.target = Some(Target { size, msaa, resolve_tex, resolve, depth, blit_group });
     }
-}
 
-impl CallbackTrait for Frame3d {
-    fn prepare(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _screen: &ScreenDescriptor,
-        encoder: &mut wgpu::CommandEncoder,
-        resources: &mut CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        let Some(gpu) = resources.get_mut::<Gpu3d>() else { return Vec::new() };
-        if self.size_px[0] == 0 || self.size_px[1] == 0 {
-            return Vec::new();
-        }
-        let size = self.size_px.map(|s| s.min(device.limits().max_texture_dimension_2d));
-        gpu.ensure_target(device, size);
-        gpu.mesh.upload(device, &self.mesh);
-        gpu.caps.upload(device, &self.caps);
-        queue.write_buffer(&gpu.uniform_buffer, 0, bytemuck::bytes_of(&self.uniforms));
-        let target = gpu.target.as_ref().expect("target");
-        let [r, g, b, a] = self.clear;
+    /// Render a frame into the offscreen target (`frame.size_px`, clamped to the
+    /// device's texture limit). The result is in the resolve texture.
+    fn encode(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, f: &Frame3d) {
+        let size = f.size_px.map(|s| s.min(device.limits().max_texture_dimension_2d));
+        self.ensure_target(device, size);
+        self.mesh.upload(device, &f.mesh);
+        self.caps.upload(device, &f.caps);
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&f.uniforms));
+        let target = self.target.as_ref().expect("target");
+        let [r, g, b, a] = f.clear;
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("stagecraft-3d"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -368,13 +362,71 @@ impl CallbackTrait for Frame3d {
             }),
             ..Default::default()
         });
-        pass.set_bind_group(0, &gpu.uniform_group, &[]);
-        pass.set_pipeline(&gpu.mesh_pipeline);
-        gpu.mesh.draw(&mut pass);
-        gpu.caps.draw(&mut pass);
-        pass.set_pipeline(&gpu.grid_pipeline);
+        pass.set_bind_group(0, &self.uniform_group, &[]);
+        pass.set_pipeline(&self.mesh_pipeline);
+        self.mesh.draw(&mut pass);
+        self.caps.draw(&mut pass);
+        pass.set_pipeline(&self.grid_pipeline);
         pass.draw(0..6, 0..1);
-        drop(pass);
+    }
+
+    /// Render a frame and read it back: straight sRGB RGBA rows from the top, with the
+    /// size actually rendered. `None` if the read back failed.
+    pub fn render_to_rgba(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        f: &Frame3d,
+    ) -> Option<(u32, u32, Vec<u8>)> {
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("stagecraft-3d offscreen") });
+        self.encode(device, queue, &mut encoder, f);
+        let target = self.target.as_ref().expect("target");
+        let [w, h] = target.size;
+        let row = (w * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("stagecraft-3d readback"),
+            size: (row * h) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            target.resolve_tex.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) },
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        queue.submit([encoder.finish()]);
+        let slice = buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let data = slice.get_mapped_range().ok()?;
+        let mut out = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h as usize {
+            out.extend_from_slice(&data[y * row as usize..y * row as usize + w as usize * 4]);
+        }
+        drop(data);
+        buffer.unmap();
+        Some((w, h, out))
+    }
+}
+
+impl CallbackTrait for Frame3d {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen: &ScreenDescriptor,
+        encoder: &mut wgpu::CommandEncoder,
+        resources: &mut CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        let Some(gpu) = resources.get_mut::<Gpu3d>() else { return Vec::new() };
+        if self.size_px[0] == 0 || self.size_px[1] == 0 {
+            return Vec::new();
+        }
+        gpu.encode(device, queue, encoder, self);
         Vec::new()
     }
 

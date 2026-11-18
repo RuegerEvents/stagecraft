@@ -139,6 +139,8 @@ fn page_busy(s: &mut Studio) -> (Option<Page>, bool) {
         return (Some(p.clone()), false);
     }
     if s.ui.sheets.pending.as_ref().is_none_or(|(k, _)| *k != key) {
+        // 3D images need the GPU, which lives on this thread.
+        s.render_sheet_images(Some(id));
         let doc = s.engine.doc().clone();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {

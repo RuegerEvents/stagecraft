@@ -315,6 +315,6 @@ fn sheets(e: &mut Engine) {
         e,
         "viewport.create",
         json!({ "sheet": cuts["id"], "view": "rendered", "name": "3D view", "scale": 100,
-                "crop": [[-8000, -5500], [8000, 5500]], "position": [320, 205] }),
+                "hidden_tags": ["ceiling"], "crop": [[-8000, -5500], [8000, 5500]], "position": [320, 205] }),
     );
 }

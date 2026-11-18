@@ -4273,6 +4273,7 @@ dependencies = [
  "egui_kittest",
  "glam",
  "image",
+ "pollster 1.0.2",
  "rfd",
  "schemars",
  "serde",

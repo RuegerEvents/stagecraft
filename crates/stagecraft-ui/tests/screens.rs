@@ -8,22 +8,26 @@ use egui_kittest::Harness;
 use serde_json::json;
 use stagecraft_ui::{Studio, ThemePref};
 
-/// A headless wgpu renderer with the 3D view's pipelines installed.
-fn renderer() -> egui_kittest::wgpu::WgpuTestRenderer {
+/// A headless wgpu renderer with the 3D view's pipelines installed, and an offscreen
+/// renderer for sheet images on the same device.
+fn renderer() -> (egui_kittest::wgpu::WgpuTestRenderer, stagecraft_ui::view3d::offscreen::Offscreen) {
     let rs = egui_kittest::wgpu::create_render_state(
         egui_kittest::wgpu::default_wgpu_setup(),
         egui_wgpu::RendererOptions::PREDICTABLE,
     );
     stagecraft_ui::view3d::gpu::install(&rs);
-    egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs)
+    let off = stagecraft_ui::view3d::offscreen::Offscreen::from_render_state(&rs);
+    (egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs), off)
 }
 
 fn harness(theme: ThemePref) -> Harness<'static, Studio> {
     let mut studio = Studio::new(stagecraft_ui::demo::engine());
     studio.ui.theme = theme;
+    let (renderer, off) = renderer();
+    studio.offscreen = Some(off);
     let mut h = Harness::builder()
         .with_size(vec2(1440.0, 900.0))
-        .renderer(renderer())
+        .renderer(renderer)
         .build_ui_state(|ui, s: &mut Studio| s.show(ui), studio);
     h.run();
     h

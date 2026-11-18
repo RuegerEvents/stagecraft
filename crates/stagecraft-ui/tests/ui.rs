@@ -348,7 +348,7 @@ fn ui_commands_change_tool_theme_panels_and_tag_visibility() {
 fn control_extension_answers_ui_commands() {
     use stagecraft_control::handle_with;
     let mut s = Studio::new(Engine::new());
-    let Studio { engine, ui } = &mut s;
+    let Studio { engine, ui, .. } = &mut s;
     let mut ext = stagecraft_ui::commands::UiExtension { ui };
     let list = handle_with(engine, &mut ext, "commands", json!({ "prefix": "ui." })).unwrap();
     let names: Vec<&str> = list.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
