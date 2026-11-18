@@ -197,6 +197,44 @@ fn fill_rings(painter: &Painter, cam: &PaperCam, rings: &[Vec<P2>], fill: Color3
     painter.add(Shape::mesh(mesh));
 }
 
+/// A texture for a sheet image (rendered 3D view, logo), cached by the identity of
+/// its bytes, which stay shared while the image is unchanged.
+fn texture(ctx: &egui::Context, data: &ImageData) -> Option<egui::TextureHandle> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<HashMap<usize, egui::TextureHandle>>> = Mutex::new(None);
+    // Pointer plus a sample of the bytes: a freed image's address may be reused.
+    let bytes: &[u8] = match data {
+        ImageData::Encoded(b) => b,
+        ImageData::Rgba { pixels, .. } => pixels,
+    };
+    let mut key = bytes.as_ptr() as usize ^ bytes.len().rotate_left(32);
+    let step = (bytes.len() / 64).max(1);
+    for (i, b) in bytes.iter().step_by(step).enumerate() {
+        key = key.wrapping_mul(31).wrapping_add(*b as usize ^ i);
+    }
+    let mut guard = CACHE.lock().ok()?;
+    let cache = guard.get_or_insert_with(HashMap::new);
+    if let Some(t) = cache.get(&key) {
+        return Some(t.clone());
+    }
+    let img = match data {
+        ImageData::Rgba { width, height, pixels } => {
+            egui::ColorImage::from_rgba_unmultiplied([*width as usize, *height as usize], pixels)
+        }
+        ImageData::Encoded(bytes) => {
+            let d = image::load_from_memory(bytes).ok()?.to_rgba8();
+            egui::ColorImage::from_rgba_unmultiplied([d.width() as usize, d.height() as usize], d.as_raw())
+        }
+    };
+    if cache.len() > 32 {
+        cache.clear();
+    }
+    let t = ctx.load_texture(format!("sheet-image-{key}"), img, egui::TextureOptions::LINEAR);
+    cache.insert(key, t.clone());
+    Some(t)
+}
+
 /// Draw composed primitives (paper mm) on screen.
 pub fn paint_prims(painter: &Painter, cam: &PaperCam, prims: &[Prim]) {
     for p in prims {
@@ -255,13 +293,14 @@ pub fn paint_prims(painter: &Painter, cam: &PaperCam, prims: &[Prim]) {
             }
             Prim::Image { min, max, data } => {
                 let r = Rect::from_two_pos(cam.to_screen(*min), cam.to_screen(*max));
-                painter.rect_filled(r, 0.0, Color32::from_gray(232));
-                let label = match data {
-                    ImageData::Encoded(_) => "",
-                    ImageData::Rgba { .. } => "3D",
-                };
-                if !label.is_empty() {
-                    painter.text(r.center(), Align2::CENTER_CENTER, label, theme::proportional(12.0), Color32::GRAY);
+                match texture(painter.ctx(), data) {
+                    Some(t) => {
+                        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        painter.image(t.id(), r, uv, Color32::WHITE);
+                    }
+                    None => {
+                        painter.rect_filled(r, 0.0, Color32::from_gray(232));
+                    }
                 }
             }
             Prim::Clip { min, max, prims } => {

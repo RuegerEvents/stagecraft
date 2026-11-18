@@ -429,7 +429,9 @@ impl<'m> Importer<'m> {
             o.attrs.insert("fixture_id_numeric".into(), mo.fixture_id_numeric.to_string());
         }
         let cid = mo.custom_id.filter(|c| *c != 0).map(|c| c.to_string());
-        if let Some(c) = mo.color.as_ref().and_then(cie_to_hex) {
+        // grandMA3 writes D65 white for every fixture: that is no colour information.
+        let white = mo.color.as_ref().is_some_and(|c| (c.x - 0.3127).abs() < 0.002 && (c.y - 0.329).abs() < 0.002);
+        if !white && let Some(c) = mo.color.as_ref().and_then(cie_to_hex) {
             o.attrs.insert("colour".into(), c);
         }
         if key.is_none()

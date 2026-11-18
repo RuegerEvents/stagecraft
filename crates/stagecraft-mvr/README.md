@@ -48,6 +48,7 @@ let bytes: Vec<u8> = write_mvr(&mvr)?;         // MVR 1.6, provider="StageCraft"
 | `Scene::objects()`, `objects_of(kind)`, `find(uuid)`, `symdef`, `class`, `position`, `stats()` | Queries. |
 | `Scene::geometry_instances()` | Model files with world transforms, symbols expanded (cycle-safe). |
 | `check(&Scene, &Resources)` | Reference and file checks (also run by import). |
+| `glb::write_glb(positions, normals, indices)` | A minimal GLB (mm z-up in, metres y-up out), deterministic; used for exported geometry. |
 
 ### Fixture fields
 

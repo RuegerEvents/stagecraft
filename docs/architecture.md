@@ -8,10 +8,11 @@ read this, `CLAUDE.md`, `docs/spec/overview.md` and `docs/spec/control.md` first
 | Crate | Holds | Depends on |
 |---|---|---|
 | `stagecraft-core` | document, commands, undo, files, load sums | – |
-| `stagecraft-geom` | per-object representations: plan (2D) primitives and 3D meshes; triangulation; section cuts; hidden-line | core |
+| `stagecraft-geom` | per-object representations: plan (2D) primitives and 3D meshes; triangulation; section cuts | core, gdtf, hlr |
+| `stagecraft-hlr` | hidden-line removal and section cuts for orthographic views of triangle meshes | – |
 | `stagecraft-gdtf` | GDTF parsing (description.xml, geometry tree, modes, footprints, weight), 3DS/GLB model loading, GDTF Share client | core types only where needed |
-| `stagecraft-mvr` | MVR import/export | core, gdtf, geom |
-| `stagecraft-sheet` | sheets, viewports, title blocks, labels, PDF (krilla) | core, geom |
+| `stagecraft-mvr` | MVR file model, reader and writer, GLB writer (the mapping to the document is in core) | – |
+| `stagecraft-sheet` | sheets, viewports, title blocks, labels, PDF (krilla), vector views through hlr | core, geom, hlr |
 | `stagecraft-ui` | egui/eframe app: plan canvas, 3D view (wgpu), sheets, palette, inspector, tables | all above |
 | `stagecraft-control` | TCP JSON-RPC, discovery, MCP | core |
 | `stagecraft-app` | the `stagecraft` binary; no subcommand opens the GUI | all |

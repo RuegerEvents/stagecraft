@@ -16,7 +16,7 @@ UX. Commits are GPG-signed.
 
 - `stagecraft-core` holds the document and every command. No UI, no sockets, no clock.
   It must keep building for `wasm32-unknown-unknown`
-  (`cargo check -p stagecraft-core -p stagecraft-geom -p stagecraft-sheet -p stagecraft-gdtf --target wasm32-unknown-unknown`).
+  (`cargo check -p stagecraft-core -p stagecraft-geom -p stagecraft-sheet -p stagecraft-gdtf -p stagecraft-hlr -p stagecraft-mvr --target wasm32-unknown-unknown`).
 - **Every action is a command** registered in `crates/stagecraft-core/src/commands/`.
   The GUI never mutates the document directly. A new feature without a command is not
   done.
@@ -31,7 +31,8 @@ UX. Commits are GPG-signed.
   y = 0 is the setting line (the proscenium's downstage face in the demo).
 - Object kinds (`model.rs`): floor, wall, truss, fixture, and from block 4 proscenium,
   curtain, wing_set + masking, batten, platform, truss_node + truss_run, support,
-  hoist, ceiling. `wing_set` and `truss_run` are groups (children, no geometry).
+  hoist, ceiling; from block 8 group and model. `wing_set`, `truss_run` and `group`
+  are groups (children, no geometry).
   Battens keep position and trim in their placement (y, z); things hang on them by
   attachment. Stage commands are in `commands/stage.rs`, truss runs/nodes, load
   report and per-object plan style in `commands/rigging.rs`.
@@ -142,13 +143,23 @@ The document holds `sheets`, `label_templates`, `title_blocks` (model in
 a sheet into `Prim`s in paper mm (origin lower left, y up): `compose.rs` (frame,
 viewports, titles + scale bars, legend, title block placeholders, fixture list),
 `labels.rs` (pure label layout: three rotation modes, per-field greedy collision
-avoidance, leaders), `view.rs` (`VectorViewSource` for elevations/sections;
-`FallbackSource` draws mesh outlines and section cuts without hidden-line removal,
-to be replaced by `stagecraft-hlr`), `render.rs` (krilla PDF with embedded Roboto,
-SVG). Core cannot depend on it, so `sheet.export_pdf`/`export_svg` call an exporter
-that `stagecraft_sheet::install()` registers (the app's `main` and `Studio::new` do).
-Rendered viewports take images from `stagecraft_sheet::set_raster`; nothing fills it
-yet, so they print a placeholder. Fonts live in `assets/fonts/` for GUI and PDF.
+avoidance, leaders), `view.rs` (`VectorViewSource`, `ViewSpec`; `FallbackSource`
+draws mesh outlines without hidden-line removal, kept for tests), `hlr.rs`
+(`HlrSource`, the default: meshes per object and material run into
+`stagecraft-hlr`, cached per view and document revision = identity of the `imbl`
+maps), `render.rs` (krilla PDF with embedded Roboto, SVG). Vector viewports are
+`elevation`, `section` (cut faces hatched by material) and `plan_3d` (top view from
+meshes, optional cut height, labels as in `plan`); `hidden_lines` adds dashed
+hidden edges, `tag_lines` restyles objects by tag. Core cannot depend on it, so
+`sheet.export_pdf`/`export_svg` call an exporter that `stagecraft_sheet::install()`
+registers (the app's `main` and `Studio::new` do; it also runs
+`stagecraft_geom::install()` for the MVR mesher). Rendered viewports take images
+from `stagecraft_sheet::set_raster`: the GUI's `view3d::offscreen::Offscreen` renders
+them with the 3D pipelines before composing and before `sheet.export_*`; `stagecraft
+exec sheet.export_* --file` makes a windowless wgpu device (`STAGECRAFT_NO_GPU`
+skips it); without a GPU they print a placeholder. The Sheets mode composes on a
+worker thread and shows the previous page meanwhile. Fonts live in `assets/fonts/`
+for GUI and PDF.
 
 ```
 STAGECRAFT_SHEETS=/some/dir cargo test -p stagecraft-sheet --test sheet
@@ -166,7 +177,25 @@ STAGECRAFT_SCREENSHOTS=/some/dir cargo test -p stagecraft-ui --test screens
 renders the demo document (`demo.rs`, a small proscenium theatre with battens,
 curtains, wings, truss, platforms) in light and dark to PNG, including 3D iso,
 front, sections, a truss close-up, the stage from the house, the fly bar list and
-split. The overview shots hide the `ceiling` tag, which would cover the house.
+split. The overview shots hide the `ceiling` tag, which would cover the house. With
+`testdata/private/vectorworks/sample_show.mvr` present it also renders that
+import in plan and 3D (`26-mvr-*`, `27-mvr-*`).
+
+## MVR and imported models
+
+`stagecraft-mvr` (no StageCraft deps; README there) reads and writes MVR files;
+`stagecraft-core/src/mvr.rs` maps them to the document (`mvr.import {path,
+layer_mapping?}`, `mvr.export {path}`), `commands/mvr.rs` also has `model.import`
+(glb, gltf, obj, 3ds). Imported objects keep their MVR UUID and land at their MVR
+world matrix; fixtures get their GDTF into the library, mode, FID/CID and
+multi-break patch; trusses become truss pieces (catalogue profile by name, else the
+closest cross-section); objects with geometry become `model` objects whose parts
+are mesh files in `assets` (`model_file.rs` reads them; geom's `kinds/model.rs`
+caches meshes and draws a hidden-line top view). Export writes MVR 1.6 with GLBs of
+geom meshes through `mvr::install_mesher` (set by `stagecraft_geom::install`).
+Tests: `cargo test -p stagecraft-geom --release --test mvr -- --nocapture` imports
+every private MVR, checks counts against the file, fixture world matrices and
+patch, and round trips. grandMA3 has no MVR import outside its PSR GUI.
 
 ## Test data
 

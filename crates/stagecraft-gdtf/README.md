@@ -69,7 +69,9 @@ channel drives which axis is in `DmxChannel::geometry` and the attribute
 (`Pan`/`Tilt`).
 
 Lower level: `dmx::resolve_mode(&FixtureType, &DmxMode)`, `mesh::instances`,
-`models::{gltf, three_ds, primitives}::…`, `Archive`.
+`models::{gltf, three_ds, obj, primitives}::…`, `Archive`. `models::gltf::load` reads
+GLB and `.gltf` with base64 `data:` buffers; `models::obj::load` reads Wavefront OBJ
+(positions and faces). Both are also used for model objects and MVR geometry.
 
 ### Footprints
 
