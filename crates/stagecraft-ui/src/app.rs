@@ -41,6 +41,7 @@ impl Studio {
             theme: prefs.get().appearance.theme,
             options: prefs.get().tools.clone(),
             recent: prefs.get().palette.recent.clone(),
+            tool_columns: prefs.get().tool_palette.columns,
             ..Default::default()
         };
         Self { engine, ui, offscreen: None, dialogs: crate::dialogs::queue(), prefs }
@@ -182,13 +183,16 @@ impl Studio {
             || p.appearance.theme != theme
             || p.tools != tools
             || &p.palette.recent != recent
+            || p.tool_palette.columns != self.ui.tool_columns
         {
+            let columns = self.ui.tool_columns;
             let (layout, recent) = (layout.clone(), recent.clone());
             self.prefs.update(|p| {
                 p.layout.workspace = Some(layout);
                 p.appearance.theme = theme;
                 p.tools = tools;
                 p.palette.recent = recent;
+                p.tool_palette.columns = columns;
             });
         }
         let tick = self.prefs.tick(std::time::Instant::now());

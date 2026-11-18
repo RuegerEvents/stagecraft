@@ -353,7 +353,7 @@ fn overlay(ui: &mut Ui, s: &mut Studio, rect: egui::Rect) {
         let _ = s.run("ui.camera", json!({ "projection": p }));
     }
     section_controls(&mut child, s);
-    let r = crate::chrome::icon(&mut child, t("menu.zoom_fit"), "fit", 22.0, 14.0, false, t("menu.zoom_fit"));
+    let r = crate::chrome::icon(&mut child, t("menu.zoom_fit"), "fit", 22.0, 16.0, false, t("menu.zoom_fit"));
     if r.clicked() {
         s.ui.view3d.fit(None);
         s.ui.view3d.follow = true;

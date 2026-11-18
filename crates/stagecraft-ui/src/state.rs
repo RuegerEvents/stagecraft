@@ -150,6 +150,19 @@ impl Tool {
     }
 }
 
+/// How many tool buttons the tool palette puts in a row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolColumns {
+    /// As many as fit the panel's width.
+    #[default]
+    Auto,
+    /// Two per row, the panel as narrow as that needs.
+    Two,
+    /// One per row; section titles become rules.
+    One,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemePref {
@@ -442,8 +455,8 @@ pub struct UiState {
     pub sketch: crate::sketch_ui::SketchUi,
     /// The guided tour.
     pub tutorial: crate::tutorial::Tutorial,
-    /// The floating command line at the bottom of the canvas.
-    pub cmdline: crate::cmdline::CmdLine,
+    /// Tool palette buttons per row (saved per user).
+    pub tool_columns: ToolColumns,
     /// Tool palette sections the user folded (catalog keys).
     pub collapsed_sections: BTreeSet<String>,
     /// The view the Model tab goes back to from the Sheets mode.
@@ -506,7 +519,7 @@ impl Default for UiState {
             quit_confirmed: false,
             sketch: Default::default(),
             tutorial: Default::default(),
-            cmdline: Default::default(),
+            tool_columns: ToolColumns::Auto,
             collapsed_sections: BTreeSet::new(),
             model_view: View::Plan,
             grid_step: 100.0,

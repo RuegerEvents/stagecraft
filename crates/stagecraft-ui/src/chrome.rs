@@ -272,14 +272,14 @@ pub fn options_row(ui: &mut Ui, s: &mut Studio) {
     ui.horizontal_centered(|ui| {
         ui.add_space(10.0);
         if s.ui.view == View::Sheets {
-            crate::icons::paint_inline(ui, "sheet", 15.0, c.icon);
+            crate::icons::paint_inline(ui, "sheet", 16.0, c.icon);
             ui.label(egui::RichText::new(t("view.sheets")).font(theme::medium(theme::BODY)).color(c.text));
             ui.add_space(8.0);
             ui.label(egui::RichText::new(t("hint.sheets")).color(c.text2));
             return;
         }
         let tool = s.ui.tool;
-        crate::icons::paint_inline(ui, crate::icons::tool_icon(tool), 15.0, c.icon);
+        crate::icons::paint_inline(ui, crate::icons::tool_icon(tool), 16.0, c.icon);
         ui.label(egui::RichText::new(t(tool.key())).font(theme::medium(theme::BODY)).color(c.text));
         if crate::panels::has_options(tool) {
             ui.add_space(4.0);
@@ -290,7 +290,37 @@ pub fn options_row(ui: &mut Ui, s: &mut Studio) {
     });
 }
 
-/// The status bar: Model and sheet tabs, the readout, snap and display toggles.
+/// What the active tool expects next ("Wall: next corner …"), for the status bar.
+pub fn prompt(s: &Studio) -> String {
+    if s.ui.view == View::Sheets {
+        return format!("{}: {}", t("view.sheets"), t("hint.sheets"));
+    }
+    format!("{}: {}", t(s.ui.tool.key()), crate::panels::hint(s))
+}
+
+/// One line of `text` at most `width` wide, cut with "…"; the whole text is the tooltip when
+/// cut. Its accessible name is the whole text.
+fn elided(ui: &mut Ui, text: &str, colour: egui::Color32, width: f32) {
+    let mut job =
+        egui::text::LayoutJob::single_section(text.to_owned(), egui::TextFormat::simple(theme::body(), colour));
+    job.wrap = egui::text::TextWrapping {
+        max_width: width.max(1.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let g = ui.fonts_mut(|f| f.layout_job(job));
+    let cut = g.elided;
+    let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x, STATUS_BAR - 4.0), Sense::hover());
+    resp.widget_info(|| egui::WidgetInfo::labeled(Role::Label, true, text));
+    ui.painter().galley(pos2(rect.left(), rect.center().y - g.size().y / 2.0), g, colour);
+    if cut {
+        resp.on_hover_text(text);
+    }
+}
+
+/// The status bar: Model and sheet tabs, the readout, the active tool's prompt and the last
+/// message, snap and display toggles.
 pub fn status_bar(ui: &mut Ui, s: &mut Studio) {
     let c = theme::of(ui);
     let r = ui.max_rect();
@@ -302,21 +332,7 @@ pub fn status_bar(ui: &mut Ui, s: &mut Studio) {
         sheet_tabs(ui, s, &c);
         ui.add_space(10.0);
         ui.spacing_mut().item_spacing.x = 8.0;
-        if let Some(cur) = s.ui.gesture.cursor
-            && s.ui.view != View::Sheets
-        {
-            let f = |v: f64| crate::panels::fmt_mm(v);
-            ui.label(
-                egui::RichText::new(format!("X {}   Y {}", f(cur.point[0]), f(cur.point[1])))
-                    .font(theme::proportional(theme::BODY))
-                    .color(c.text),
-            );
-            ui.label(egui::RichText::new(t(crate::panels::snap_key(cur.kind))).color(c.text2));
-        }
-        if let Some((msg, err)) = &s.ui.status {
-            let text = egui::RichText::new(msg).color(if *err { c.warning } else { c.text2 });
-            ui.add(egui::Label::new(text).truncate());
-        }
+        // The right end first, so the middle knows how much room it has.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(6.0);
             toggles(ui, s, &c);
@@ -330,6 +346,33 @@ pub fn status_bar(ui: &mut Ui, s: &mut Studio) {
                 |g| tf("status.grid", &[("mm", &crate::panels::fmt_mm(g))]),
             );
             ui.label(egui::RichText::new(grid).color(c.text2));
+            ui.add_space(8.0);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if let Some(cur) = s.ui.gesture.cursor
+                    && s.ui.view != View::Sheets
+                {
+                    let f = |v: f64| crate::panels::fmt_mm(v);
+                    ui.label(
+                        egui::RichText::new(format!("X {}   Y {}", f(cur.point[0]), f(cur.point[1])))
+                            .font(theme::proportional(theme::BODY))
+                            .color(c.text),
+                    );
+                    ui.label(egui::RichText::new(t(crate::panels::snap_key(cur.kind))).color(c.text2));
+                }
+                // The prompt, then the last message; the message gets up to half the room.
+                let room = ui.available_width();
+                let msg = s.ui.status.clone();
+                let msg_w = msg.as_ref().map_or(0.0, |(m, _)| {
+                    let w = ui.painter().layout_no_wrap(m.clone(), theme::body(), c.text2).size().x;
+                    w.min(room * 0.5)
+                });
+                let prompt_w = (room - msg_w - if msg.is_some() { 16.0 } else { 0.0 }).max(40.0);
+                elided(ui, &prompt(s), c.text, prompt_w);
+                if let Some((m, err)) = msg {
+                    ui.add_space(8.0);
+                    elided(ui, &m, if err { c.warning } else { c.text2 }, msg_w);
+                }
+            });
         });
     });
 }
@@ -418,7 +461,7 @@ fn toggles(ui: &mut Ui, s: &mut Studio, c: &Tokens) {
             p.rect_filled(rect, 3.0, c.hover.gamma_multiply(0.5));
         }
         let colour = if *on { c.text } else { c.text2 };
-        crate::icons::paint(ui, Rect::from_center_size(rect.center(), vec2(14.0, 14.0)), ic, 14.0, colour);
+        crate::icons::paint(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)), ic, 16.0, colour);
         if *on {
             ui.painter().hline(rect.x_range().shrink(5.0), rect.bottom() - 0.5, Stroke::new(1.5, c.toggle_on));
         }

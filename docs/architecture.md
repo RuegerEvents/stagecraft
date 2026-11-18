@@ -53,8 +53,10 @@ so an AI can see the app.
 - Light and dark theme, following macOS by default, switchable (`ui.set_theme`).
   Sheets are always white paper.
 - Command palette (Cmd+K) reaches every command of both registries by title (technical
-  ones after `>`, with their IDs).
-- Typed dimensions while drawing.
+  ones after `>`, with their IDs; IDs show nowhere else in the GUI). No separate command
+  line.
+- Typed dimensions while drawing; the active tool's prompt in the status bar.
+- Icons rasterised per device pixel size and grid-fitted, so they stay sharp at 1×.
 - UI tests with `egui_kittest`; widgets are found by accessible name. Screens can be
   rendered to PNG without a window (`STAGECRAFT_SCREENSHOTS=dir cargo test -p
   stagecraft-ui --test screens`), and agents look at those PNGs to check their work.

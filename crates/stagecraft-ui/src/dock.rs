@@ -35,7 +35,7 @@ pub const PANELS: [PanelKind; 10] = [
     PanelKind::Tutorial,
 ];
 
-const LEFT_WIDTH: f32 = 204.0;
+pub const LEFT_WIDTH: f32 = 204.0;
 const RIGHT_WIDTH: f32 = 300.0;
 const TABLE_HEIGHT: f32 = 210.0;
 
@@ -303,7 +303,14 @@ impl DockContent<PanelKind> for Bodies<'_> {
         panel: &PanelKind,
         color: egui::Color32,
     ) -> bool {
-        crate::icons::paint_with(painter, painter.ctx(), rect, iconic(*panel), rect.height().min(16.0), color);
+        crate::icons::paint_with(
+            painter,
+            painter.ctx(),
+            rect,
+            iconic(*panel),
+            if rect.height() >= 16.0 { 16.0 } else { 12.0 },
+            color,
+        );
         true
     }
 
@@ -328,7 +335,7 @@ impl DockContent<PanelKind> for Bodies<'_> {
     fn limits(&self, panel: &PanelKind) -> PanelLimits {
         let min = match panel {
             PanelKind::Inspector | PanelKind::Layers | PanelKind::Library => egui::vec2(220.0, 80.0),
-            PanelKind::Tools => egui::vec2(120.0, 120.0),
+            PanelKind::Tools => egui::vec2(crate::toolsets::width_for(1), 120.0),
             PanelKind::Table => egui::vec2(320.0, 100.0),
             _ => egui::vec2(160.0, 60.0),
         };
@@ -380,9 +387,26 @@ fn panel_menu_button(ui: &mut Ui, s: &mut Studio, panel: PanelKind, rect: egui::
     if resp.hovered() {
         ui.painter().rect_filled(rect, 3.0, c.hover.gamma_multiply(0.6));
     }
-    crate::icons::paint(ui, rect, "menu", 14.0, if resp.hovered() { c.text } else { c.text2 });
+    crate::icons::paint(ui, rect, "menu", 16.0, if resp.hovered() { c.text } else { c.text2 });
     let resp = resp.on_hover_text(t("panel.menu"));
     egui::Popup::menu(&resp).show(|ui| {
+        if panel == PanelKind::Tools {
+            use crate::state::ToolColumns;
+            ui.label(egui::RichText::new(t("panel.columns")).color(crate::theme::of(ui).text2));
+            for (cols, key, name) in [
+                (ToolColumns::Auto, "panel.columns.auto", "Columns auto"),
+                (ToolColumns::Two, "panel.columns.two", "Columns two"),
+                (ToolColumns::One, "panel.columns.one", "Columns one"),
+            ] {
+                let r = ui.radio(s.ui.tool_columns == cols, t(key));
+                crate::widgets::name(&r, egui::Role::RadioButton, name);
+                if r.clicked() {
+                    let _ = s.run("ui.tool_columns", serde_json::json!({ "columns": cols }));
+                    ui.close();
+                }
+            }
+            ui.separator();
+        }
         let float = ui.button(t("panel.float"));
         crate::widgets::name(&float, egui::Role::Button, format!("Float {}", label(panel)));
         if float.clicked() {
@@ -407,7 +431,6 @@ fn panel_menu_button(ui: &mut Ui, s: &mut Studio, panel: PanelKind, rect: egui::
 
 /// The centre: plan, 3D, both side by side, or the sheet.
 fn canvas(ui: &mut Ui, s: &mut Studio) {
-    let rect = ui.max_rect();
     match s.ui.view {
         View::Plan => crate::canvas::show(ui, s),
         View::ThreeD => crate::view3d::show(ui, s),
@@ -424,7 +447,6 @@ fn canvas(ui: &mut Ui, s: &mut Studio) {
             ui.painter().vline(x, left.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
         }
     }
-    crate::cmdline::show(ui, s, rect);
 }
 
 /// What StageCraft keeps per user (`config.toml` in the platform's config folder, e.g.
@@ -439,6 +461,14 @@ pub struct Prefs {
     /// which belongs to a document's library.
     pub tools: crate::state::ToolOptions,
     pub palette: PalettePrefs,
+    pub tool_palette: ToolPalettePrefs,
+}
+
+/// The tool palette: buttons per row.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToolPalettePrefs {
+    pub columns: crate::state::ToolColumns,
 }
 
 /// The command palette's memory: recently run commands, newest first.
@@ -507,6 +537,7 @@ mod tests {
             layout: SavedLayout { workspace: Some(ws) },
             tools,
             palette: PalettePrefs { recent: vec!["patch.auto".into(), "ui.set_view {\"view\":\"3d\"}".into()] },
+            tool_palette: ToolPalettePrefs { columns: crate::state::ToolColumns::Two },
         };
         let dir = tempfile::tempdir().unwrap();
         {

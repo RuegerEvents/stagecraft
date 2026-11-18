@@ -52,13 +52,8 @@ pub struct Tokens {
     pub select_bg: Color32,
     /// Status bar toggles that are on.
     pub toggle_on: Color32,
-    /// The floating command bar.
-    pub cmd_bg: Color32,
-    pub cmd_border: Color32,
-    pub cmd_history: Color32,
-    /// Autocomplete list.
-    pub list_bg: Color32,
-    pub list_row: Color32,
+    /// Translucent chips over the canvas (the view label).
+    pub canvas_chip: Color32,
     /// The command palette: its card, the highlighted row, its border, key chips and
     /// the shadow under it.
     pub pal_bg: Color32,
@@ -97,11 +92,7 @@ impl Tokens {
         on_accent: Color32::WHITE,
         select_bg: rgb(0x2f5e9e),
         toggle_on: rgb(0x3d8bfd),
-        cmd_bg: rgba(0x343c4a, 0xf2),
-        cmd_border: rgb(0x55606f),
-        cmd_history: rgba(0x2a303a, 0xc8),
-        list_bg: rgb(0x2b313b),
-        list_row: rgb(0x3a4250),
+        canvas_chip: rgba(0x2a303a, 0xc8),
         pal_bg: rgb(0x373e4b),
         pal_row: rgb(0x46536b),
         pal_border: rgb(0x525d70),
@@ -175,11 +166,7 @@ impl Tokens {
         on_accent: Color32::WHITE,
         select_bg: rgb(0xc4dafb),
         toggle_on: rgb(0x2f7cf6),
-        cmd_bg: rgba(0xf9fafb, 0xf2),
-        cmd_border: rgb(0xa9b0ba),
-        cmd_history: rgba(0xf0f2f5, 0xdc),
-        list_bg: rgb(0xfbfcfd),
-        list_row: rgb(0xe3e8ef),
+        canvas_chip: rgba(0xf0f2f5, 0xdc),
         pal_bg: rgb(0xffffff),
         pal_row: rgb(0xe6eefc),
         pal_border: rgb(0xc9ced6),

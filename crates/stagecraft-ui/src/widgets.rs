@@ -181,7 +181,7 @@ pub fn eye_toggle(ui: &mut Ui, on: bool, accessible: &str) -> Response {
         ui.painter().rect_filled(rect, 3.0, c.hover.gamma_multiply(0.5));
     }
     let colour = if on { c.text } else { c.text3 };
-    crate::icons::paint(ui, rect, if on { "eye" } else { "eye-off" }, 14.0, colour);
+    crate::icons::paint(ui, rect, if on { "eye" } else { "eye-off" }, 16.0, colour);
     resp
 }
 

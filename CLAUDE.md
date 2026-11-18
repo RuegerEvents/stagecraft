@@ -112,8 +112,9 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   AppKit centres the traffic lights in, centred title "StageCraft — file •"); then the tool
   bar (file/edit/import/export commands as icons, ⋯ overflow, Plan/3D/Split/Sheets switch,
   palette search), the options row (active tool + its options), the dock area (`dock.rs`,
-  craft-ui docking) and the status bar (Model and sheet tabs, coordinates, status message,
-  grid/object/truss snap, sketch, constraint colours and theme toggles). No menu row on
+  craft-ui docking) and the status bar (Model and sheet tabs, coordinates,
+  the active tool's prompt and the last message, grid/object/truss snap, sketch, constraint
+  colours and theme toggles). No menu row on
   macOS (`menu.rs` is the native menu bar through craft-menu). Default docks: the tool
   palette (`PanelKind::Tools`, `toolsets.rs`) left; right the browsers Layers, Tags,
   Sheets, Library, GDTF Share as icon tabs (`dock::icon`, painted by `tab_icons`, with a
@@ -133,29 +134,40 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   (→/Enter opens, ←/Backspace back, breadcrumb). Typing searches titles, aliases
   (`assets/i18n/aliases.json`: German and Vectorworks words per English term), groups,
   summaries and objects (name, FID), layers, tags, sheets; inside a group only the group.
-  `>` all commands incl. hidden ones with IDs, `@` objects, `#` tags. Greyed rows carry the
+  `>` all commands incl. hidden ones with IDs, `@` objects, `#` tags. IDs and fixed
+  arguments (`ui.set_tool tool=dimension`, the form's `patch.auto`) show only in `>` mode
+  and in a form opened from it (`palette::technical`, `shown_id`); everywhere else titles only. Greyed rows carry the
   reason (`command_meta::available`, no command is run to find out). Arguments: an inline
   form from `schema_form::fields_for` (units, enums, pickers for objects/layers/tags/
   sheets/viewports/fixture types, x/y/z boxes, prefill from selection and defaults); Enter
   runs, Esc goes back. Palette tests: `tests/ui.rs` (`the_palette_*`), screens `70-78`.
-- The command line (`cmdline.rs`) floats at the bottom of the canvas: the line above it is
-  the active tool's prompt (`panels::hint`, two lines then "…" with the full text as
-  tooltip), it completes tool names and commands by title, alias or ID (shown as title +
-  ID), runs `name {json}` or `name key=value`, opens the palette form for commands that need
-  arguments.
+- There is no in-canvas command line (removed: ⌘K and the tool bar search do that). The
+  active tool's prompt (`chrome::prompt`, from `panels::hint`) sits in the status bar after
+  the coordinates, cut with "…" (full text as tooltip, accessible name = the text); the last
+  status message follows it and gets at most half the room.
 - Icons in `assets/icons/` (Lucide, ISC; own stage and constraint icons in the same
-  grid), rasterised by `icons.rs`; `STAGECRAFT_ICONS=<dir> cargo test -p stagecraft-ui --lib
-  icon_sheet` writes them as PNGs.
+  grid), rasterised by `icons.rs` at the device pixel size (size × pixels_per_point, cached
+  per icon and px, so another screen density gets new textures) with grid fitting: path
+  points snap to pixel centres/corners, the stroke is Lucide's 2 units rounded to whole
+  pixels (`icons::stroke_px`: 1 px at 16 px, 3 px at 32). `icons::pixel_rect` puts the
+  texture on the pixel grid 1:1 (nearest filter). Use 12 or 16 pt icons (20/24 for big
+  ones), not 14/15/17: those leave Lucide's grid between pixels. `STAGECRAFT_ICONS=<dir> cargo
+  test -p stagecraft-ui --lib icon_sheet` writes them as PNGs; the screens test's
+  `80-crisp-{1x,1.5x,2x}-*` render the window at those densities.
 - Give clickable things an accessible name (`widgets::name`); tests find them so.
   Table cells are named `"<Column> <row>"`, e.g. `FID 1`, header resize handles
   `Resize <Column>` (columns fill a wide panel, give way to 70 % in a narrow one, then the
   table scrolls sideways; cut cells end in "…"); tool buttons `Tool Wall`, tool
   bar buttons `Toolbar Save`, palette sections `Section Stage`, status toggles `Toggle grid
   snap`, sheet tabs `Model tab` / `Sheet tab L-101`, panel menus `Panel menu Layers`.
-- Tools sit in `panels::tool_groups` (palette sections); tool options (`ToolOptions`,
+- Tools sit in `panels::tool_groups` (palette sections); the palette (`toolsets.rs`) fills its
+  rows to the panel width, which can be dragged down to one button; `ui.tool_columns
+  {columns: auto|two|one}` (also the Tools ≡ menu's Compact entries, saved in
+  `Prefs.tool_palette`) caps the rows at two or one and narrows the docked column to fit
+  (`toolsets::width_for`); at one per row section headers are rules with the title as tooltip; tool options (`ToolOptions`,
   `ui.set_tool_options`, saved per user in `dock::Prefs.tools`) show on the options row;
   `panels::hint` (what the gesture expects next: first corner,
-  next corner, "close the floor") is the command line's prompt. After a tool creates something the status bar says
+  next corner, "close the floor") is the status bar's prompt. After a tool creates something the status bar says
   what to do next (`next.<tool>` catalog keys, `tools::created_message`). Heights the
   user types (tool options, Inspector) are above the object's layer elevation; floors
   show "Top height", walls "Base height", ceilings "Underside height". One-click
@@ -261,7 +273,8 @@ front, sections, a truss close-up, the stage from the house, the fly bar list an
 split, a rearranged dock layout with a floating panel (`40-dock-float-*`), the
 tutorial panel (`41-43-tutorial-*`), and `50-55-craft-*` at 1200 × 750, the size of the
 Craft suite's reference screenshots, and `70-78-palette-*` (groups, selection, group,
-search, alias, form, objects, `>`). kittest's 8 pt margin is cut off and the traffic
+search, alias, form, objects, `>`), `80-crisp-{1x,1.5x,2x}-*` (plan and palette at those
+pixel densities) and `81-tools-{two,one}-*` (the folded tool palette). kittest's 8 pt margin is cut off and the traffic
 lights are painted where AppKit puts them (`chrome::traffic_light_centres`). The overview shots (`53-craft-3d` too) hide the `ceiling` tag, which would cover the house. With
 `testdata/private/vectorworks/sample_show.mvr` present it also renders that
 import in plan and 3D (`26-mvr-*`, `27-mvr-*`).

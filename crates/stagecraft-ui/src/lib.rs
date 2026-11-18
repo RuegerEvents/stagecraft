@@ -11,7 +11,6 @@
 pub mod app;
 pub mod canvas;
 pub mod chrome;
-pub mod cmdline;
 pub mod command_meta;
 pub mod commands;
 pub mod demo;

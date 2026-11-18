@@ -224,7 +224,7 @@ fn score_meta(i: usize, query: &str, with_ids: bool) -> Option<i32> {
     Some(total)
 }
 
-/// Rows of [`META`] matching `query`, best first. The command line uses it too.
+/// Rows of [`META`] matching `query`, best first.
 pub fn search_commands(query: &str, hidden: bool, group: Option<Group>) -> Vec<(usize, i32)> {
     let q = query.trim().to_lowercase();
     let mut v: Vec<(usize, i32)> = (0..META.len())
@@ -540,7 +540,7 @@ fn go_to(s: &mut Studio, ids: Vec<Id>, name: &str) {
 }
 
 /// Start the form for a command (its base row), or run it right away if it takes
-/// nothing. The command line calls this for commands typed without arguments.
+/// nothing.
 pub fn choose(s: &mut Studio, name: &str) {
     match META.iter().position(|m| m.id == name && m.args.is_none()) {
         Some(i) => choose_meta(s, i),
@@ -674,7 +674,8 @@ fn run_named(s: &mut Studio, name: &str, i: Option<usize>, args: Value) {
 
 // ---------------------------------------------------------------- drawing
 
-/// The command as one types it on the command line: `ui.set_tool tool=batten`.
+/// The command with its fixed arguments, as MCP and the CLI know it: `ui.set_tool tool=batten`.
+/// Shown only in `>` mode ([`technical`]).
 pub fn display_id(m: &Meta) -> String {
     match m.args_value() {
         Some(Value::Object(a)) => {
@@ -685,6 +686,25 @@ pub fn display_id(m: &Meta) -> String {
             format!("{} {}", m.id, pairs.join(" "))
         }
         _ => m.id.to_owned(),
+    }
+}
+
+/// Whether the palette shows command IDs and arguments: in `>` mode, and in a form opened
+/// from it. Everywhere else people see titles only.
+pub fn technical(s: &Studio) -> bool {
+    let p = &s.ui.palette;
+    match (&p.chosen, &p.back) {
+        (Some(_), Some((query, ..))) => mode(query).0 == Mode::Commands,
+        (Some(_), None) => false,
+        (None, _) => mode(&p.query).0 == Mode::Commands,
+    }
+}
+
+/// The ID a row shows at its right end: only in `>` mode.
+pub fn shown_id(s: &Studio, item: &Item) -> Option<String> {
+    match item {
+        Item::Command(m) if technical(s) => Some(display_id(&META[*m])),
+        _ => None,
     }
 }
 
@@ -810,9 +830,9 @@ fn header(
         crate::icons::paint_with(
             &p,
             ui.ctx(),
-            Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(14.0, 14.0)),
+            Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(16.0, 16.0)),
             icon,
-            14.0,
+            16.0,
             colour,
         );
         p.galley(pos2(r.left() + 24.0, r.center().y - g.size().y / 2.0), g, colour);
@@ -982,7 +1002,6 @@ fn list(ui: &mut Ui, s: &mut Studio, c: &Tokens) {
         || ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.any());
     let ctxt = Context::of(s);
     let cursor = s.ui.palette.cursor.min(rows.len().saturating_sub(1));
-    let ids = mode(&s.ui.palette.query).0 == Mode::Commands;
     let flat = !s.ui.palette.query.trim().is_empty();
     let mut picked: Option<Row> = None;
     let mut hover_to: Option<usize> = None;
@@ -1066,9 +1085,9 @@ fn list(ui: &mut Ui, s: &mut Studio, c: &Tokens) {
                         crate::icons::paint_with(
                             p,
                             ui.ctx(),
-                            Rect::from_center_size(pos2(right - 6.0, cy), vec2(14.0, 14.0)),
+                            Rect::from_center_size(pos2(right - 6.0, cy), vec2(12.0, 12.0)),
                             "chevron-right",
-                            14.0,
+                            12.0,
                             c.text3,
                         );
                         right -= 22.0;
@@ -1085,14 +1104,8 @@ fn list(ui: &mut Ui, s: &mut Studio, c: &Tokens) {
                     right -= g.size().x;
                     p.galley(pos2(right, cy - g.size().y / 2.0), g, c.text3);
                     right -= 12.0;
-                } else if let Item::Command(m) = row.item
-                    && (on || ids)
-                {
-                    let g = p.layout_no_wrap(
-                        display_id(&META[m]),
-                        FontId::monospace(10.0),
-                        if on { c.text2 } else { c.text3 },
-                    );
+                } else if let Some(id) = shown_id(s, &row.item) {
+                    let g = p.layout_no_wrap(id, FontId::monospace(10.0), if on { c.text2 } else { c.text3 });
                     right -= g.size().x;
                     p.galley(pos2(right, cy - g.size().y / 2.0), g, c.text3);
                     right -= 12.0;
@@ -1207,15 +1220,18 @@ fn form(ui: &mut Ui, s: &mut Studio, name: &str, c: &Tokens) {
         crumbs.push(("terminal", title.clone()));
     }
     header(ui, s, c, &crumbs, false);
+    let ids = technical(s);
     let specs: Vec<FieldSpec> = fields_for(name, &schema_of(name));
     let summary = meta.map_or_else(|| stagecraft_core::registry().get(name).map_or("", |e| e.summary), |m| m.summary());
     egui::Frame::NONE.inner_margin(egui::Margin { left: 18, right: 18, top: 10, bottom: 12 }).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
         ui.horizontal(|ui| {
             ui.add(egui::Label::new(egui::RichText::new(summary).font(dim_font()).color(c.text2)).wrap());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(name).font(FontId::monospace(10.0)).color(c.text3));
-            });
+            if ids {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(name).font(FontId::monospace(10.0)).color(c.text3));
+                });
+            }
         });
         ui.add_space(4.0);
         let (simple, advanced): (Vec<&FieldSpec>, Vec<&FieldSpec>) =

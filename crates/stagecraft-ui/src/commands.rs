@@ -130,6 +130,11 @@ fn register(r: &mut UiRegistry) {
     r.add("ui.float_panel", "Float a panel in its own window inside the app window, at a rect in points", float_panel);
     r.add("ui.reset_layout", "Put every panel back where a new user has it", reset_layout);
     r.add(
+        "ui.tool_columns",
+        "Tool palette buttons per row: auto (as many as fit), two or one; two and one also narrow the docked palette to fit",
+        tool_columns,
+    );
+    r.add(
         "ui.share_search",
         "Search GDTF Share in the library panel (loads the cached list off the UI thread; returns hits once loaded)",
         share_search,
@@ -191,6 +196,7 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "section": ui.view3d.section,
         "section_hatch": ui.view3d.hatch,
         "theme": ui.theme,
+        "tool_columns": ui.tool_columns,
         "panels": crate::dock::PANELS.iter().map(|p| (p, ui.layout.layout.contains(p))).collect::<std::collections::BTreeMap<_, _>>(),
         "hidden_tags": ui.hidden_tags,
         "active_layer": ui.active_layer,
@@ -741,6 +747,29 @@ struct ThemeArgs {
 fn set_theme(c: &mut UiCtx, a: ThemeArgs) -> CmdResult {
     c.ui.theme = a.theme;
     Ok(json!({ "theme": a.theme }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ToolColumnsArgs {
+    /// auto, two or one.
+    columns: crate::state::ToolColumns,
+}
+
+fn tool_columns(c: &mut UiCtx, a: ToolColumnsArgs) -> CmdResult {
+    use crate::state::ToolColumns;
+    c.ui.tool_columns = a.columns;
+    let width = match a.columns {
+        ToolColumns::Auto => crate::dock::LEFT_WIDTH,
+        ToolColumns::Two => crate::toolsets::width_for(2),
+        ToolColumns::One => crate::toolsets::width_for(1),
+    };
+    // A floating or closed palette keeps its size.
+    let docked = crate::dock::apply(
+        &mut c.ui.layout,
+        vec![craft_ui::docking::Action::ResizeColumn { panel: PanelKind::Tools, width }],
+    )
+    .is_ok();
+    Ok(json!({ "columns": a.columns, "width": docked.then_some(width) }))
 }
 
 #[derive(Deserialize, JsonSchema)]

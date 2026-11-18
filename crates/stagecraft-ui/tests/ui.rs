@@ -921,3 +921,87 @@ fn table_columns_resize_by_dragging_the_header() {
     let w = h.state().ui.table.widths.get(&stagecraft_ui::table::Col::Name).copied().expect("dragged width");
     assert!(w > stagecraft_ui::table::Col::Name.width(), "{w}");
 }
+
+#[test]
+fn the_tool_palette_folds_to_two_or_one_column() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    let x = |h: &Harness<'static, Studio>, tool: &str| h.get_by_label(&format!("Tool {tool}")).rect().center().x;
+    let y = |h: &Harness<'static, Studio>, tool: &str| h.get_by_label(&format!("Tool {tool}")).rect().center().y;
+    // Auto: Select, Move and Rotate share the first row.
+    assert_eq!(y(&h, "Select"), y(&h, "Rotate"));
+    // The ≡ menu's Compact entries.
+    h.get_by_label("Panel menu Tools").click();
+    h.run();
+    h.get_by_label("Columns one").click();
+    h.run();
+    h.run();
+    assert_eq!(h.state().ui.tool_columns, stagecraft_ui::state::ToolColumns::One);
+    assert_eq!(x(&h, "Select"), x(&h, "Move"));
+    assert!(y(&h, "Move") > y(&h, "Select"));
+    let tools = h.get_by_label("Tool Select").rect();
+    assert!(tools.right() < 60.0, "the dock narrowed to one button: {tools:?}");
+    // Tooltips stay; section titles are rules but keep their names.
+    assert!(h.query_by_label("Section Stage").is_some());
+    run(&mut h, "ui.tool_columns", json!({ "columns": "two" }));
+    h.run();
+    assert_eq!(y(&h, "Select"), y(&h, "Move"));
+    assert!(y(&h, "Rotate") > y(&h, "Select"));
+    assert_eq!(x(&h, "Select"), x(&h, "Rotate"));
+    run(&mut h, "ui.tool_columns", json!({ "columns": "auto" }));
+    h.run();
+    assert_eq!(y(&h, "Select"), y(&h, "Rotate"));
+    // Saved per user.
+    run(&mut h, "ui.tool_columns", json!({ "columns": "one" }));
+    h.run();
+    assert_eq!(h.state().prefs.get().tool_palette.columns, stagecraft_ui::state::ToolColumns::One);
+}
+
+#[test]
+fn the_palette_shows_command_ids_only_after_the_prefix() {
+    use stagecraft_ui::palette::{Item, shown_id, technical};
+    let mut h = harness(stagecraft_ui::demo::engine());
+    open_palette(&mut h);
+    type_query(&mut h, "dimension");
+    let rows = stagecraft_ui::palette::rows(h.state());
+    assert!(matches!(rows[0].item, Item::Command(_)));
+    // Highlighted or not, no row shows an ID.
+    assert!(!technical(h.state()));
+    assert!(rows.iter().all(|r| shown_id(h.state(), &r.item).is_none()));
+    // A form opened from a search shows no ID either.
+    h.state_mut().ui.palette.query.clear();
+    h.run();
+    stagecraft_ui::palette::choose(h.state_mut(), "patch.auto");
+    h.run();
+    assert!(h.query_by_label("Run").is_some(), "the form is open");
+    assert!(h.query_by_label("patch.auto").is_none());
+    assert!(!technical(h.state()));
+    h.state_mut().ui.palette.close();
+    h.run();
+    // `>`: every row and the form carry their IDs.
+    open_palette(&mut h);
+    type_query(&mut h, ">ui.set_tool");
+    let rows = stagecraft_ui::palette::rows(h.state());
+    assert!(technical(h.state()));
+    assert!(rows.iter().any(|r| shown_id(h.state(), &r.item).as_deref() == Some("ui.set_tool tool=dimension")));
+    h.state_mut().ui.palette.query = ">patch.auto".into();
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(h.state().ui.palette.chosen.as_deref(), Some("patch.auto"));
+    assert!(h.query_by_label("patch.auto").is_some());
+}
+
+#[test]
+fn the_status_bar_shows_the_tool_prompt_and_there_is_no_command_line() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    assert!(h.query_by_label("Command line").is_none());
+    run(&mut h, "ui.set_tool", json!({ "tool": "wall" }));
+    let prompt = stagecraft_ui::chrome::prompt(h.state());
+    assert!(prompt.starts_with("Wall: "), "{prompt}");
+    assert!(h.query_by_label(&prompt).is_some(), "the prompt is in the status bar");
+    // A message from a command shares the bar with the prompt.
+    h.state_mut().ui.info("Placed it");
+    h.run();
+    assert!(h.query_by_label("Placed it").is_some());
+    assert!(h.query_by_label(&prompt).is_some());
+}

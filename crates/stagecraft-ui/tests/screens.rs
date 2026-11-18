@@ -33,6 +33,16 @@ fn harness_with(theme: ThemePref, engine: stagecraft_core::Engine) -> Harness<'s
 const MARGIN: f32 = 8.0;
 
 fn harness_sized(theme: ThemePref, engine: stagecraft_core::Engine, size: egui::Vec2) -> Harness<'static, Studio> {
+    harness_ppp(theme, engine, size, 1.0)
+}
+
+/// [`harness_sized`] at a pixel density: 1.0 is a plain external monitor, 2.0 Retina.
+fn harness_ppp(
+    theme: ThemePref,
+    engine: stagecraft_core::Engine,
+    size: egui::Vec2,
+    ppp: f32,
+) -> Harness<'static, Studio> {
     let mut studio = Studio::new(engine);
     studio.ui.theme = theme;
     // As on macOS: the menus are the system's, the tool bar is the title bar.
@@ -44,6 +54,7 @@ fn harness_sized(theme: ThemePref, engine: stagecraft_core::Engine, size: egui::
         // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
         // asks for one more frame; closing a modal can take six.
         .with_max_steps(8)
+        .with_pixels_per_point(ppp)
         .with_size(size + vec2(2.0 * MARGIN, 2.0 * MARGIN))
         .renderer(renderer)
         .build_ui_state(|ui, s: &mut Studio| s.show(ui), studio);
@@ -54,7 +65,7 @@ fn harness_sized(theme: ThemePref, engine: stagecraft_core::Engine, size: egui::
 fn save(h: &mut Harness<'static, Studio>, dir: &str, name: &str) {
     h.run();
     let full = h.render().expect("render");
-    let m = MARGIN as u32;
+    let m = (MARGIN * h.ctx.pixels_per_point()) as u32;
     let mut img = image::imageops::crop_imm(&full, m, m, full.width() - 2 * m, full.height() - 2 * m).to_image();
     window_buttons(&mut img);
     img.save(format!("{dir}/{name}.png")).expect("save");
@@ -77,6 +88,34 @@ fn window_buttons(img: &mut image::RgbaImage) {
                         *ch = (*ch as f32 * (1.0 - a) + want as f32 * a) as u8;
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Icons and text at 1× (a plain external monitor) and 2× (Retina), and at 1.5×: the tool
+/// palette, the tool bar, the palette with the Draw group. `80-crisp-<ppp>x-*`.
+#[test]
+fn crisp_screens() {
+    let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") else { return };
+    std::fs::create_dir_all(&dir).expect("screenshot dir");
+    for (theme, tn) in [(ThemePref::Light, "light"), (ThemePref::Dark, "dark")] {
+        for (ppp, pn) in [(1.0, "1x"), (1.5, "1.5x"), (2.0, "2x")] {
+            let mut h = harness_ppp(theme, stagecraft_ui::demo::engine(), vec2(1200.0, 750.0), ppp);
+            h.state_mut().run("ui.set_tool", json!({ "tool": "dimension" })).unwrap();
+            save(&mut h, &dir, &format!("80-crisp-{pn}-plan-{tn}"));
+            h.state_mut().ui.palette.open();
+            h.state_mut().ui.palette.group = Some(stagecraft_ui::command_meta::Group::Draw);
+            h.run();
+            save(&mut h, &dir, &format!("80-crisp-{pn}-palette-{tn}"));
+            h.state_mut().ui.palette.close();
+            if pn == "1.5x" {
+                continue;
+            }
+            // The tool palette folded to two and to one column.
+            for cols in ["two", "one"] {
+                h.state_mut().run("ui.tool_columns", json!({ "columns": cols })).unwrap();
+                save(&mut h, &dir, &format!("81-tools-{cols}-{pn}-{tn}"));
             }
         }
     }
