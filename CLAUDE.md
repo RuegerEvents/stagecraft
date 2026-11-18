@@ -16,7 +16,7 @@ UX. Commits are GPG-signed.
 
 - `stagecraft-core` holds the document and every command. No UI, no sockets, no clock.
   It must keep building for `wasm32-unknown-unknown`
-  (`cargo check -p stagecraft-core -p stagecraft-geom -p stagecraft-sheet -p stagecraft-gdtf -p stagecraft-hlr -p stagecraft-mvr -p stagecraft-sketch --target wasm32-unknown-unknown`).
+  (`cargo check -p stagecraft-core -p stagecraft-geom -p stagecraft-sheet -p stagecraft-gdtf -p stagecraft-hlr -p stagecraft-mvr -p stagecraft-sketch -p stagecraft-underlay --target wasm32-unknown-unknown`).
 - **Every action is a command** registered in `crates/stagecraft-core/src/commands/`.
   The GUI never mutates the document directly. A new feature without a command is not
   done.
@@ -31,7 +31,7 @@ UX. Commits are GPG-signed.
   y = 0 is the setting line (the proscenium's downstage face in the demo).
 - Object kinds (`model.rs`): floor, wall, truss, fixture, and from block 4 proscenium,
   curtain, wing_set + masking, batten, platform, truss_node + truss_run, support,
-  hoist, ceiling; from block 8 group and model. `wing_set`, `truss_run` and `group`
+  hoist, ceiling; from block 8 group, model, underlay and note. `wing_set`, `truss_run` and `group`
   are groups (children, no geometry).
   Battens keep position and trim in their placement (y, z); things hang on them by
   attachment. Stage commands are in `commands/stage.rs`, truss runs/nodes, load
@@ -197,17 +197,34 @@ knowledge. Linked objects are roots at x/y/rotation 0 (only z is theirs);
 dimensions between anchors (object + local point, sketch point, world point).
 Commands: `sketch.get/status/add_point/add_line/add_arc/add_polyline/add_constraint/
 remove_constraint/remove/drag/draw_line/draw/make_wall/make_floor/adopt/unlink/solve/
-edit`, `dimension.add/add_reference/set_value/set_driving/move_label/name/remove/list`
+edit`, `sketch.link` (portal, batten, curtain, truss piece follow one line), `dimension.add/add_reference/set_value/set_driving/move_label/name/remove/list`
 (ids: number = sketch dimension, UUID = reference, or a name). An edit the solver
 cannot satisfy fails with code `conflict` naming the constraints; the engine rolls
 back. Tests: `crates/stagecraft-core/tests/sketch.rs`.
 
 Drawing: `stagecraft_geom::dims` (shared by canvas and sheets; plan viewports have
-`sketch_dimensions`/`reference_dimensions` toggles). GUI: `src/sketch_ui.rs` (overlay
+`sketch_dimensions`/`reference_dimensions` toggles). GUI: `src/sketch_ui.rs` (click picks sketch points/lines, inspector constraint buttons, `ui.sketch_pick`; overlay
 in FreeCAD colours with a cached analysis, dimension hit tests, inline value editor,
 drag preview, inspector section, dimension tool picks); wall/floor tools run
 `sketch.draw`; `ui.sketch`, `ui.dimension`. GUI tests in `tests/sketch.rs` (the
 harness there uses 1/60 s steps so double clicks register), screens `30-35-sketch-*`.
+
+## Underlays and notes
+
+`stagecraft-underlay` (no StageCraft deps, wasm; README there) turns PNG/JPEG, PDF
+(hayro), SVG (resvg, draw.io CSS fixed up) and DXF (flattened `Linework`) into what
+the plan shows. Core `commands/annotate.rs`: `underlay.import/calibrate/align/update`,
+`note.create/update`; kinds `underlay` (assets: source + PNG or JSON linework) and
+`note`. Plan prim `Image`; sheets draw underlays only with viewport `underlays: true`.
+GUI: Calibrate tool (K), File > Import underlay…, inspector rows. Tests:
+`stagecraft-core/tests/underlay.rs`, `stagecraft-ui/tests/underlay.rs`.
+
+## Acceptance: Hall A
+
+`cargo test -p stagecraft-ui --test hall_a` builds the venue from
+`testdata/private/hall_a.drawio.svg` through commands only (skips without it)
+and writes `testdata/private/hall_a/` (documents, PDFs at 13 and 15 m portal
+width, plan/3D PNGs). Assumptions A1–A12 are in the script and as notes in the plan.
 
 ## MVR and imported models
 

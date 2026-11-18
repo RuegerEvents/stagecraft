@@ -480,3 +480,11 @@ fn a_corner_node_reaches_one_profile_width_along_each_arm() {
     let b = object_bounds(e.doc(), &e.doc().objects[&n], &PlanStyle::default());
     assert!(near(b.min, [-145.0, -145.0]) && near(b.max, [290.0, 290.0]), "{b:?}");
 }
+
+#[test]
+fn levels_carry_their_sign() {
+    use stagecraft_geom::kinds::stage::level_text;
+    assert_eq!(level_text(1400.0), "+1.40");
+    assert_eq!(level_text(-750.0), "-0.75");
+    assert_eq!(level_text(0.4), "±0.00");
+}

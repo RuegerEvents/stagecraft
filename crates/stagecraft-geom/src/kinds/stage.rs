@@ -223,9 +223,15 @@ pub fn platform_plan(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanP
             fill: FillClass::Deck,
             line: None,
         });
-        out.push(label(c, format!("+{:.2}", top / 1000.0), h));
+        out.push(label(c, level_text(top), h));
     }
     out
+}
+
+/// A level in metres with its sign, as on drawings: `+1.40`, `±0.00`, `-0.75`.
+pub fn level_text(mm: f64) -> String {
+    let m = (mm / 10.0).round() / 100.0;
+    if m == 0.0 { "±0.00".to_owned() } else { format!("{m:+.2}") }
 }
 
 pub fn platform_mesh(obj: &Object, lod: Lod) -> Mesh {

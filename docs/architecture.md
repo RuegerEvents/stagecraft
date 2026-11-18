@@ -13,6 +13,7 @@ read this, `CLAUDE.md`, `docs/spec/overview.md` and `docs/spec/control.md` first
 | `stagecraft-gdtf` | GDTF parsing (description.xml, geometry tree, modes, footprints, weight), 3DS/GLB model loading, GDTF Share client | core types only where needed |
 | `stagecraft-mvr` | MVR file model, reader and writer, GLB writer (the mapping to the document is in core) | – |
 | `stagecraft-sketch` | parametric 2D sketch: points, lines, arcs, constraints, dimensions, solved with ezpz (the document and commands are in core) | – |
+| `stagecraft-underlay` | underlay files to rasters (PDF, SVG) and DXF linework | – |
 | `stagecraft-sheet` | sheets, viewports, title blocks, labels, PDF (krilla), vector views through hlr | core, geom, hlr |
 | `stagecraft-ui` | egui/eframe app: plan canvas, 3D view (wgpu), sheets, palette, inspector, tables | all above |
 | `stagecraft-control` | TCP JSON-RPC, discovery, MCP | core |
