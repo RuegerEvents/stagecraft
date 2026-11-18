@@ -277,12 +277,51 @@ impl Camera {
     }
 }
 
-/// What the user is typing while drawing: "4.5", Tab, "30", Enter.
+/// Which box of the heads-up dimension input takes the keys.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DimField {
+    #[default]
+    Length,
+    Angle,
+}
+
+/// What the user is typing while drawing (the heads-up boxes next to the rubber band):
+/// "4.5", Tab, "30", Enter. A box whose text parses locks its quantity; the other one
+/// follows the pointer. See `hud.rs`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct DimInput {
     pub length: String,
     pub angle: String,
-    pub on_angle: bool,
+    /// The box that takes the keys; Tab switches.
+    pub field: DimField,
+    /// The next key replaces the box's text (after Tab into a box with a value).
+    pub replace: bool,
+}
+
+impl DimInput {
+    /// A typed length in mm, if the length box holds one (> 0).
+    pub fn length_mm(&self) -> Option<f64> {
+        crate::tools::parse_length(&self.length).filter(|l| *l > 0.0)
+    }
+
+    /// A typed angle in degrees, if the angle box holds one.
+    pub fn angle_deg(&self) -> Option<f64> {
+        if self.angle.trim().is_empty() { None } else { crate::tools::parse_angle(&self.angle) }
+    }
+
+    /// Nothing typed in either box.
+    pub fn is_empty(&self) -> bool {
+        self.length.trim().is_empty() && self.angle.trim().is_empty()
+    }
+
+    /// The text of the box that takes keys.
+    pub fn text_mut(&mut self) -> &mut String {
+        match self.field {
+            DimField::Length => &mut self.length,
+            DimField::Angle => &mut self.angle,
+        }
+    }
 }
 
 /// A press on the canvas that may become a drag.

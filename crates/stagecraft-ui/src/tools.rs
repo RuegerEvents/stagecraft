@@ -13,13 +13,17 @@ use stagecraft_geom::{Bounds, PlanStyle};
 use crate::app::Studio;
 use crate::canvas::{draw_prims, screen_rect, tolerance};
 use crate::i18n::{t, tf};
-use crate::state::{DimInput, Drag, Gesture, SegHint, Tool};
+use crate::state::{DimField, DimInput, Drag, Gesture, SegHint, Tool};
 use crate::theme::Palette;
 
 /// A typed length in mm. Plain numbers are metres ("4.5" = 4500 mm); `mm`, `cm` and
-/// `m` suffixes are understood. `None` for anything else.
+/// `m` suffixes are understood, and feet and inches (`15'`, `15' 6"`, `6"`, `15ft`,
+/// `6in`). `None` for anything else.
 pub fn parse_length(s: &str) -> Option<f64> {
     let s = s.trim().replace(',', ".");
+    if let Some(v) = parse_imperial(&s) {
+        return Some(v);
+    }
     let (num, factor) = if let Some(n) = s.strip_suffix("mm") {
         (n, 1.0)
     } else if let Some(n) = s.strip_suffix("cm") {
@@ -33,28 +37,27 @@ pub fn parse_length(s: &str) -> Option<f64> {
     v.is_finite().then_some(v * factor)
 }
 
+/// Feet and inches: `15'`, `15' 6"`, `15'6`, `6"`, `15ft`, `6in`.
+fn parse_imperial(s: &str) -> Option<f64> {
+    let s = s.replace("ft", "'").replace("in", "\"");
+    if !s.contains(['\'', '"']) {
+        return None;
+    }
+    let (feet, rest) = match s.split_once('\'') {
+        Some((f, r)) => (f.trim().parse::<f64>().ok()?, r),
+        None => (0.0, s.as_str()),
+    };
+    let rest = rest.trim().trim_end_matches('"').trim();
+    let inches = if rest.is_empty() { 0.0 } else { rest.parse::<f64>().ok()? };
+    let sign = if feet < 0.0 || s.trim_start().starts_with('-') { -1.0 } else { 1.0 };
+    let v = feet * 304.8 + sign * inches.abs() * 25.4;
+    v.is_finite().then_some(v)
+}
+
 /// A typed angle in degrees ("30", "-45°").
 pub fn parse_angle(s: &str) -> Option<f64> {
     let s = s.trim().trim_end_matches('°').replace(',', ".");
     s.trim().parse().ok().filter(|v: &f64| v.is_finite())
-}
-
-/// Where a typed length (and optional angle) lands from `from`. Without an angle, the
-/// direction is towards the pointer, or along +x if the pointer is on `from`.
-pub fn typed_point(from: P2, towards: Option<P2>, dim: &DimInput) -> Option<P2> {
-    let len = parse_length(&dim.length)?;
-    let angle = match parse_angle(&dim.angle) {
-        Some(a) if !dim.angle.trim().is_empty() => a,
-        _ => match towards {
-            Some(p) if math::dist(p, from) > 1e-6 => math::angle_deg(math::sub(p, from)),
-            _ => 0.0,
-        },
-    };
-    Some(math::polar(from, len, angle))
-}
-
-fn accepts_char(c: char) -> bool {
-    c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '+' | 'm' | 'c' | '°')
 }
 
 /// The object under the pointer for hover highlighting (select-like tools only).
@@ -112,7 +115,23 @@ pub fn interact(ui: &mut Ui, resp: &Response, s: &mut Studio, ids: &[Id], style:
         return;
     }
     let raw = raw.unwrap_or(cursor.point);
-    let p = cursor.point;
+    // What is typed in the heads-up boxes holds for a click too: a locked length or
+    // angle wins over the pointer (Shift still squares its direction). The boxes empty
+    // for the next segment.
+    let typed = match crate::hud::kind(s) {
+        Some(crate::hud::Kind::LengthAngle) => s.ui.gesture.dim.take(),
+        _ => None,
+    };
+    let p = match (s.ui.tool, s.ui.gesture.points.as_slice()) {
+        (Tool::Truss | Tool::Curtain | Tool::Move, [first, ..]) => {
+            crate::hud::constrained(*first, cursor.point, typed.as_ref(), 0.0)
+        }
+        (_, [.., last]) => {
+            crate::hud::constrained(*last, cursor.point, typed.as_ref(), crate::hud::prev_dir(&s.ui.gesture.points))
+        }
+        _ => cursor.point,
+    };
+    let typed_len = typed.as_ref().and_then(|d| d.length_mm());
     match s.ui.tool {
         Tool::Select => unreachable!(),
         Tool::Wall | Tool::Floor | Tool::Ceiling | Tool::Run => {
@@ -127,7 +146,7 @@ pub fn interact(ui: &mut Ui, resp: &Response, s: &mut Studio, ids: &[Id], style:
                 finish(s);
             } else {
                 if !s.ui.gesture.points.is_empty() {
-                    s.ui.gesture.segs.push(SegHint { axis_lock: shift, length: None });
+                    s.ui.gesture.segs.push(SegHint { axis_lock: shift, length: typed_len });
                 }
                 s.ui.gesture.points.push(p);
             }
@@ -137,8 +156,9 @@ pub fn interact(ui: &mut Ui, resp: &Response, s: &mut Studio, ids: &[Id], style:
             let picks = s.ui.gesture.picks.clone();
             match picks.as_slice() {
                 [a, b] => {
+                    let value = s.ui.gesture.dim.as_ref().and_then(|d| d.length_mm());
                     s.ui.gesture = Gesture::default();
-                    crate::sketch_ui::commit(s, *a, *b, raw);
+                    commit_dimension(s, *a, *b, raw, value);
                 }
                 [a] if math::dist(a.at(), pick.at()) < 1e-6 => {}
                 _ => s.ui.gesture.picks.push(pick),
@@ -181,6 +201,15 @@ pub fn interact(ui: &mut Ui, resp: &Response, s: &mut Studio, ids: &[Id], style:
                 if let Some(id) = pick(s.engine.doc(), ids.iter().copied(), raw, tol, style) {
                     let _ = s.run("selection.set", json!({ "ids": [id] }));
                 }
+                return;
+            }
+            // A typed angle turns by that much on the click that sets the new direction.
+            if s.ui.tool == Tool::Rotate
+                && s.ui.gesture.points.len() >= 2
+                && let Some(a) = s.ui.gesture.dim.as_ref().and_then(|d| d.angle_deg())
+            {
+                let pivot = s.ui.gesture.points[0];
+                commit_rotate(s, pivot, a);
                 return;
             }
             s.ui.gesture.points.push(p);
@@ -360,19 +389,31 @@ fn add_to(sel: &[Id], id: Id) -> Vec<Id> {
     v
 }
 
-/// Typed dimensions, Enter, Escape, Backspace while a tool draws. Only when no text
-/// field has focus, so typing in the inspector is left alone.
+/// Text events this frame that would start or continue a typed dimension. The window's
+/// tool shortcuts look first, so a digit and a unit letter in one frame stay typing.
+pub fn typing_now(ui: &Ui, s: &Studio) -> bool {
+    if s.ui.gesture.dim.is_some() {
+        return true;
+    }
+    crate::hud::takes_keys(s)
+        && ui.input(|i| i.events.iter().any(|e| matches!(e, Event::Text(t) if crate::hud::accepts_text(t, false))))
+}
+
+/// Typed dimensions (the heads-up boxes), Tab, Enter, Escape, Backspace while a tool
+/// draws. Only when no text field has focus, so typing in the inspector is left alone.
 fn keyboard(ui: &mut Ui, s: &mut Studio) {
     if ui.ctx().memory(|m| m.focused().is_some()) || s.ui.palette.open || s.ui.table.focused {
         return;
     }
-    let g = &mut s.ui.gesture;
-    let typing = s.ui.tool.draws() && !g.points.is_empty();
-    if typing {
+    let kind = crate::hud::kind(s);
+    if crate::hud::takes_keys(s)
+        && let Some(kind) = kind
+    {
+        let started = s.ui.gesture.dim.is_some();
         let text: String = ui.input_mut(|i| {
             let mut out = String::new();
             i.events.retain(|e| match e {
-                Event::Text(t) if t.chars().all(accepts_char) => {
+                Event::Text(t) if crate::hud::accepts_text(t, started || !out.is_empty()) => {
                     out.push_str(t);
                     false
                 }
@@ -380,21 +421,37 @@ fn keyboard(ui: &mut Ui, s: &mut Studio) {
             });
             out
         });
+        let g = &mut s.ui.gesture;
         if !text.is_empty() {
-            let dim = g.dim.get_or_insert_with(DimInput::default);
-            let field = if dim.on_angle { &mut dim.angle } else { &mut dim.length };
-            field.push_str(&text.replace(',', "."));
+            // The first key opens the box with that key in it.
+            let dim = g.dim.get_or_insert_with(|| DimInput { field: kind.first_field(), ..Default::default() });
+            if std::mem::take(&mut dim.replace) {
+                dim.text_mut().clear();
+            }
+            dim.text_mut().push_str(&text.replace(',', "."));
         }
-        if let Some(d) = g.dim.as_mut()
-            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab))
-        {
-            d.on_angle = !d.on_angle;
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab)) {
+            match g.dim.as_mut() {
+                // Tab before typing goes into the first box.
+                None => g.dim = Some(DimInput { field: kind.first_field(), ..Default::default() }),
+                Some(d) if kind == crate::hud::Kind::LengthAngle => {
+                    d.field = match d.field {
+                        DimField::Length => DimField::Angle,
+                        DimField::Angle => DimField::Length,
+                    };
+                    d.replace = !d.text_mut().is_empty();
+                }
+                Some(_) => {}
+            }
         }
         if let Some(d) = g.dim.as_mut()
             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Backspace))
         {
-            let field = if d.on_angle { &mut d.angle } else { &mut d.length };
-            field.pop();
+            if std::mem::take(&mut d.replace) {
+                d.text_mut().clear();
+            } else {
+                d.text_mut().pop();
+            }
         }
     }
     if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter)) {
@@ -403,9 +460,10 @@ fn keyboard(ui: &mut Ui, s: &mut Studio) {
     if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
         let g = &mut s.ui.gesture;
         if g.dim.is_some() {
+            // First Esc: drop what was typed, keep drawing.
             g.dim = None;
-        } else if !g.points.is_empty() || g.drag.is_some() {
-            *g = Gesture::default();
+        } else if !g.points.is_empty() || g.drag.is_some() || !g.picks.is_empty() {
+            end_drawing(s);
         } else if s.ui.tool != Tool::Select {
             s.ui.set_tool(Tool::Select);
         } else {
@@ -415,55 +473,121 @@ fn keyboard(ui: &mut Ui, s: &mut Studio) {
     }
 }
 
+/// Esc while drawing: keep the segments drawn so far when they make an object (as in
+/// Fusion, where drawn lines stay), else drop the gesture.
+fn end_drawing(s: &mut Studio) {
+    let n = s.ui.gesture.points.len();
+    let keeps = match s.ui.tool {
+        Tool::Wall | Tool::Run => n >= 2,
+        Tool::Floor | Tool::Ceiling => n >= 3,
+        _ => false,
+    };
+    if keeps && s.ui.gesture.drag.is_none() {
+        finish(s);
+    } else {
+        s.ui.gesture = Gesture::default();
+    }
+}
+
 /// Enter: take the typed value, or finish the polyline/polygon.
 fn enter(s: &mut Studio) {
     let g = &s.ui.gesture;
-    let dim = g.dim.clone().filter(|d| !d.length.trim().is_empty() || !d.angle.trim().is_empty());
-    let Some(dim) = dim else {
+    let Some(dim) = g.dim.clone().filter(|d| !d.is_empty()) else {
         finish(s);
         return;
     };
-    let Some(&last) = g.points.last() else { return };
     let towards = g.cursor.map(|c| c.point);
-    if s.ui.tool == Tool::Calibrate {
-        let pts = g.points.clone();
-        match (pts.as_slice(), parse_length(&dim.length).filter(|l| *l > 0.0)) {
-            ([a, b], Some(len)) => commit_calibrate(s, *a, *b, len),
-            ([_, _], None) => s.ui.error(tf("status.bad_length", &[("text", &dim.length)])),
-            _ => s.ui.error(t("status.calibrate_second")),
+    match s.ui.tool {
+        Tool::Calibrate => {
+            let pts = g.points.clone();
+            match (pts.as_slice(), dim.length_mm()) {
+                ([a, b], Some(len)) => commit_calibrate(s, *a, *b, len),
+                ([_, _], None) => s.ui.error(tf("status.bad_length", &[("text", &dim.length)])),
+                _ => s.ui.error(t("status.calibrate_second")),
+            }
+            return;
         }
-        return;
-    }
-    if s.ui.tool == Tool::Rotate {
-        // After the pivot, the typed number is the angle.
-        let text = if dim.length.trim().is_empty() { &dim.angle } else { &dim.length };
-        match parse_angle(text) {
-            Some(a) => commit_rotate(s, g.points[0], a),
-            None => s.ui.error(tf("status.bad_angle", &[("text", text)])),
+        Tool::Rotate => {
+            // After the pivot, the typed number is the angle.
+            let text = if dim.angle.trim().is_empty() { &dim.length } else { &dim.angle };
+            match parse_angle(text) {
+                Some(a) => commit_rotate(s, g.points[0], a),
+                None => s.ui.error(tf("status.bad_angle", &[("text", text)])),
+            }
+            return;
         }
-        return;
+        Tool::Dimension => {
+            let picks = g.picks.clone();
+            let label = towards.unwrap_or_default();
+            match (picks.as_slice(), dim.length_mm()) {
+                ([a, b], Some(v)) => {
+                    s.ui.gesture = Gesture::default();
+                    commit_dimension(s, *a, *b, label, Some(v));
+                }
+                _ => s.ui.error(tf("status.bad_length", &[("text", &dim.length)])),
+            }
+            return;
+        }
+        _ => {}
     }
-    let Some(p) = typed_point(last, towards, &dim) else {
-        s.ui.error(tf("status.bad_length", &[("text", &dim.length)]));
-        return;
+    let Some(&last) = g.points.last() else { return };
+    let from = match s.ui.tool {
+        Tool::Truss | Tool::Curtain | Tool::Move => g.points[0],
+        _ => last,
     };
+    let bad = || {
+        let text = if dim.length_mm().is_none() && !dim.length.trim().is_empty() { &dim.length } else { &dim.angle };
+        tf("status.bad_length", &[("text", text)])
+    };
+    if dim.length_mm().is_none() && dim.angle_deg().is_none() {
+        s.ui.error(bad());
+        return;
+    }
+    let p = crate::hud::constrained(from, towards.unwrap_or(from), Some(&dim), crate::hud::prev_dir(&g.points));
+    if math::dist(p, from) < 1e-6 {
+        s.ui.error(t("status.type_length"));
+        return;
+    }
     s.ui.gesture.dim = None;
     match s.ui.tool {
         Tool::Wall | Tool::Floor => {
-            let len = parse_length(&dim.length).filter(|l| *l > 0.0);
-            let hint = SegHint { axis_lock: s.ui.gesture.shift, length: len };
+            let hint = SegHint { axis_lock: s.ui.gesture.shift, length: dim.length_mm() };
             s.ui.gesture.segs.push(hint);
             s.ui.gesture.points.push(p);
         }
         Tool::Run | Tool::Ceiling => s.ui.gesture.points.push(p),
-        Tool::Truss => create_truss(s, last, p),
+        Tool::Truss => create_truss(s, from, p),
         Tool::Curtain => {
             let ids = crate::canvas::visible_ids(s.engine.doc(), &s.ui);
             let tol = tolerance(&s.ui.camera);
-            create_curtain(s, &ids, last, p, tol);
+            create_curtain(s, &ids, from, p, tol);
         }
-        Tool::Move => commit_move(s, math::sub(p, last)),
+        Tool::Move => commit_move(s, math::sub(p, from)),
         _ => {}
+    }
+}
+
+/// The dimension tool's third click (or Enter): the dimension, and a typed value for
+/// a driving sketch dimension.
+fn commit_dimension(
+    s: &mut Studio,
+    a: crate::sketch_ui::Pick,
+    b: crate::sketch_ui::Pick,
+    label: P2,
+    value: Option<f64>,
+) {
+    crate::sketch_ui::commit(s, a, b, label);
+    let Some(v) = value else { return };
+    if let Some(src @ stagecraft_geom::dims::DimSource::Sketch { .. }) = s.ui.sketch.selected
+        && s.ui.sketch.editing.as_ref().is_some_and(|e| e.source == src)
+    {
+        s.ui.sketch.editing = None;
+        let mut args = crate::sketch_ui::dim_args(src);
+        args["value"] = json!(v);
+        if s.run("dimension.set_value", args).is_ok() {
+            let text = stagecraft_geom::dims::format_value(v, false);
+            s.ui.info(tf("sketch.value_set", &[("value", &text)]));
+        }
     }
 }
 
@@ -841,13 +965,12 @@ fn ghost_in(
 pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style: &PlanStyle) {
     let cam = &s.ui.camera;
     let g = &s.ui.gesture;
-    // A typed length moves the preview to where Enter will put the point.
-    let typed = match (s.ui.tool, &g.dim, g.points.last()) {
+    // Typed values move the preview to where Enter or a click will put the point.
+    let typed = match (s.ui.tool, crate::hud::segment(s)) {
         (
             Tool::Wall | Tool::Floor | Tool::Truss | Tool::Move | Tool::Run | Tool::Ceiling | Tool::Curtain,
-            Some(d),
-            Some(last),
-        ) => typed_point(*last, g.cursor.map(|c| c.point), d),
+            Some((_, to)),
+        ) => Some(to),
         _ => None,
     };
     let cursor = typed.or(g.cursor.map(|c| c.point));
@@ -905,14 +1028,12 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
                 Placement::default(),
                 style,
             ));
-            length_label(p, cam, pal, *pts.last().expect("non-empty"), c);
         }
         (Tool::Run, Some(c)) if !pts.is_empty() => {
             let mut sp: Vec<Pos2> = pts.iter().map(|q| cam.to_screen(*q)).collect();
             sp.push(cam.to_screen(c));
             let w = (o.truss_profile_width() * cam.scale).max(2.0) as f32;
             p.add(Shape::line(sp, Stroke::new(w, pal.preview.gamma_multiply(0.45))));
-            length_label(p, cam, pal, *pts.last().expect("non-empty"), c);
         }
         (Tool::Curtain, Some(c)) if !pts.is_empty() => {
             let a = pts[0];
@@ -932,7 +1053,6 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
                 };
                 ghosts(ghost(kind, placement, style));
             }
-            length_label(p, cam, pal, a, c);
         }
         (Tool::Batten | Tool::Proscenium | Tool::Wings | Tool::Platform | Tool::Support | Tool::Hoist, Some(c)) => {
             for (kind, placement) in stage_ghost(s.ui.tool, o, c) {
@@ -946,7 +1066,6 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
             if pts.len() >= 2 {
                 p.extend(Shape::dashed_line(&[sp[sp.len() - 1], sp[0]], thin, 6.0, 4.0));
             }
-            length_label(p, cam, pal, *pts.last().expect("non-empty"), c);
         }
         (Tool::Truss, Some(c)) if !pts.is_empty() => {
             let a = pts[0];
@@ -956,7 +1075,6 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
                 let placement = Placement { position: [a[0], a[1], 0.0], rotation: [0.0, 0.0, math::angle_deg(d)] };
                 ghosts(ghost(ObjectKind::Truss { length: len, profile: o.truss_profile.clone() }, placement, style));
             }
-            length_label(p, cam, pal, a, c);
         }
         (Tool::Calibrate, Some(c)) if !pts.is_empty() => {
             let b = pts.get(1).copied().unwrap_or(c);
@@ -964,13 +1082,11 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
             for q in [pts[0], b] {
                 p.circle_stroke(cam.to_screen(q), 4.0, thin);
             }
-            length_label(p, cam, pal, pts[0], b);
         }
         (Tool::Move, Some(c)) if !pts.is_empty() => {
             let d = math::sub(c, pts[0]);
             sel_prims(&|q| q.translated(d));
             p.line_segment([cam.to_screen(pts[0]), cam.to_screen(c)], thin);
-            length_label(p, cam, pal, pts[0], c);
         }
         (Tool::Rotate, Some(c)) if !pts.is_empty() => {
             let pivot = pts[0];
@@ -978,16 +1094,9 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
             p.line_segment([cam.to_screen(pivot), cam.to_screen(c)], thin);
             if pts.len() >= 2 {
                 p.line_segment([cam.to_screen(pivot), cam.to_screen(pts[1])], thin);
-                let a = math::angle_deg(math::sub(c, pivot)) - math::angle_deg(math::sub(pts[1], pivot));
+            }
+            if let Some((_, _, Some(a))) = crate::hud::rotation(s) {
                 sel_prims(&|q| q.rotated(pivot, a));
-                let label = format!("{a:.1}°");
-                p.text(
-                    cam.to_screen(c) + vec2(12.0, -12.0),
-                    Align2::LEFT_BOTTOM,
-                    label,
-                    crate::theme::proportional(12.0),
-                    pal.preview,
-                );
             }
         }
         (Tool::Fixture, Some(c)) => {
@@ -1024,11 +1133,7 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
         snap_marker(p, cam.to_screen(c.point), c.kind, pal);
     }
 
-    if let Some(dim) = &g.dim
-        && let Some(pos) = ui.input(|i| i.pointer.hover_pos()).or(cursor.map(|c| cam.to_screen(c)))
-    {
-        dim_box(ui, pos, dim, s.ui.tool == Tool::Rotate);
-    }
+    crate::hud::draw(ui, p, s, pal);
 }
 
 fn length_label(p: &egui::Painter, cam: &crate::state::Camera, pal: &Palette, a: P2, b: P2) {
@@ -1071,32 +1176,6 @@ fn snap_marker(p: &egui::Painter, at: Pos2, kind: SnapKind, pal: &Palette) {
     }
 }
 
-/// The small box next to the pointer showing what is being typed.
-fn dim_box(ui: &Ui, at: Pos2, dim: &DimInput, angle_only: bool) {
-    egui::Area::new(egui::Id::unique("dim_input"))
-        .fixed_pos(at + vec2(18.0, 18.0))
-        .order(egui::Order::Tooltip)
-        .interactable(false)
-        .show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if angle_only {
-                        ui.label(format!("{}: {}°", t("dim.angle"), dim.length));
-                        return;
-                    }
-                    // The field that takes keys is strong; Tab switches.
-                    let field = |ui: &mut Ui, on: bool, text: String| {
-                        let rt = egui::RichText::new(text);
-                        ui.label(if on { rt.strong().color(crate::theme::of(ui).accent) } else { rt.weak() });
-                    };
-                    field(ui, !dim.on_angle, format!("{}: {} m", t("dim.length"), dim.length));
-                    ui.separator();
-                    field(ui, dim.on_angle, format!("{}: {}°", t("dim.angle"), dim.angle));
-                });
-            });
-        });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1113,14 +1192,12 @@ mod tests {
     }
 
     #[test]
-    fn typed_point_uses_the_pointer_direction_or_the_angle() {
-        let dim = DimInput { length: "2".into(), ..Default::default() };
-        let p = typed_point([0.0, 0.0], Some([0.0, 10.0]), &dim).unwrap();
-        assert!((p[0]).abs() < 1e-9 && (p[1] - 2000.0).abs() < 1e-9);
-        let p = typed_point([0.0, 0.0], None, &dim).unwrap();
-        assert_eq!(p, [2000.0, 0.0]);
-        let dim = DimInput { length: "1".into(), angle: "90".into(), on_angle: true };
-        let p = typed_point([100.0, 0.0], Some([5000.0, 0.0]), &dim).unwrap();
-        assert!((p[0] - 100.0).abs() < 1e-9 && (p[1] - 1000.0).abs() < 1e-9);
+    fn feet_and_inches() {
+        assert_eq!(parse_length("15'"), Some(15.0 * 304.8));
+        assert!((parse_length("15' 6\"").unwrap() - (15.0 * 304.8 + 6.0 * 25.4)).abs() < 1e-9);
+        assert_eq!(parse_length("6\""), Some(6.0 * 25.4));
+        assert_eq!(parse_length("10ft"), Some(3048.0));
+        assert_eq!(parse_length("2,5m"), Some(2500.0));
+        assert_eq!(parse_length("1500mm"), Some(1500.0));
     }
 }

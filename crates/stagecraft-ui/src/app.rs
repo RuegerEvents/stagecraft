@@ -131,7 +131,7 @@ impl Studio {
         theme::set_preference(ui.ctx(), self.ui.theme);
         // Tab and arrows belong to the typed dimension or the table, not to egui's
         // focus cycling, while those take keys.
-        let drawing = self.ui.tool.draws() && !self.ui.gesture.points.is_empty();
+        let drawing = crate::hud::kind(self).is_some();
         if (drawing || self.ui.table.focused) && ui.memory(|m| m.focused().is_none()) {
             ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
@@ -255,7 +255,7 @@ fn shortcuts(ui: &mut Ui, s: &mut Studio) {
         let ids = canvas::visible_ids(s.engine.doc(), &s.ui);
         let _ = s.run("selection.set", json!({ "ids": ids }));
     }
-    let typing = s.ui.gesture.dim.is_some();
+    let typing = crate::tools::typing_now(ui, s);
     if !typing {
         for tool in Tool::ALL {
             let Some(key) = tool.shortcut() else { continue };

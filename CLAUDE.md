@@ -95,8 +95,13 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   server lists/describes/runs both (`UiExtension`); calls are answered in
   `StageApp::logic`, and `ui.screenshot` is answered after the frame arrives.
 - Canvas drawing in `canvas.rs`, tool behaviour in `tools.rs` (drags are transient
-  `Gesture` state; one command on release). Typed dimensions: plain numbers are
-  metres, Tab switches to the angle, Enter takes it, an empty Enter finishes.
+  `Gesture` state; one command on release). Typed dimensions are Fusion-style heads-up boxes (`hud.rs`): length (and angle)
+  boxes beside the rubber band show live values; a digit goes straight into the length box,
+  Tab cycles length → angle, a box whose text parses is locked (lock icon) and Enter or a
+  click takes the point and empties the boxes; Shift squares the pointer's direction, a
+  typed length holds along it. Esc drops the typed value, a second Esc ends the drawing
+  (keeps what makes an object), a third leaves the tool. Plain numbers are metres; `mm`,
+  `cm`, `m`, feet/inches (`15'`, `6"`). Tests in `tests/drawing.rs` use real key events.
 - All visible text goes through `i18n::t("key")`; the catalog is
   `assets/i18n/en.json`, and a test fails on keys used but missing.
 - egui 0.37 comes from storytold's fork (root `[patch.crates-io]`, same revision as

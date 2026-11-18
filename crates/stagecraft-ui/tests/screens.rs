@@ -659,3 +659,59 @@ fn sketch_room() {
         }
     }
 }
+
+/// Heads-up dimension input: live boxes, typed and locked length + angle, and a
+/// Shift-squared side with a typed length. `90-92-hud-*`.
+#[test]
+fn hud_screens() {
+    let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") else { return };
+    std::fs::create_dir_all(&dir).expect("screenshot dir");
+    let at = |h: &Harness<'static, Studio>, p: [f64; 2]| h.state().ui.camera.to_screen(p);
+    let click = |h: &mut Harness<'static, Studio>, p: [f64; 2], m: Modifiers| {
+        let pos = at(h, p);
+        h.hover_at(pos);
+        h.run();
+        for pressed in [true, false] {
+            h.event(Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: m });
+        }
+        h.run();
+        for _ in 0..40 {
+            h.step();
+        }
+    };
+    for (theme, tn) in [(ThemePref::Light, "light"), (ThemePref::Dark, "dark")] {
+        let mut h = harness_with(theme, stagecraft_core::Engine::new());
+        h.state_mut().run("ui.zoom", json!({ "scale": 0.06 })).unwrap();
+        h.state_mut().run("ui.pan", json!({ "center": [3000, 2000] })).unwrap();
+        h.state_mut().run("ui.set_tool", json!({ "tool": "wall" })).unwrap();
+        h.run();
+        click(&mut h, [0.0, 0.0], Modifiers::NONE);
+        let pos = at(&h, [4200.0, 2600.0]);
+        h.hover_at(pos);
+        h.run();
+        save(&mut h, &dir, &format!("90-hud-live-{tn}"));
+        h.event(Event::Text("4.5".into()));
+        h.run();
+        h.key_press(Key::Tab);
+        h.run();
+        h.event(Event::Text("30".into()));
+        h.run();
+        let pos = at(&h, [2500.0, 3800.0]);
+        h.hover_at(pos);
+        save(&mut h, &dir, &format!("91-hud-typed-{tn}"));
+        h.key_press(Key::Enter);
+        h.run();
+        // Next side: Shift squares it, the typed 3 m holds.
+        h.event(Event::Text("3".into()));
+        h.run();
+        h.event(Event::ModifiersChanged(Modifiers::SHIFT));
+        let pos = at(&h, [3600.0, 5200.0]);
+        h.hover_at(pos);
+        h.run();
+        save(&mut h, &dir, &format!("92-hud-shift-{tn}"));
+        h.event(Event::ModifiersChanged(Modifiers::NONE));
+        h.key_press(Key::Escape);
+        h.key_press(Key::Escape);
+        h.run();
+    }
+}
