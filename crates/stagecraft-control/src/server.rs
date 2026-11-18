@@ -1,7 +1,7 @@
 //! TCP server on 127.0.0.1. Connection threads parse requests and hand them, as
 //! [`Call`]s, to whoever owns the engine (the GUI loop or the headless loop).
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -78,18 +78,35 @@ impl Server {
     }
 }
 
+/// Longest request line: `data_base64` imports carry whole files.
+pub const MAX_REQUEST: usize = 512 << 20;
+
 fn serve_conn(stream: TcpStream, token: &str, tx: &Sender<Call>, wake: &dyn Fn()) {
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
-    let reader = BufReader::new(stream);
-    for line in reader.lines() {
-        let Ok(line) = line else { return };
-        if line.trim().is_empty() {
+    let mut reader = BufReader::new(stream);
+    let limits = craft_jsonrpc::Limits { max_message_bytes: MAX_REQUEST, ..Default::default() };
+    loop {
+        // Bounded: a client cannot make the server buffer an endless line.
+        let line = match craft_jsonrpc::read_line(&mut reader, MAX_REQUEST) {
+            Ok(Some(line)) => line,
+            Ok(None) => return,
+            Err(craft_jsonrpc::LineError::TooLong) => {
+                let e = RpcError::new(RpcError::INVALID_REQUEST, "request too large");
+                let _ = send(&mut out, json!({ "jsonrpc": "2.0", "id": null, "error": e }));
+                return;
+            }
+            Err(craft_jsonrpc::LineError::Io(_)) => return,
+        };
+        if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        let (id, result) = match serde_json::from_str::<Request>(&line) {
-            Err(e) => (Value::Null, Err(RpcError::new(RpcError::PARSE, e.to_string()))),
+        let parsed = craft_jsonrpc::parse_json(&line, limits)
+            .map_err(|e| e.to_string())
+            .and_then(|v| serde_json::from_value::<Request>(v).map_err(|e| e.to_string()));
+        let (id, result) = match parsed {
+            Err(e) => (Value::Null, Err(RpcError::new(RpcError::PARSE, e))),
             Ok(req) => {
                 let id = req.id.clone();
                 (id, dispatch(req, token, tx, wake))
@@ -99,16 +116,21 @@ fn serve_conn(stream: TcpStream, token: &str, tx: &Sender<Call>, wake: &dyn Fn()
             Ok(r) => json!({ "jsonrpc": "2.0", "id": id, "result": r }),
             Err(e) => json!({ "jsonrpc": "2.0", "id": id, "error": e }),
         };
-        let mut bytes = serde_json::to_vec(&resp).expect("json");
-        bytes.push(b'\n');
-        if out.write_all(&bytes).is_err() {
+        if send(&mut out, resp).is_err() {
             return;
         }
     }
 }
 
+fn send(out: &mut TcpStream, resp: Value) -> std::io::Result<()> {
+    let mut bytes = serde_json::to_vec(&resp).expect("json");
+    bytes.push(b'\n');
+    out.write_all(&bytes)
+}
+
 fn dispatch(req: Request, token: &str, tx: &Sender<Call>, wake: &dyn Fn()) -> Result<Value, RpcError> {
-    if req.token.as_deref() != Some(token) {
+    // Same time wherever a guessed token differs.
+    if !req.token.as_deref().is_some_and(|t| craft_control::auth::tokens_match(t, token)) {
         return Err(RpcError::new(RpcError::UNAUTHORIZED, "missing or wrong token"));
     }
     let method = req.method.ok_or_else(|| RpcError::new(RpcError::INVALID_REQUEST, "no method"))?;

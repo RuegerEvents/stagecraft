@@ -48,7 +48,9 @@ A window that draws no frames (screen locked, minimised) leaves it waiting.
 {"jsonrpc":"2.0","id":1,"method":"execute","token":"…","params":{"command":"object.list","args":{"type":"fixture"}}}
 ```
 
-Each request carries the instance's `token` at top level. The answer is one line.
+Each request carries the instance's `token` at top level (compared in constant time). The
+answer is one line. Lines are read bounded (512 MiB, for `data_base64` imports): a longer one
+gets `-32600` and the connection closes.
 
 ## Discovery
 
@@ -73,6 +75,10 @@ scripts.
 - `stagecraft_execute {command, args?}`
 
 Use the `batch` command for several edits as one undo step.
+
+The protocol (lifecycle, framing, argument checks against the tool schemas) is
+`craft-mcp-server`'s. `stagecraft_execute` of `ui.screenshot` (GUI) answers with an MCP
+image (PNG, up to 16 MB) followed by the JSON result as text.
 
 ## CLI
 

@@ -148,3 +148,69 @@ fn an_extension_registry_is_listed_described_and_run() {
     stagecraft_control::handle_with(&mut engine, &mut ext, "execute", json!({ "command": "doc.info" })).unwrap();
     assert_eq!(ext.calls, 1);
 }
+
+/// A `ui.screenshot` that writes a tiny PNG where it is asked to, as the GUI does.
+struct Shooter;
+
+impl stagecraft_control::Extension for Shooter {
+    fn commands(&self) -> Vec<Value> {
+        vec![json!({ "name": "ui.screenshot", "kind": "ui", "summary": "Screenshot" })]
+    }
+    fn describe(&self, _: &str) -> Option<Value> {
+        None
+    }
+    fn execute(&mut self, _: &mut Engine, name: &str, args: Value) -> Option<Result<Value, stagecraft_core::CmdError>> {
+        (name == "ui.screenshot").then(|| {
+            let path = args["path"].as_str().unwrap().to_owned();
+            std::fs::write(&path, b"\x89PNG\r\n\x1a\nnot really a png").unwrap();
+            Ok(json!({ "path": path, "width": 1, "height": 1 }))
+        })
+    }
+}
+
+#[test]
+fn mcp_screenshot_comes_back_as_an_image() {
+    let server = Server::spawn("shot".into(), 0, || {}).unwrap();
+    let addr = server.addr;
+    thread::spawn(move || {
+        let mut engine = Engine::new();
+        for call in server.calls {
+            call.answer_with(&mut engine, &mut Shooter);
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.png");
+    let input = format!(
+        "{}\n",
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "stagecraft_execute",
+            "arguments": { "command": "ui.screenshot", "args": { "path": path } } } })
+    );
+    let mut out = Vec::new();
+    let mut backend = Backend::Remote(Client::connect(addr, "shot").unwrap());
+    mcp::serve(&mut backend, Cursor::new(input), &mut out).unwrap();
+    let resp: Value = serde_json::from_slice(&out).unwrap();
+    let content = &resp["result"]["content"];
+    assert_eq!(content[0]["type"], "image", "{resp}");
+    assert_eq!(content[0]["mimeType"], "image/png");
+    assert!(content[1]["text"].as_str().unwrap().contains("\"width\": 1"));
+}
+
+#[test]
+fn oversized_requests_are_refused_without_buffering_them() {
+    use std::io::{BufRead, BufReader, Write};
+    let addr = spawn_instance("big");
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    // A line past the limit gets an error and the connection closes; nothing is buffered.
+    let chunk = vec![b'x'; 1 << 20];
+    let mut sent = 0;
+    while sent <= stagecraft_control::server::MAX_REQUEST {
+        if s.write_all(&chunk).is_err() {
+            break;
+        }
+        sent += chunk.len();
+    }
+    let mut line = String::new();
+    let _ = BufReader::new(s).read_line(&mut line);
+    let v: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(v["error"]["code"], RpcError::INVALID_REQUEST);
+}

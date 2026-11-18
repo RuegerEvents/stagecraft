@@ -95,6 +95,8 @@ pub fn connect_newest() -> Option<(Instance, Client)> {
     running().into_iter().find_map(|(inst, _)| Client::connect(inst.addr, inst.token.clone()).ok().map(|c| (inst, c)))
 }
 
+/// A per-launch token: 32 random bytes from the operating system as hex (craft-control), or a
+/// UUID if the system has no randomness to give.
 pub fn new_token() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
+    craft_control::server::new_token().unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string())
 }
