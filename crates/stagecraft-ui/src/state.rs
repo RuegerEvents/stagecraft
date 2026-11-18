@@ -297,12 +297,15 @@ pub struct DimInput {
     pub field: DimField,
     /// The next key replaces the box's text (after Tab into a box with a value).
     pub replace: bool,
+    /// The project unit the length is read in (set by the keyboard handling each frame).
+    #[serde(skip)]
+    pub units: stagecraft_core::units::Units,
 }
 
 impl DimInput {
     /// A typed length in mm, if the length box holds one (> 0).
     pub fn length_mm(&self) -> Option<f64> {
-        crate::tools::parse_length(&self.length).filter(|l| *l > 0.0)
+        self.units.parse(&self.length).filter(|l| *l > 0.0)
     }
 
     /// A typed angle in degrees, if the angle box holds one.
@@ -496,6 +499,8 @@ pub struct UiState {
     pub tutorial: crate::tutorial::Tutorial,
     /// The first-run "Build a basic stage?" offer is open (`onboarding.rs`).
     pub tutorial_offer: bool,
+    /// The Project Settings window is open (`settings.rs`).
+    pub project_settings: bool,
     /// Tool palette buttons per row (saved per user).
     pub tool_columns: ToolColumns,
     /// Tool palette sections the user folded (catalog keys).
@@ -561,6 +566,7 @@ impl Default for UiState {
             sketch: Default::default(),
             tutorial: Default::default(),
             tutorial_offer: false,
+            project_settings: false,
             tool_columns: ToolColumns::Auto,
             collapsed_sections: BTreeSet::new(),
             model_view: View::Plan,

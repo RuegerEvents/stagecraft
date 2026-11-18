@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
+use stagecraft_core::units::Units;
 use stagecraft_core::{Document, Id};
 
 /// What a picker field chooses from.
@@ -178,7 +179,7 @@ fn default_text(v: &Value) -> Option<String> {
         }),
         Value::Bool(b) => Some(b.to_string()),
         Value::Array(a) if !a.is_empty() && a.iter().all(Value::is_number) => {
-            Some(a.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "))
+            Some(a.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("; "))
         }
         _ => None,
     }
@@ -378,13 +379,32 @@ pub fn label(name: &str) -> String {
     }
 }
 
-/// Turn the typed text into arguments. Empty optional fields are left out.
-pub fn build_args(specs: &[FieldSpec], values: &BTreeMap<String, String>) -> Result<Value, String> {
+/// Point fields keep their parts in one text, separated by `;` (a comma may be a decimal
+/// comma).
+pub const POINT_SEP: char = ';';
+
+/// A length field's value from the command's mm (a default) as the project unit shows
+/// it; points part by part.
+pub fn mm_text_to_unit(f: &FieldSpec, text: &str, u: &Units) -> String {
+    if f.unit != Some("mm") {
+        return text.to_owned();
+    }
+    let one = |p: &str| p.trim().parse::<f64>().map_or_else(|_| p.trim().to_owned(), |mm| u.field(mm));
+    match f.kind {
+        FieldKind::Point(_) => text.split(POINT_SEP).map(one).collect::<Vec<_>>().join("; "),
+        FieldKind::Number | FieldKind::Integer => one(text),
+        _ => text.to_owned(),
+    }
+}
+
+/// Turn the typed text into arguments. Empty optional fields are left out. Length
+/// fields (unit mm) are read in the project unit `u` and sent as mm.
+pub fn build_args(specs: &[FieldSpec], values: &BTreeMap<String, String>, u: &Units) -> Result<Value, String> {
     let mut m = Map::new();
     for f in specs {
         let text = values.get(&f.name).map(|s| s.trim()).unwrap_or_default();
         let empty = match f.kind {
-            FieldKind::Point(_) => text.split(',').all(|p| p.trim().is_empty()),
+            FieldKind::Point(_) => text.split(POINT_SEP).all(|p| p.trim().is_empty()),
             _ => text.is_empty(),
         };
         if empty {
@@ -393,18 +413,25 @@ pub fn build_args(specs: &[FieldSpec], values: &BTreeMap<String, String>) -> Res
             }
             continue;
         }
-        let num = |t: &str| t.trim().replace(',', ".").parse::<f64>();
+        let length = f.unit == Some("mm");
+        let num = |t: &str| {
+            if length { u.parse(t).ok_or(()) } else { t.trim().replace(',', ".").parse::<f64>().map_err(|_| ()) }
+        };
         let v = match &f.kind {
             FieldKind::Text | FieldKind::Choice(_) | FieldKind::Object | FieldKind::Ref(_) => json!(text),
             FieldKind::Number => {
                 json!(num(text).map_err(|_| crate::i18n::tf("form.not_number", &[("field", &label(&f.name))]))?)
+            }
+            FieldKind::Integer if length => {
+                json!(num(text).map_err(|_| crate::i18n::tf("form.not_number", &[("field", &label(&f.name))]))?.round()
+                    as i64)
             }
             FieldKind::Integer => json!(
                 text.parse::<i64>().map_err(|_| crate::i18n::tf("form.not_integer", &[("field", &label(&f.name))]))?
             ),
             FieldKind::Bool => json!(text == "true"),
             FieldKind::Point(n) => {
-                let parts: Vec<&str> = text.split(',').collect();
+                let parts: Vec<&str> = text.split(POINT_SEP).collect();
                 let mut out = Vec::with_capacity(*n);
                 for i in 0..*n {
                     let p = parts.get(i).map(|s| s.trim()).unwrap_or("");
@@ -479,14 +506,21 @@ mod tests {
         let mut v = BTreeMap::new();
         v.insert("fid".to_string(), "101".to_string());
         v.insert("address".to_string(), "1.001".to_string());
-        v.insert("position".to_string(), "1000, , 0".to_string());
+        v.insert("position".to_string(), "1000; ; 0".to_string());
         v.insert("tags".to_string(), "light, front".to_string());
-        let a = build_args(&f, &v).unwrap();
+        let mm = Units::default();
+        let a = build_args(&f, &v, &mm).unwrap();
         assert_eq!(
             a,
             json!({ "fid": 101, "address": "1.001", "position": [1000.0, 0.0, 0.0], "tags": ["light", "front"] })
         );
+        // In a metre project lengths are typed in m (decimal comma too) and sent as mm.
+        let m = Units { separator: ',', ..Units::new(stagecraft_core::units::LengthUnit::M) };
+        v.insert("position".to_string(), "1,5; 2; 300mm".to_string());
+        assert_eq!(build_args(&f, &v, &m).unwrap()["position"], json!([1500.0, 2000.0, 300.0]));
+        let pos = f.iter().find(|x| x.name == "position").unwrap();
+        assert_eq!(mm_text_to_unit(pos, "1500; 0; 6155", &m), "1,5; 0; 6,155");
         let l = fields(&schema("layer.create"));
-        assert_eq!(build_args(&l, &BTreeMap::new()), Err("Name is required".into()));
+        assert_eq!(build_args(&l, &BTreeMap::new(), &mm), Err("Name is required".into()));
     }
 }

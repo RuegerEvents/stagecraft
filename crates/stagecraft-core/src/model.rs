@@ -19,9 +19,11 @@ pub type P3 = [f64; 3];
 ///
 /// 1: block 1–7 documents. 2: embedded assets (`assets/` in the ZIP) and the fixture
 /// type library. 3: layer sketches, sketch-backed walls/floors and reference
-/// dimensions. 4: underlays (image, PDF, SVG, DXF assets) and notes. Older files load
-/// unchanged (the new maps start empty).
-pub const FORMAT_VERSION: u32 = 4;
+/// dimensions. 4: underlays (image, PDF, SVG, DXF assets) and notes. 5: the project
+/// unit (`meta.units`) and the dimension format `project` (default of new documents).
+/// Older files load unchanged (the new maps start empty, the unit is mm, and a missing
+/// dimension format stays `m_sup_mm`).
+pub const FORMAT_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Document {
@@ -174,9 +176,14 @@ pub struct Meta {
     /// Language of sheet text (title block labels, legend, view names). Default English.
     #[serde(default)]
     pub sheet_language: crate::units::Language,
-    /// How dimension values are written in plan and on sheets.
-    #[serde(default)]
+    /// How dimension values are written in plan and on sheets. New documents follow
+    /// the project unit; files without the field (before format 5) meant `m_sup_mm`.
+    #[serde(default = "crate::units::DimFormat::legacy")]
     pub dimension_format: crate::units::DimFormat,
+    /// The project unit: how the GUI shows and takes lengths. The document and every
+    /// command argument stay in mm.
+    #[serde(default)]
+    pub units: crate::units::UnitSettings,
     /// Decimal separator of lengths; `None` = the sheet language's (en `.`, de `,`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decimal_separator: Option<char>,

@@ -206,7 +206,7 @@ fn sheet_language_and_dimension_format() {
         &mut e,
         "doc.set_meta",
         json!({ "sheet_language": "de", "venue_address": "Street 1\nTown", "production_dates": "1.–3. Mai",
-                "website": "example.org" }),
+                "website": "example.org", "dimension_format": "m_sup_mm" }),
     );
     assert_eq!(r["sheet_language"], "de");
     let names: Vec<_> = e.doc().sheets[&s].viewports.iter().map(|v| v.name.clone()).collect();

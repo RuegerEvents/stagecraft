@@ -66,7 +66,8 @@ fn calibrate_tool_scales_the_underlay_under_the_first_click() {
     let pts = h.state().ui.gesture.points.clone();
     assert_eq!(pts.len(), 2, "{pts:?}");
     let d = (pts[1][0] - pts[0][0]).hypot(pts[1][1] - pts[0][1]);
-    h.event(Event::Text("8".into()));
+    // Plain numbers are the project unit (mm); "8m" is eight metres anyway.
+    h.event(Event::Text("8m".into()));
     h.run();
     h.key_press(Key::Enter);
     h.run();

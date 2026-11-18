@@ -673,15 +673,13 @@ pub fn open_editor(s: &mut Studio, src: DimSource) {
         s.ui.info(t("sketch.reference_only"));
         return;
     }
-    let text = if d.measure.is_angle() { format!("{:.1}", d.value) } else { trim_metres(d.value) };
+    let text = if d.measure.is_angle() { format!("{:.1}", d.value) } else { crate::lengths::of(s).field(d.value) };
     s.ui.sketch.editing = Some(DimEdit { source: src, text, focus: true });
 }
 
-/// mm as metres for typing ("6.5", "13", "1.805").
-fn trim_metres(mm: f64) -> String {
-    let s = format!("{:.3}", mm / 1000.0);
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    s.to_owned()
+/// A dimension value for the status bar: a length with the project unit, an angle.
+pub fn value_text(u: &stagecraft_core::units::Units, v: f64, angle: bool) -> String {
+    if angle { dims::format_value(v, true) } else { u.field_with_unit(v) }
 }
 
 /// The inline editor over a dimension's value: type, Enter applies, Escape cancels.
@@ -720,13 +718,14 @@ pub fn editor(ui: &Ui, s: &mut Studio) {
         });
     if apply {
         s.ui.sketch.editing = None;
-        let value = if d.angle { crate::tools::parse_angle(&text) } else { crate::tools::parse_length(&text) };
+        let u = crate::lengths::of(s);
+        let value = if d.angle { crate::tools::parse_angle(&text) } else { u.parse(&text) };
         match value {
             Some(v) => {
                 let mut args = dim_args(edit.source);
                 args["value"] = json!(v);
                 if s.run("dimension.set_value", args).is_ok() {
-                    s.ui.info(tf("sketch.value_set", &[("value", &dims::format_value(v, d.angle))]));
+                    s.ui.info(tf("sketch.value_set", &[("value", &value_text(&u, v, d.angle))]));
                 }
             }
             None => s.ui.error(tf("status.bad_length", &[("text", &text)])),
@@ -827,12 +826,16 @@ fn dimension_fields(ui: &mut Ui, s: &mut Studio, src: DimSource) {
     let title = if driving == Some(true) { t("sketch.driving_dimension") } else { t("sketch.reference_dimension") };
     crate::widgets::section(ui, title);
     egui::Grid::new("inspector_dimension").num_columns(2).spacing([6.0, 3.0]).show(ui, |ui| {
-        crate::widgets::prop_label(ui, t("sketch.value"));
-        let shown = dims::format_value(value, angle);
+        let u = crate::lengths::of(s);
+        crate::widgets::prop_label(
+            ui,
+            if angle { t("sketch.value").to_owned() } else { crate::lengths::label(&u, t("sketch.value")) },
+        );
+        let shown = if angle { dims::format_value(value, true) } else { u.field(value) };
         if driving == Some(true) {
             let id = egui::Id::unique(("inspector", "dimension_value"));
             if let Some(v) = widgets::edit_field(ui, id, &shown, f32::INFINITY, "Inspector Dimension value") {
-                let parsed = if angle { crate::tools::parse_angle(&v) } else { crate::tools::parse_length(&v) };
+                let parsed = if angle { crate::tools::parse_angle(&v) } else { u.parse(&v) };
                 match parsed {
                     Some(mm) => {
                         let mut args = dim_args(src);

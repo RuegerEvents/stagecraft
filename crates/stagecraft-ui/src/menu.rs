@@ -66,6 +66,8 @@ pub fn bar(s: &Studio) -> MenuBar {
             Node::Separator,
             node(item("app.export_mvr", t("menu.export_mvr"))),
             node(item("app.export_pdf", t("menu.export_pdf")).enabled(sheets)),
+            Node::Separator,
+            node(item("ui.project_settings", t("menu.project_settings")).shortcut(chord("cmd+Comma"))),
         ],
     )
     .role(MenuRole::File);

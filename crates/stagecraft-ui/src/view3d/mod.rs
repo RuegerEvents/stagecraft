@@ -432,7 +432,14 @@ fn section_controls(ui: &mut Ui, s: &mut Studio) {
     {
         let n = plane.n();
         let mut offset = plane.o().dot(n.abs());
-        let r = ui.add(egui::DragValue::new(&mut offset).speed(20.0).suffix(" mm"));
+        // Dragged in mm, shown and typed in the project unit.
+        let u = crate::lengths::of(s);
+        let r = ui.add(
+            egui::DragValue::new(&mut offset)
+                .speed(20.0)
+                .custom_formatter(move |v, _| u.field_with_unit(v))
+                .custom_parser(move |t| u.parse(t)),
+        );
         widgets::name(&r, Role::SpinButton, t("view3d.offset"));
         if r.changed() {
             let o = n.abs() * offset;

@@ -21,7 +21,7 @@ use stagecraft_sheet::prim::{ImageData, Page, Pen, Prim, Rgb};
 
 use crate::app::Studio;
 use crate::i18n::{t, tf};
-use crate::panels::{fmt_mm, parse_mm};
+use crate::lengths::fmt_number;
 use crate::theme;
 use crate::widgets::{self, Icon, button, edit_field, icon_button};
 
@@ -953,16 +953,17 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
         ui.end_row();
 
         if let ViewKind::Section { origin, normal } = vp.view {
-            crate::widgets::prop_label(ui, t("sheets.cut_at"));
+            let u = crate::lengths::of(s);
+            crate::widgets::prop_label(ui, tf("sheets.cut_at", &[("unit", &u.label())]));
             let off = origin[0] * normal[0] + origin[1] * normal[1] + origin[2] * normal[2];
             if let Some(v) = edit_field(
                 ui,
                 egui::Id::unique(("vp_cut", salt, vp.id)),
-                &fmt_mm(off.abs()),
+                &u.field(off.abs()),
                 f32::INFINITY,
                 "Cut position",
             ) {
-                match parse_mm(&v) {
+                match u.parse(&v) {
                     Some(mm) => {
                         let sign = if off < 0.0 { -1.0 } else { 1.0 };
                         let o = normal.map(|c| c * mm * sign);
@@ -991,7 +992,10 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
             crate::widgets::prop_label(ui, t("sheets.crop"));
             ui.horizontal(|ui| {
                 let text = match vp.crop {
-                    Some(c) => format!("{} × {} m", fmt_m(c[1][0] - c[0][0]), fmt_m(c[1][1] - c[0][1])),
+                    Some(c) => {
+                        let u = crate::lengths::of(s);
+                        format!("{} × {}", u.field(c[1][0] - c[0][0]), u.field_with_unit(c[1][1] - c[0][1]))
+                    }
                     None => t("sheets.crop_fit").to_owned(),
                 };
                 ui.label(text);
@@ -1101,12 +1105,13 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
         }
         if let ViewKind::PlanFrom3d { cut } = vp.view {
             ui.horizontal(|ui| {
-                crate::widgets::prop_label(ui, t("sheets.cut_height"));
-                let text = cut.map(fmt_mm).unwrap_or_default();
+                let u = crate::lengths::of(s);
+                crate::widgets::prop_label(ui, crate::lengths::label(&u, t("sheets.cut_height")));
+                let text = cut.map(|c| u.field(c)).unwrap_or_default();
                 if let Some(v) =
                     edit_field(ui, egui::Id::unique(("vp_cut_z", salt, vp.id)), &text, f32::INFINITY, "Cut height")
                 {
-                    let cut = if v.trim().is_empty() { None } else { parse_mm(&v) };
+                    let cut = if v.trim().is_empty() { None } else { u.parse(&v) };
                     if cut.is_none() && !v.trim().is_empty() {
                         s.ui.error(tf("status.bad_number", &[("text", &v)]));
                     } else {
@@ -1155,11 +1160,6 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
             s.ui.sheets.editor = false;
         }
     });
-}
-
-fn fmt_m(mm: f64) -> String {
-    let m = mm / 1000.0;
-    format!("{m:.1}")
 }
 
 fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
@@ -1435,10 +1435,10 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
                 if let Some(v) = edit_field(
                     ui,
                     egui::Id::unique(("lt_anchor", cur, i, salt)),
-                    &fmt_mm(f.anchor[axis]),
+                    &fmt_number(f.anchor[axis]),
                     42.0,
                     &format!("Field {i} {salt}"),
-                ) && let Some(mm) = parse_mm(&v)
+                ) && let Some(mm) = stagecraft_core::units::Units::default().parse(&v)
                 {
                     f.anchor[axis] = mm;
                     changed = true;

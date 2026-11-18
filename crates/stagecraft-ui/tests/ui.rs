@@ -66,9 +66,9 @@ fn drawing_a_wall_with_a_typed_length() {
     assert_eq!(h.state().ui.tool, stagecraft_ui::Tool::Wall);
     click_world(&mut h, [0.0, 0.0]);
     assert_eq!(h.state().ui.gesture.points, vec![[0.0, 0.0]]);
-    h.event(Event::Text("4.5".into()));
+    h.event(Event::Text("4.5m".into()));
     h.run();
-    assert!(h.query_by_label_contains("Length: 4.5").is_some(), "the typed length shows next to the pointer");
+    assert!(h.query_by_label_contains("Length: 4.5m").is_some(), "the typed length shows next to the pointer");
     h.key_press(Key::Enter);
     h.run();
     assert_eq!(h.state().ui.gesture.points.len(), 2);
@@ -93,7 +93,7 @@ fn typed_angle_after_tab() {
     run(&mut h, "ui.pan", json!({ "center": [0, 0] }));
     run(&mut h, "ui.set_tool", json!({ "tool": "wall" }));
     click_world(&mut h, [0.0, 0.0]);
-    h.event(Event::Text("2".into()));
+    h.event(Event::Text("2000".into()));
     h.run();
     h.key_press(Key::Tab);
     h.run();
@@ -787,27 +787,136 @@ fn sheet_panel_buttons_create_sheets_and_viewports() {
     assert!(h.state_mut().run("ui.sheet", json!({ "sheet": "nope" })).is_err());
 }
 
-/// The inspector's Document section sets the sheet language, the dimension format and
-/// the new title block fields through `doc.set_meta`.
+/// Project Settings (from the Inspector's Document link) set the sheet language, the
+/// dimension format and the title block fields through `doc.set_meta`.
 #[test]
-fn document_section_sets_sheet_language_and_fields() {
+fn project_settings_set_sheet_language_and_fields() {
     let mut h = harness(Engine::new());
-    h.get_by_label("Inspector sheet language").click();
+    assert!(h.query_by_label("Inspector Venue address").is_none(), "the fields moved out of the Inspector");
+    h.get_by_label("Project Settings").click();
+    h.run_steps(6);
+    assert!(h.state().ui.project_settings);
+    h.get_by_label("Settings sheet language").click();
     h.run_steps(6);
     h.get_by_label("Deutsch").click();
     h.run_steps(6);
     assert_eq!(h.state().engine.doc().meta.sheet_language, stagecraft_core::units::Language::De);
-    h.get_by_label("Inspector dimension format").click();
+    h.get_by_label("Settings dimension format").click();
     h.run_steps(6);
     h.get_by_label("Millimetres (6155)").click();
     h.run_steps(6);
     assert_eq!(h.state().engine.doc().meta.dimension_format, stagecraft_core::units::DimFormat::Mm);
-    h.get_by_label("Inspector Venue address").click();
+    h.get_by_label("Settings Venue address").click();
     h.run_steps(6);
-    h.get_by_label("Inspector Venue address").type_text("1 Street / 12345 Town");
+    h.get_by_label("Settings Venue address").type_text("1 Street / 12345 Town");
     h.key_press(Key::Enter);
     h.run_steps(6);
     assert_eq!(h.state().engine.doc().meta.venue_address, "1 Street\n12345 Town");
+    h.get_by_label("Close Project Settings").click();
+    h.run_steps(6);
+    assert!(!h.state().ui.project_settings);
+    // ⌘, opens it again; so does the command.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    h.run_steps(6);
+    assert!(h.state().ui.project_settings);
+    run(&mut h, "ui.project_settings", json!({ "open": false }));
+    assert!(!h.state().ui.project_settings);
+}
+
+/// Switching the project to metres in Project Settings: the Inspector, the heads-up
+/// boxes, the table and the layers show and take metres; explicit units still win;
+/// the document keeps mm.
+#[test]
+fn a_metre_project_shows_and_takes_metres_everywhere() {
+    let mut e = Engine::new();
+    let p = id(&e.execute("platform.create", json!({ "width": 2000, "depth": 1000, "height": 400 })).unwrap());
+    let b = id(&e.execute("batten.create", json!({ "number": 1, "y": 1500, "trim": 7500 })).unwrap());
+    let mut h = harness(e);
+    run(&mut h, "ui.project_settings", json!({ "open": true }));
+    h.get_by_label("Settings length unit").click();
+    h.run_steps(6);
+    h.get_by_label("Metres (m)").click();
+    h.run_steps(6);
+    assert_eq!(h.state().engine.doc().meta.units.length, stagecraft_core::units::LengthUnit::M);
+    assert!(h.query_by_label("Settings example 6.155 m").is_some());
+    h.get_by_label("Settings precision").click();
+    h.run_steps(6);
+    h.get_by_label("2 decimals").click();
+    h.run_steps(6);
+    assert_eq!(h.state().engine.doc().meta.units.precision, Some(2));
+    run(&mut h, "ui.project_settings", json!({ "open": false }));
+
+    // Inspector: labels name the unit, values are metres, typing takes metres.
+    run(&mut h, "selection.set", json!({ "ids": [p] }));
+    assert!(h.query_by_label("Width (m)").is_some(), "the label shows the unit");
+    let width = |h: &Harness<'static, Studio>| match h.state().engine.doc().objects[&p].kind {
+        ObjectKind::Platform { width, .. } => width,
+        _ => unreachable!(),
+    };
+    h.get_by_label("Inspector Width").click();
+    h.run();
+    h.get_by_label("Inspector Width").type_text("2,5");
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert_eq!(width(&h), 2500.0, "2,5 in a metre project");
+    h.get_by_label("Inspector Width").click();
+    h.run();
+    h.get_by_label("Inspector Width").type_text("1500mm");
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert_eq!(width(&h), 1500.0, "an explicit unit wins");
+    assert!(h.query_by_label_contains("X (m)").is_some());
+
+    // Heads-up boxes: plain numbers are metres, the live value too.
+    run(&mut h, "selection.set", json!({ "ids": [] }));
+    run(&mut h, "ui.zoom", json!({ "scale": 0.05 }));
+    run(&mut h, "ui.pan", json!({ "center": [0, -6000] }));
+    run(&mut h, "ui.set_tool", json!({ "tool": "wall" }));
+    click_world(&mut h, [0.0, -6000.0]);
+    h.hover_at(screen(&h, [3000.0, -6000.0]));
+    h.run();
+    assert!(h.query_by_label_contains("Length: 3.00 m").is_some(), "live length in m");
+    h.event(Event::Text("4.5".into()));
+    h.run();
+    assert!(h.query_by_label_contains("Length: 4.5 m (locked, typing)").is_some());
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(h.state().ui.gesture.points[1], [4500.0, -6000.0]);
+    h.key_press(Key::Escape);
+    h.key_press(Key::Escape);
+    h.key_press(Key::Escape);
+    h.run();
+
+    // Table: metre cells and headers; typing and pasting from Excel take metres.
+    h.state_mut().ui.table.kind = Some("batten".into());
+    h.run();
+    let doc = h.state().engine.doc().clone();
+    let col = stagecraft_ui::table::Col::Trim;
+    assert_eq!(stagecraft_ui::table::cell_text(&doc, &doc.objects[&b], col), "7.5");
+    assert_eq!(col.title(&doc), "Trim (m)");
+    h.get_by_label("Trim 1").click();
+    h.run();
+    h.event(Event::Text("8,25".into()));
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(h.state().engine.doc().objects[&b].placement.position[2], 8250.0);
+    h.get_by_label("Y 1").click();
+    h.run();
+    h.event(Event::Paste("2.5\t9\n".into()));
+    h.run();
+    let pos = h.state().engine.doc().objects[&b].placement.position;
+    assert_eq!((pos[1], pos[2]), (2500.0, 9000.0), "pasted cells are metres");
+
+    // Layers: the elevation in metres.
+    let layer = *h.state().engine.doc().layers.keys().next().unwrap();
+    let name = format!("Elevation {}", h.state().engine.doc().layers[&layer].name);
+    h.get_by_label(&name).click();
+    h.run();
+    h.get_by_label(&name).type_text("-1");
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert_eq!(h.state().engine.doc().layers[&layer].elevation, -1000.0);
 }
 
 // ---- docking ---------------------------------------------------------------------

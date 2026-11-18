@@ -4,11 +4,12 @@
 
 use egui::{RichText, Ui};
 use serde_json::{Value, json};
+use stagecraft_core::units::Units;
 use stagecraft_core::{Id, Object, ObjectKind};
 
 use crate::app::Studio;
 use crate::i18n::{t, tf};
-use crate::panels::{fmt_mm, parse_mm};
+use crate::lengths::{fmt_number, parse_number};
 use crate::widgets::{self, button, edit_field_hint};
 
 /// The one value all items share, if they do.
@@ -24,7 +25,17 @@ pub fn common<T: PartialEq>(mut it: impl Iterator<Item = T>) -> Option<T> {
 
 /// A labelled field; `None` as current shows the "mixed" hint.
 fn field(ui: &mut Ui, key: &str, salt: &str, current: Option<String>) -> Option<String> {
-    crate::widgets::prop_label(ui, t(key));
+    field_as(ui, t(key).to_owned(), key, salt, current)
+}
+
+/// A length field: the label names the project unit ("Width (m)"), the accessible
+/// name stays "Inspector Width".
+fn len_field(ui: &mut Ui, s: &Studio, key: &str, salt: &str, current: Option<String>) -> Option<String> {
+    field_as(ui, crate::lengths::label(&crate::lengths::of(s), t(key)), key, salt, current)
+}
+
+fn field_as(ui: &mut Ui, label: String, key: &str, salt: &str, current: Option<String>) -> Option<String> {
+    crate::widgets::prop_label(ui, label);
     let id = egui::Id::unique(("inspector", salt));
     let mixed = current.is_none();
     let hint = if mixed { t("inspector.mixed") } else { "" };
@@ -52,6 +63,7 @@ fn step(command: &str, args: Value) -> Value {
 }
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
+    let u = crate::lengths::of(s);
     let sel: Vec<Id> = s.engine.selection().to_vec();
     let doc = s.engine.doc().clone();
     let objs: Vec<&Object> = sel.iter().filter_map(|id| doc.objects.get(id)).collect();
@@ -114,10 +126,10 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             let shown = |id: &Id, w: &stagecraft_core::Placement| {
                 if axis == 2 { w.position[2] - layer_elevation(&doc, *id) } else { w.position[axis] }
             };
-            let cur = common(worlds.iter().map(|(id, w)| fmt_mm(shown(id, w))));
+            let cur = common(worlds.iter().map(|(id, w)| u.field(shown(id, w))));
             let cur = cur.or_else(|| (worlds.is_empty()).then(String::new));
-            if let Some(v) = field(ui, key, key, cur) {
-                let Some(mm) = parse_mm(&v) else {
+            if let Some(v) = len_field(ui, s, key, key, cur) {
+                let Some(mm) = u.parse(&v) else {
                     s.ui.error(tf("status.bad_number", &[("text", &v)]));
                     continue;
                 };
@@ -132,7 +144,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                 batch(s, steps);
             }
         }
-        let rot = common(worlds.iter().map(|(_, w)| fmt_mm(w.rotation[2])));
+        let rot = common(worlds.iter().map(|(_, w)| fmt_number(w.rotation[2])));
         if let Some(v) = field(ui, "inspector.rotation", "rotation", rot) {
             match crate::tools::parse_angle(&v) {
                 Some(a) => {
@@ -197,8 +209,9 @@ fn height_row(ui: &mut Ui, s: &mut Studio, sel: &[Id], key: &str, salt: &str) {
     let above =
         |id: &Id| stagecraft_core::geom::world_placement(doc, *id).map(|w| w.position[2] - layer_elevation(doc, *id));
     let heights: Vec<(Id, f64)> = sel.iter().filter_map(|id| above(id).map(|z| (*id, z))).collect();
-    let cur = common(heights.iter().map(|(_, z)| fmt_mm(*z)));
-    if let Some(v) = field(ui, key, salt, cur)
+    let u = Units::of(&doc.meta);
+    let cur = common(heights.iter().map(|(_, z)| u.field(*z)));
+    if let Some(v) = len_field(ui, s, key, salt, cur)
         && let Some(mm) = mm_or_error(s, &v)
     {
         let steps = heights
@@ -218,24 +231,28 @@ fn world_note(ui: &mut Ui, s: &Studio, objs: &[&Object]) {
         return;
     }
     let world = |o: &&Object| stagecraft_core::geom::world_placement(doc, o.id).map_or(0.0, |w| w.position[2]);
-    let Some(z) = common(objs.iter().map(|o| fmt_mm(world(o)))) else { return };
+    let u = Units::of(&doc.meta);
+    let Some(z) = common(objs.iter().map(|o| u.field_with_unit(world(o)))) else { return };
     crate::widgets::prop_label(ui, "");
-    let note = tf("inspector.world_height", &[("z", &z), ("layer", &layer.name), ("e", &fmt_mm(layer.elevation))]);
+    let note =
+        tf("inspector.world_height", &[("z", &z), ("layer", &layer.name), ("e", &u.field_with_unit(layer.elevation))]);
     ui.label(RichText::new(note).weak().small());
     ui.end_row();
 }
 
 fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[Id]) {
+    let u = crate::lengths::of(s);
+    let in_unit = |v: f64| u.field(v);
     let each = |cmd: &str, f: &dyn Fn(Id) -> Value| sel.iter().map(|id| step(cmd, f(*id))).collect::<Vec<_>>();
     match ty {
         "floor" => {
             height_row(ui, s, sel, "inspector.top_height", "floor_top");
             world_note(ui, s, objs);
             let th = common(objs.iter().map(|o| match &o.kind {
-                ObjectKind::Floor { thickness, .. } => fmt_mm(*thickness),
+                ObjectKind::Floor { thickness, .. } => in_unit(*thickness),
                 _ => String::new(),
             }));
-            if let Some(v) = field(ui, "inspector.thickness", "floor_thickness", th)
+            if let Some(v) = len_field(ui, s, "inspector.thickness", "floor_thickness", th)
                 && let Some(mm) = mm_or_error(s, &v)
             {
                 batch(s, each("floor.update", &|id| json!({ "id": id, "thickness": mm })));
@@ -243,17 +260,17 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             crate::sketch_ui::link_row(ui, s, sel);
         }
         "wall" => {
-            let get = |f: fn(&ObjectKind) -> f64| common(objs.iter().map(|o| fmt_mm(f(&o.kind))));
+            let get = |f: fn(&ObjectKind) -> f64| common(objs.iter().map(|o| in_unit(f(&o.kind))));
             let h = get(|k| if let ObjectKind::Wall { height, .. } = k { *height } else { 0.0 });
             let th = get(|k| if let ObjectKind::Wall { thickness, .. } = k { *thickness } else { 0.0 });
             height_row(ui, s, sel, "inspector.base_height", "wall_base");
             world_note(ui, s, objs);
-            if let Some(v) = field(ui, "inspector.height", "wall_height", h)
+            if let Some(v) = len_field(ui, s, "inspector.height", "wall_height", h)
                 && let Some(mm) = mm_or_error(s, &v)
             {
                 batch(s, each("wall.update", &|id| json!({ "id": id, "height": mm })));
             }
-            if let Some(v) = field(ui, "inspector.thickness", "wall_thickness", th)
+            if let Some(v) = len_field(ui, s, "inspector.thickness", "wall_thickness", th)
                 && let Some(mm) = mm_or_error(s, &v)
             {
                 batch(s, each("wall.update", &|id| json!({ "id": id, "thickness": mm })));
@@ -279,10 +296,10 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             widgets::name(&r.response, egui::Role::ComboBox, format!("Inspector {}", t("inspector.profile")));
             ui.end_row();
             let len = common(objs.iter().map(|o| match &o.kind {
-                ObjectKind::Truss { length, .. } => fmt_mm(*length),
+                ObjectKind::Truss { length, .. } => in_unit(*length),
                 _ => String::new(),
             }));
-            if let Some(v) = field(ui, "inspector.length", "truss_length", len)
+            if let Some(v) = len_field(ui, s, "inspector.length", "truss_length", len)
                 && let Some(mm) = mm_or_error(s, &v)
             {
                 batch(s, each("truss.update", &|id| json!({ "id": id, "length": mm })));
@@ -291,8 +308,14 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
                 crate::widgets::prop_label(ui, "");
                 ui.add(
                     egui::Label::new(
-                        RichText::new(format!("{} · {}×{} mm · {} kg/m", p.maker, p.width, p.height, p.kg_per_m))
-                            .weak(),
+                        RichText::new(format!(
+                            "{} · {} × {} · {} kg/m",
+                            p.maker,
+                            u.field(p.width),
+                            u.field_with_unit(p.height),
+                            p.kg_per_m
+                        ))
+                        .weak(),
                     )
                     .wrap(),
                 );
@@ -388,6 +411,9 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
     }
 }
 
+/// Arguments of [`num`] fields that are not lengths.
+const NOT_LENGTHS: [&str; 6] = ["number", "fullness", "max_load", "kg_per_m", "weight_kg", "capacity_kg"];
+
 /// A number field over the selection: shown when all agree, applied to all.
 #[allow(clippy::too_many_arguments)]
 fn num(
@@ -401,9 +427,14 @@ fn num(
     cmd: &str,
     arg: &str,
 ) {
-    let cur = common(objs.iter().map(|o| get(o).map(fmt_mm).unwrap_or_default()));
-    if let Some(v) = field(ui, key, salt, cur)
-        && let Some(x) = mm_or_error(s, &v)
+    // Lengths in the project unit; counts, factors and kg as plain numbers.
+    let length = !NOT_LENGTHS.contains(&arg);
+    let u = crate::lengths::of(s);
+    let shown = |v: f64| if length { u.field(v) } else { fmt_number(v) };
+    let cur = common(objs.iter().map(|o| get(o).map(shown).unwrap_or_default()));
+    let edited = if length { len_field(ui, s, key, salt, cur) } else { field(ui, key, salt, cur) };
+    if let Some(v) = edited
+        && let Some(x) = if length { mm_or_error(s, &v) } else { number_or_error(s, &v) }
     {
         // Whole numbers go as integers so counts (batten numbers) parse too.
         let x = if x.fract() == 0.0 && x.abs() < 1e15 { json!(x as i64) } else { json!(x) };
@@ -858,8 +889,9 @@ pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Objec
             if let [o] = objs
                 && let ObjectKind::Underlay { format, extent: [lo, hi], scale, .. } = &o.kind
             {
+                let u = crate::lengths::of(s);
                 let size =
-                    format!("{:.2} × {:.2} m", (hi[0] - lo[0]) * scale / 1000.0, (hi[1] - lo[1]) * scale / 1000.0);
+                    format!("{} × {}", u.field((hi[0] - lo[0]) * scale), u.field_with_unit((hi[1] - lo[1]) * scale));
                 crate::widgets::prop_label(ui, t("inspector.size"));
                 ui.label(RichText::new(format!("{} · {size}", json_str(format))).weak());
                 ui.end_row();
@@ -983,7 +1015,11 @@ fn load_section(ui: &mut Ui, doc: &stagecraft_core::Document, o: &Object) {
 }
 
 fn mm_or_error(s: &mut Studio, v: &str) -> Option<f64> {
-    let r = parse_mm(v);
+    crate::lengths::parse_or_error(s, v)
+}
+
+fn number_or_error(s: &mut Studio, v: &str) -> Option<f64> {
+    let r = parse_number(v);
     if r.is_none() {
         s.ui.error(tf("status.bad_number", &[("text", &v)]));
     }
@@ -1022,16 +1058,18 @@ fn tags_field(ui: &mut Ui, s: &mut Studio, doc: &stagecraft_core::Document, objs
     }
 }
 
-/// With nothing selected: the document's meta data.
+/// With nothing selected: what the document is, and the way to its settings.
 fn document_fields(ui: &mut Ui, s: &mut Studio) {
     crate::widgets::section(ui, t("inspector.document"));
     let meta = s.engine.doc().meta.clone();
-    egui::Grid::new("inspector_doc").num_columns(2).spacing([6.0, 3.0]).show(ui, |ui| {
-        for (key, field_name, v) in crate::sheets::meta_texts(&meta) {
-            if let Some(v) = field(ui, key, field_name, Some(v)) {
-                let _ = s.run("doc.set_meta", json!({ field_name: crate::sheets::meta_value(field_name, v) }));
-            }
-        }
-        crate::sheets::sheet_text_rows(ui, s, "Inspector");
-    });
+    let u = crate::lengths::of(s);
+    let project = if meta.project.is_empty() { t("settings.untitled").to_owned() } else { meta.project.clone() };
+    ui.label(RichText::new(project).strong());
+    let units =
+        tf("settings.summary", &[("unit", &t(&format!("unit.{}", u.unit.code()))), ("example", &u.with_unit(6155.0))]);
+    ui.label(RichText::new(units).weak());
+    ui.add_space(4.0);
+    if button(ui, t("settings.open"), "Project Settings").clicked() {
+        s.ui.project_settings = true;
+    }
 }

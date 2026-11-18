@@ -9,6 +9,17 @@ ways in, all with the same four methods.
 | TCP, JSON-RPC 2.0, one JSON object per line, 127.0.0.1 only | scripts, other apps, MCP |
 | MCP on stdio (`stagecraft mcp`) | Claude and other AI clients |
 
+## Units
+
+Every length in every command argument and result is **millimetres**, angles degrees,
+whatever the document's project unit is. The project unit (`doc.set_units
+{length_unit: mm|cm|m|ft_in, precision}`, stored in `meta.units`, default mm) only
+changes how the GUI shows lengths and how it reads what people type there (a bare number
+is in the project unit, `15m`, `1500mm`, `15' 6"` always win). Scripts, MCP clients and
+the CLI never convert: `platform.create {width: 2000}` is 2 m in a mm, m or ft-in
+project alike. The one place the unit reaches output is sheet text when the dimension
+format is `project` (the default for new documents).
+
 ## Methods
 
 | Method | Params | Result |
@@ -36,7 +47,8 @@ commands (`kind: "ui"`), and `execute` runs them: `ui.state`, `ui.set_tool`,
 `projection`, `fov`, `orbit`, `zoom`, `fit`), `ui.section` (3D: `axis` + `offset`,
 `origin` + `normal`, `box {min,max}`, `off`, `hatch`), `ui.set_theme`,
 `ui.toggle_panel`, `ui.set_tag_visible`, `ui.set_active_layer`, `ui.set_snap`,
-`ui.set_tool_options`, `ui.palette`, `ui.tutorial` (start, next, back, stop), `ui.screenshot {path}`. They change only what
+`ui.set_tool_options`, `ui.palette`, `ui.tutorial` (start, next, back, stop),
+`ui.project_settings {open?}` (the Project Settings window), `ui.screenshot {path}`. They change only what
 the window shows, not the document, and are not undoable. `ui.state` reports the 3D
 camera (`camera3d`) and section too. `ui.screenshot` answers once the next frame is
 captured, with `{path, width, height}` in physical pixels; it includes the 3D view.

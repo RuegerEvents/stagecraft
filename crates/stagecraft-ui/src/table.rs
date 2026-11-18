@@ -10,7 +10,7 @@ use stagecraft_core::{Document, Id, Object, ObjectKind};
 
 use crate::app::Studio;
 use crate::i18n::{t, tf};
-use crate::panels::{fmt_mm, parse_mm};
+use crate::lengths::{fmt_number, parse_number};
 use crate::widgets;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -71,6 +71,20 @@ impl Col {
             Col::FixtureType => "col.gdtf_type",
             Col::Footprint => "col.footprint",
             Col::Conflict => "col.conflict",
+        }
+    }
+
+    /// Columns that hold lengths (shown and typed in the project unit).
+    pub fn is_length(self) -> bool {
+        matches!(self, Col::Length | Col::Height | Col::Thickness | Col::PosY | Col::Trim)
+    }
+
+    /// The header text: lengths with the project unit, "Length (m)".
+    pub fn title(self, doc: &Document) -> String {
+        if self.is_length() {
+            crate::lengths::label(&stagecraft_core::units::Units::of(&doc.meta), t(self.key()))
+        } else {
+            t(self.key()).to_owned()
         }
     }
 
@@ -180,6 +194,8 @@ pub fn rows(doc: &Document, st: &TableState) -> Vec<Id> {
 }
 
 pub fn cell_text(doc: &Document, o: &Object, col: Col) -> String {
+    let u = stagecraft_core::units::Units::of(&doc.meta);
+    let len = |v: f64| u.field(v);
     match (col, &o.kind) {
         (Col::Name, _) => o.name.clone(),
         (Col::Type, k) => t(&format!("type.{}", k.type_name())).to_owned(),
@@ -195,22 +211,20 @@ pub fn cell_text(doc: &Document, o: &Object, col: Col) -> String {
             stagecraft_core::patch::conflicts(doc).remove(&o.id).map(|p| problem_text(doc, &p)).unwrap_or_default()
         }
         (Col::Profile, ObjectKind::Truss { profile, .. }) => profile.clone(),
-        (Col::Length, ObjectKind::Truss { length, .. } | ObjectKind::Batten { length, .. }) => fmt_mm(*length),
+        (Col::Length, ObjectKind::Truss { length, .. } | ObjectKind::Batten { length, .. }) => len(*length),
         (Col::Number, ObjectKind::Batten { number, .. }) => number.to_string(),
-        (Col::PosY, ObjectKind::Batten { .. }) => fmt_mm(o.placement.position[1]),
-        (Col::Trim, ObjectKind::Batten { .. }) => fmt_mm(o.placement.position[2]),
-        (Col::MaxLoad, ObjectKind::Batten { max_load, .. }) => fmt_mm(*max_load),
-        (Col::Weight, ObjectKind::Fixture { weight_kg, .. }) => weight_kg.map(fmt_mm).unwrap_or_default(),
+        (Col::PosY, ObjectKind::Batten { .. }) => len(o.placement.position[1]),
+        (Col::Trim, ObjectKind::Batten { .. }) => len(o.placement.position[2]),
+        (Col::MaxLoad, ObjectKind::Batten { max_load, .. }) => fmt_number(*max_load),
+        (Col::Weight, ObjectKind::Fixture { weight_kg, .. }) => weight_kg.map(fmt_number).unwrap_or_default(),
         (Col::Load, _) => {
             let l = stagecraft_core::load::load_of(doc, o.id);
             let over = matches!(o.kind, ObjectKind::Batten { max_load, .. } if l.attached_kg > max_load);
             let unknown = if l.unknown > 0 { "+?" } else { "" };
             format!("{:.1}{unknown}{}", l.attached_kg, if over { " !" } else { "" })
         }
-        (Col::Height, ObjectKind::Wall { height, .. }) => fmt_mm(*height),
-        (Col::Thickness, ObjectKind::Wall { thickness, .. } | ObjectKind::Floor { thickness, .. }) => {
-            fmt_mm(*thickness)
-        }
+        (Col::Height, ObjectKind::Wall { height, .. }) => len(*height),
+        (Col::Thickness, ObjectKind::Wall { thickness, .. } | ObjectKind::Floor { thickness, .. }) => len(*thickness),
         (Col::Layer, _) => doc.layers.get(&o.layer).map(|l| l.name.clone()).unwrap_or_default(),
         (Col::Tags, _) => {
             let mut names: Vec<String> =
@@ -230,7 +244,10 @@ fn step(command: &str, args: Value) -> Value {
 pub fn edit_steps(doc: &Document, o: &Object, col: Col, text: &str) -> Result<Vec<Value>, String> {
     let id = o.id;
     let text = text.trim();
-    let mm = || parse_mm(text).ok_or_else(|| tf("status.bad_number", &[("text", &text)]));
+    // Lengths in the project unit (a bare number from Excel is in it too), kg plain.
+    let units = stagecraft_core::units::Units::of(&doc.meta);
+    let mm = || units.parse(text).ok_or_else(|| tf("status.bad_number", &[("text", &text)]));
+    let kg = || parse_number(text).ok_or_else(|| tf("status.bad_number", &[("text", &text)]));
     let s = match col {
         Col::Name => step("object.rename", json!({ "id": id, "name": text })),
         Col::Type => return Err(t("table.read_only").to_owned()),
@@ -265,10 +282,10 @@ pub fn edit_steps(doc: &Document, o: &Object, col: Col, text: &str) -> Result<Ve
         }
         Col::PosY => step("batten.update", json!({ "id": id, "y": mm()? })),
         Col::Trim => step("batten.update", json!({ "id": id, "trim": mm()? })),
-        Col::MaxLoad => step("batten.update", json!({ "id": id, "max_load": mm()? })),
+        Col::MaxLoad => step("batten.update", json!({ "id": id, "max_load": kg()? })),
         Col::Load => return Err(t("table.read_only").to_owned()),
         Col::Weight => {
-            let w = if text.is_empty() { 0.0 } else { mm()? };
+            let w = if text.is_empty() { 0.0 } else { kg()? };
             step("fixture.update", json!({ "id": id, "weight_kg": w }))
         }
         Col::Height => step("wall.update", json!({ "id": id, "height": mm()? })),
@@ -419,6 +436,13 @@ pub fn fill_series(col: Col, first: &str, second: Option<&str>, n: usize) -> Vec
     }
 }
 
+/// A series of lengths from `first` (mm) by the step to `second`, else by one project
+/// unit, as the cells show them.
+pub fn fill_lengths(u: &stagecraft_core::units::Units, first: f64, second: Option<f64>, n: usize) -> Vec<String> {
+    let step = second.map_or(u.unit.mm(), |b| b - first);
+    (0..n).map(|i| u.field(first + i as f64 * step)).collect()
+}
+
 /// Tab-separated rows; a trailing newline does not make an empty row.
 pub fn parse_tsv(text: &str) -> Vec<Vec<String>> {
     let text = text.strip_suffix('\n').unwrap_or(text);
@@ -505,7 +529,11 @@ pub fn fill_selected(s: &mut Studio) {
         } else {
             (first, second)
         };
-        let values = fill_series(*col, &first, second.as_deref(), ids.len());
+        let units = stagecraft_core::units::Units::of(&doc.meta);
+        let values = match (col.is_length(), units.parse(&first)) {
+            (true, Some(a)) => fill_lengths(&units, a, second.as_deref().and_then(|t| units.parse(t)), ids.len()),
+            _ => fill_series(*col, &first, second.as_deref(), ids.len()),
+        };
         // Addresses without a given step follow the footprints: auto-patch in row order.
         if *col == Col::Address && second.is_none() {
             let start = first.split('/').next().unwrap_or_default().trim().to_owned();
@@ -635,7 +663,14 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     // when its columns are wider than the panel.
     let tk = crate::theme::of(ui);
     ui.add_space(2.0);
-    let widths = fit_widths(&cols, &s.ui.table.widths, ui.available_width() - 12.0);
+    // Feet and inches need wider length columns ("45' 11 3/16\"").
+    let mut user = s.ui.table.widths.clone();
+    if stagecraft_core::units::Units::of(&s.engine.doc().meta).unit == stagecraft_core::units::LengthUnit::FtIn {
+        for c in cols.iter().filter(|c| c.is_length()) {
+            user.entry(*c).or_insert(96.0);
+        }
+    }
+    let widths = fit_widths(&cols, &user, ui.available_width() - 12.0);
     let table_w = NUM_W + widths.iter().sum::<f32>();
     egui::ScrollArea::horizontal().id_salt("table_h").auto_shrink([false, false]).show(ui, |ui| {
         ui.set_min_width(table_w);
@@ -670,7 +705,7 @@ fn body(
             p.with_clip_rect(r.rect.shrink2(vec2(2.0, 0.0))).text(
                 r.rect.left_center() + vec2(6.0, 0.0),
                 Align2::LEFT_CENTER,
-                t(c.key()),
+                c.title(doc),
                 crate::theme::medium(crate::theme::SMALL),
                 tk.text2,
             );

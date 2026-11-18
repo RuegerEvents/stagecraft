@@ -10,7 +10,10 @@ use stagecraft_core::{Engine, ObjectKind};
 use stagecraft_geom::dims::DimSource;
 use stagecraft_ui::Studio;
 
+/// A project in metres: the tests type plain metres.
 fn harness(engine: Engine) -> Harness<'static, Studio> {
+    let mut engine = engine;
+    engine.execute("doc.set_units", json!({ "length_unit": "m" })).unwrap();
     let mut h = Harness::builder()
         // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
         // asks for one more frame; closing a modal can take six.

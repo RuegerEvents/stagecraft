@@ -574,7 +574,7 @@ fn choose_meta(s: &mut Studio, i: usize) {
     }
     if m.direct {
         let values = prefill(s, m.applies, &specs);
-        if let Ok(args) = build_args(&specs, &values) {
+        if let Ok(args) = build_args(&specs, &values, &crate::lengths::of(s)) {
             run_named(s, m.id, Some(i), args);
             return;
         }
@@ -600,6 +600,7 @@ fn open_form(s: &mut Studio, name: &str, i: Option<usize>, specs: Vec<FieldSpec>
 /// layer, the current sheet, the first of a list where one must be picked.
 fn prefill(s: &Studio, applies: &[&str], specs: &[FieldSpec]) -> BTreeMap<String, String> {
     let doc = s.engine.doc();
+    let units = crate::lengths::of(s);
     let sel: Vec<Id> = s.engine.selection().to_vec();
     let of_kind: Vec<Id> = sel
         .iter()
@@ -637,7 +638,7 @@ fn prefill(s: &Studio, applies: &[&str], specs: &[FieldSpec]) -> BTreeMap<String
             }
             (FieldKind::Ref(k), _) if f.required => first(*k),
             (FieldKind::Choice(o), _) if f.required && f.default.is_none() => o.first().cloned(),
-            _ => f.default.clone(),
+            _ => f.default.as_deref().map(|d| crate::schema_form::mm_text_to_unit(f, d, &units)),
         };
         if let Some(v) = v {
             values.insert(f.name.clone(), v);
@@ -1300,7 +1301,7 @@ fn form(ui: &mut Ui, s: &mut Studio, name: &str, c: &Tokens) {
         return;
     }
     if run {
-        match build_args(&specs, &s.ui.palette.values) {
+        match build_args(&specs, &s.ui.palette.values, &crate::lengths::of(s)) {
             Ok(args) => run_named(s, name, s.ui.palette.chosen_meta, args),
             Err(e) => s.ui.palette.error = Some(e),
         }
@@ -1310,6 +1311,7 @@ fn form(ui: &mut Ui, s: &mut Studio, name: &str, c: &Tokens) {
 /// One labelled field.
 fn field_row(ui: &mut Ui, s: &mut Studio, f: &FieldSpec, first: &mut bool, c: &Tokens) {
     let doc = s.engine.doc().clone();
+    let units = crate::lengths::of(s);
     let sel = s.engine.selection().to_vec();
     ui.horizontal(|ui| {
         ui.set_min_height(FIELD_H);
@@ -1402,7 +1404,8 @@ fn field_row(ui: &mut Ui, s: &mut Studio, f: &FieldSpec, first: &mut bool, c: &T
                 widgets::name(&r, Role::Label, &accessible);
             }
             FieldKind::Point(n) => {
-                let mut parts: Vec<String> = value.split(',').map(|x| x.trim().to_owned()).collect();
+                let mut parts: Vec<String> =
+                    value.split(crate::schema_form::POINT_SEP).map(|x| x.trim().to_owned()).collect();
                 parts.resize(*n, String::new());
                 let axes = ["X", "Y", "Z"];
                 let each = (w - 14.0 * *n as f32 - 4.0 * (*n as f32 - 1.0)) / *n as f32;
@@ -1411,7 +1414,7 @@ fn field_row(ui: &mut Ui, s: &mut Studio, f: &FieldSpec, first: &mut bool, c: &T
                     ui.label(egui::RichText::new(axes[k]).font(dim_font()).color(c.text3));
                     text_field(ui, part, each, "", &format!("{accessible} {}", axes[k].to_lowercase()), first);
                 }
-                *value = parts.join(", ");
+                *value = parts.join("; ");
             }
             FieldKind::List => {
                 text_field(ui, value, w, t("palette.list_hint"), &accessible, first);
@@ -1424,6 +1427,8 @@ fn field_row(ui: &mut Ui, s: &mut Studio, f: &FieldSpec, first: &mut bool, c: &T
             }
         }
         if let Some(u) = f.unit {
+            // Lengths show the project unit; they are read in it and sent as mm.
+            let u = if u == "mm" { units.label() } else { u };
             ui.label(egui::RichText::new(u).font(dim_font()).color(c.text3));
         }
     });

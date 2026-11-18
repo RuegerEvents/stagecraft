@@ -57,5 +57,7 @@
   "save": ["speichern", "sichern"],
   "open": ["öffnen", "laden"],
   "mvr": ["vectorworks", "grandma", "exchange", "austausch"],
-  "position": ["placement", "platzieren", "koordinaten", "location"]
+  "position": ["placement", "platzieren", "koordinaten", "location"],
+  "settings": ["einstellungen", "projekteinstellungen", "dokumenteinstellungen", "document setup", "dokument einrichten", "preferences"],
+  "units": ["einheiten", "einheit", "maßeinheit", "masseinheit", "unit", "metres", "meter", "feet", "fuß", "zoll", "inches"]
 }

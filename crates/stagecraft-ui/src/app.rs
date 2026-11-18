@@ -165,6 +165,7 @@ impl Studio {
             .show(ui, |ui| chrome::status_bar(ui, self));
         egui::CentralPanel::no_frame().show(ui, |ui| crate::dock::show(ui, self));
         palette::show(ui.ctx(), self);
+        crate::settings::show(ui.ctx(), self);
         crate::onboarding::show(ui.ctx(), self);
         crate::tutorial::paint(ui.ctx(), self);
         self.keep_prefs(ui.ctx());
@@ -236,6 +237,9 @@ fn shortcuts(ui: &mut Ui, s: &mut Studio) {
     }
     if pressed(ui, cmd(Key::N)) {
         panels::new_document(s);
+    }
+    if pressed(ui, cmd(Key::Comma)) {
+        let _ = s.run("ui.project_settings", Value::Null);
     }
     if pressed(ui, cmd(Key::Num0)) {
         let _ = s.run("ui.zoom_to_fit", Value::Null);

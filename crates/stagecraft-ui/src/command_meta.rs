@@ -249,6 +249,8 @@ pub static META: &[Meta] = &[
     m("doc.open", File, "folder-open").hidden(),
     m("doc.save", File, "save").hidden(),
     m("doc.info", File, "info"),
+    m("ui.project_settings", File, "settings-2").key("⌘,"),
+    m("doc.set_units", File, "calibrate"),
     m("mvr.import", File, "file-input").hidden(),
     m("mvr.export", File, "file-output").hidden(),
     m("model.import", File, "file-input").hidden(),

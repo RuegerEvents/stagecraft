@@ -16,44 +16,6 @@ use crate::i18n::{t, tf};
 use crate::state::{DimField, DimInput, Drag, Gesture, SegHint, Tool};
 use crate::theme::Palette;
 
-/// A typed length in mm. Plain numbers are metres ("4.5" = 4500 mm); `mm`, `cm` and
-/// `m` suffixes are understood, and feet and inches (`15'`, `15' 6"`, `6"`, `15ft`,
-/// `6in`). `None` for anything else.
-pub fn parse_length(s: &str) -> Option<f64> {
-    let s = s.trim().replace(',', ".");
-    if let Some(v) = parse_imperial(&s) {
-        return Some(v);
-    }
-    let (num, factor) = if let Some(n) = s.strip_suffix("mm") {
-        (n, 1.0)
-    } else if let Some(n) = s.strip_suffix("cm") {
-        (n, 10.0)
-    } else if let Some(n) = s.strip_suffix('m') {
-        (n, 1000.0)
-    } else {
-        (s.as_str(), 1000.0)
-    };
-    let v: f64 = num.trim().parse().ok()?;
-    v.is_finite().then_some(v * factor)
-}
-
-/// Feet and inches: `15'`, `15' 6"`, `15'6`, `6"`, `15ft`, `6in`.
-fn parse_imperial(s: &str) -> Option<f64> {
-    let s = s.replace("ft", "'").replace("in", "\"");
-    if !s.contains(['\'', '"']) {
-        return None;
-    }
-    let (feet, rest) = match s.split_once('\'') {
-        Some((f, r)) => (f.trim().parse::<f64>().ok()?, r),
-        None => (0.0, s.as_str()),
-    };
-    let rest = rest.trim().trim_end_matches('"').trim();
-    let inches = if rest.is_empty() { 0.0 } else { rest.parse::<f64>().ok()? };
-    let sign = if feet < 0.0 || s.trim_start().starts_with('-') { -1.0 } else { 1.0 };
-    let v = feet * 304.8 + sign * inches.abs() * 25.4;
-    v.is_finite().then_some(v)
-}
-
 /// A typed angle in degrees ("30", "-45°").
 pub fn parse_angle(s: &str) -> Option<f64> {
     let s = s.trim().trim_end_matches('°').replace(',', ".");
@@ -428,7 +390,7 @@ fn keyboard(ui: &mut Ui, s: &mut Studio) {
             if std::mem::take(&mut dim.replace) {
                 dim.text_mut().clear();
             }
-            dim.text_mut().push_str(&text.replace(',', "."));
+            dim.text_mut().push_str(&text);
         }
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab)) {
             match g.dim.as_mut() {
@@ -453,6 +415,10 @@ fn keyboard(ui: &mut Ui, s: &mut Studio) {
                 d.text_mut().pop();
             }
         }
+    }
+    let units = crate::lengths::of(s);
+    if let Some(d) = s.ui.gesture.dim.as_mut() {
+        d.units = units;
     }
     if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter)) {
         enter(s);
@@ -585,7 +551,7 @@ fn commit_dimension(
         let mut args = crate::sketch_ui::dim_args(src);
         args["value"] = json!(v);
         if s.run("dimension.set_value", args).is_ok() {
-            let text = stagecraft_geom::dims::format_value(v, false);
+            let text = crate::sketch_ui::value_text(&crate::lengths::of(s), v, false);
             s.ui.info(tf("sketch.value_set", &[("value", &text)]));
         }
     }
@@ -1000,7 +966,7 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
             let d = math::sub(c, *from);
             sel_prims(&|q| q.translated(d));
             p.line_segment([cam.to_screen(*from), cam.to_screen(c)], thin);
-            length_label(p, cam, pal, *from, c);
+            length_label(p, cam, pal, *from, c, &crate::lengths::of(s));
         }
         _ => {}
     }
@@ -1136,13 +1102,20 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
     crate::hud::draw(ui, p, s, pal);
 }
 
-fn length_label(p: &egui::Painter, cam: &crate::state::Camera, pal: &Palette, a: P2, b: P2) {
+fn length_label(
+    p: &egui::Painter,
+    cam: &crate::state::Camera,
+    pal: &Palette,
+    a: P2,
+    b: P2,
+    u: &stagecraft_core::units::Units,
+) {
     let len = math::dist(a, b);
     if len < 1.0 {
         return;
     }
     let mid = cam.to_screen(math::midpoint(a, b));
-    let text = format!("{:.2} m", len / 1000.0);
+    let text = u.with_unit(len);
     let font = crate::theme::proportional(12.0);
     let galley = p.layout_no_wrap(text, font, pal.preview);
     let r = Align2::CENTER_BOTTOM.anchor_size(mid - vec2(0.0, 4.0), galley.size()).expand(2.0);
@@ -1181,23 +1154,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn typed_lengths_are_metres_unless_suffixed() {
-        assert_eq!(parse_length("4.5"), Some(4500.0));
-        assert_eq!(parse_length("4,5"), Some(4500.0));
-        assert_eq!(parse_length("450mm"), Some(450.0));
-        assert_eq!(parse_length("45 cm"), Some(450.0));
-        assert_eq!(parse_length("2m"), Some(2000.0));
-        assert_eq!(parse_length("abc"), None);
+    fn typed_angles() {
         assert_eq!(parse_angle("-45°"), Some(-45.0));
-    }
-
-    #[test]
-    fn feet_and_inches() {
-        assert_eq!(parse_length("15'"), Some(15.0 * 304.8));
-        assert!((parse_length("15' 6\"").unwrap() - (15.0 * 304.8 + 6.0 * 25.4)).abs() < 1e-9);
-        assert_eq!(parse_length("6\""), Some(6.0 * 25.4));
-        assert_eq!(parse_length("10ft"), Some(3048.0));
-        assert_eq!(parse_length("2,5m"), Some(2500.0));
-        assert_eq!(parse_length("1500mm"), Some(1500.0));
+        assert_eq!(parse_angle("22,5"), Some(22.5));
+        assert_eq!(parse_angle("abc"), None);
     }
 }

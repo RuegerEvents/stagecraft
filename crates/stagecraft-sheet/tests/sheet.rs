@@ -333,6 +333,23 @@ fn plan_viewports_draw_sketch_and_reference_dimensions() {
     ));
     let rasters = Default::default();
     let inputs = Inputs { source: &stagecraft_sheet::FallbackSource, rasters: &rasters };
+    // New documents follow the project unit: mm, then m.
+    let mut t = Vec::new();
+    texts(&compose(e.doc(), sh, &inputs).unwrap().prims, &mut t);
+    for want in ["10000", "8000", "(5000)"] {
+        assert!(t.iter().any(|x| x == want), "missing `{want}` in {t:?}");
+    }
+    run(&mut e, "doc.set_units", json!({ "length_unit": "m" }));
+    let mut t = Vec::new();
+    texts(&compose(e.doc(), sh, &inputs).unwrap().prims, &mut t);
+    for want in ["10.000", "8.000", "(5.000)"] {
+        assert!(t.iter().any(|x| x == want), "missing `{want}` in {t:?}");
+    }
+    run(&mut e, "doc.set_units", json!({ "length_unit": "ft_in" }));
+    let mut t = Vec::new();
+    texts(&compose(e.doc(), sh, &inputs).unwrap().prims, &mut t);
+    assert!(t.iter().any(|x| x == "32' 9 11/16\""), "{t:?}");
+    run(&mut e, "doc.set_meta", json!({ "dimension_format": "m_sup_mm" }));
     let mut t = Vec::new();
     texts(&compose(e.doc(), sh, &inputs).unwrap().prims, &mut t);
     for want in ["10.00", "8.00", "(5.00)"] {

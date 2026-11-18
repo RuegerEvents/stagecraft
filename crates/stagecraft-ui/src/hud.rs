@@ -12,6 +12,7 @@
 
 use egui::{Align2, Pos2, Rect, Role, Sense, Shape, Stroke, Ui, Vec2, vec2};
 use stagecraft_core::model::P2;
+use stagecraft_core::units::{LengthUnit, Units};
 use stagecraft_geom::math;
 
 use crate::app::Studio;
@@ -65,7 +66,7 @@ pub fn takes_keys(s: &Studio) -> bool {
 pub fn accepts(c: char, started: bool) -> bool {
     c.is_ascii_digit()
         || matches!(c, '.' | ',' | '-' | '+')
-        || (started && matches!(c, 'm' | 'c' | 'f' | 't' | 'i' | 'n' | '\'' | '"' | '°' | ' '))
+        || (started && matches!(c, 'm' | 'c' | 'f' | 't' | 'i' | 'n' | '\'' | '"' | '°' | ' ' | '/'))
 }
 
 /// Whether `text` (one text event) may go into a box; `started` = a box already has
@@ -158,12 +159,6 @@ pub fn norm180(a: f64) -> f64 {
     if a > 180.0 { a - 360.0 } else { a }
 }
 
-/// Metres for the live value: two decimals, three when the millimetre matters.
-pub fn fmt_m(mm: f64) -> String {
-    let s = format!("{:.3}", mm / 1000.0);
-    if s.ends_with('0') { s[..s.len() - 1].to_owned() } else { s }
-}
-
 fn has_unit(text: &str) -> bool {
     text.chars().any(|c| c.is_ascii_alphabetic() || matches!(c, '\'' | '"'))
 }
@@ -174,8 +169,8 @@ struct BoxSpec {
     what: &'static str,
     /// Typed text, or the live value.
     text: String,
-    /// Drawn dimmer after the text ("m", "°").
-    suffix: &'static str,
+    /// Drawn dimmer after the text (" m", "°").
+    suffix: String,
     locked: bool,
     focused: bool,
     /// The next key replaces the text (drawn selected).
@@ -183,22 +178,27 @@ struct BoxSpec {
 }
 
 impl BoxSpec {
-    fn length(dim: Option<&DimInput>, live_mm: f64) -> Self {
+    fn length(dim: Option<&DimInput>, live_mm: f64, u: &Units) -> Self {
         let typed = dim.filter(|d| !d.length.is_empty());
         let focused = dim.is_some_and(|d| d.field == DimField::Length);
+        // ft-in values carry their marks; a bare typed number there is inches.
+        let unit = match u.unit {
+            LengthUnit::FtIn => "\"".to_owned(),
+            _ => format!(" {}", u.label()),
+        };
         match typed {
             Some(d) => BoxSpec {
                 what: "dim.length",
                 text: d.length.clone(),
-                suffix: if has_unit(&d.length) { "" } else { " m" },
+                suffix: if has_unit(&d.length) { String::new() } else { unit },
                 locked: d.length_mm().is_some(),
                 focused,
                 replace: focused && d.replace,
             },
             None => BoxSpec {
                 what: "dim.length",
-                text: fmt_m(live_mm),
-                suffix: " m",
+                text: u.fixed(live_mm),
+                suffix: if u.unit == LengthUnit::FtIn { String::new() } else { unit },
                 locked: false,
                 focused,
                 replace: false,
@@ -213,7 +213,7 @@ impl BoxSpec {
             Some(d) => BoxSpec {
                 what: "dim.angle",
                 text: d.angle.clone(),
-                suffix: if d.angle.ends_with('°') { "" } else { "°" },
+                suffix: if d.angle.ends_with('°') { String::new() } else { "°".to_owned() },
                 locked: d.angle_deg().is_some(),
                 focused,
                 replace: focused && d.replace,
@@ -221,7 +221,7 @@ impl BoxSpec {
             None => BoxSpec {
                 what: "dim.angle",
                 text: format!("{live_deg:.1}"),
-                suffix: "°",
+                suffix: "°".to_owned(),
                 locked: false,
                 focused,
                 replace: false,
@@ -252,7 +252,7 @@ fn box_size(ui: &Ui, b: &BoxSpec) -> Vec2 {
     let font = theme::proportional(theme::BODY);
     let w = ui.fonts_mut(|f| {
         f.layout_no_wrap(b.text.clone(), font.clone(), egui::Color32::WHITE).size().x
-            + f.layout_no_wrap(b.suffix.to_owned(), font.clone(), egui::Color32::WHITE).size().x
+            + f.layout_no_wrap(b.suffix.clone(), font.clone(), egui::Color32::WHITE).size().x
     });
     let lock = if b.locked { LOCK + 3.0 } else { 0.0 };
     vec2((PAD * 2.0 + lock + w + 4.0).max(52.0).round(), BOX_H)
@@ -334,7 +334,8 @@ pub fn draw(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette) {
     } else {
         vec2(0.0, -1.0)
     };
-    let lb = BoxSpec::length(dim.filter(|_| s.ui.tool != Tool::Dimension || s.ui.gesture.picks.len() == 2), len);
+    let u = crate::lengths::of(s);
+    let lb = BoxSpec::length(dim.filter(|_| s.ui.tool != Tool::Dimension || s.ui.gesture.picks.len() == 2), len, &u);
     let size = box_size(ui, &lb);
     let center = if px > size.x * 0.6 { beside(sa, sb, n, size) } else { sb + vec2(18.0 + size.x / 2.0, -18.0) };
     paint_box(ui, p, center, &lb, "length");
@@ -381,8 +382,9 @@ fn arc(p: &egui::Painter, at: Pos2, from_deg: f64, turn: f64, pal: &Palette) {
 mod tests {
     use super::*;
 
+    /// Typed in a metre project.
     fn dim(length: &str, angle: &str) -> DimInput {
-        DimInput { length: length.into(), angle: angle.into(), ..Default::default() }
+        DimInput { length: length.into(), angle: angle.into(), units: Units::new(LengthUnit::M), ..Default::default() }
     }
 
     fn close(a: P2, b: P2) -> bool {
@@ -424,13 +426,29 @@ mod tests {
         assert!(!accepts_text("m", false), "a bare m stays the Move tool");
         assert!(accepts_text("m", true));
         assert!(accepts_text("2,5", false));
+        assert!(accepts_text("6 1/2\"", false));
         assert!(!accepts_text("x", true));
     }
 
     #[test]
-    fn live_values_read_as_metres() {
-        assert_eq!(fmt_m(4500.0), "4.50");
-        assert_eq!(fmt_m(4525.0), "4.525");
+    fn the_length_box_speaks_the_project_unit() {
+        let mm = Units::default();
+        let b = BoxSpec::length(None, 4525.0, &mm);
+        assert_eq!((b.text.as_str(), b.suffix.as_str()), ("4525", " mm"));
+        let m = Units::new(LengthUnit::M);
+        assert_eq!(BoxSpec::length(None, 4500.0, &m).text, "4.500");
+        let typed = DimInput { length: "1500mm".into(), units: m, ..Default::default() };
+        let b = BoxSpec::length(Some(&typed), 0.0, &m);
+        assert!(b.locked && b.suffix.is_empty(), "an explicit unit stays as typed");
+        let ft = Units::new(LengthUnit::FtIn);
+        assert_eq!(BoxSpec::length(None, 6155.0, &ft).text, "20' 2 5/16\"");
+        // Plain mm in a mm project: 1500 is 1.5 m, not 1500 m.
+        let typed = DimInput { length: "1500".into(), ..Default::default() };
+        assert_eq!(typed.length_mm(), Some(1500.0));
+    }
+
+    #[test]
+    fn angles_normalise() {
         assert_eq!(norm180(270.0), -90.0);
         assert_eq!(norm180(-180.0), 180.0);
     }

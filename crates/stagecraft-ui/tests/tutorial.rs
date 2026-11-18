@@ -166,11 +166,11 @@ fn the_tutorial_builds_a_basic_stage_through_the_gui() {
     tour.click("Tool Wall");
     tour.click_world([-7000.0, -4500.0]);
     tour.hover_world([0.0, -4500.0]);
-    tour.type_enter("14");
+    tour.type_enter("14m");
     tour.hover_world([7000.0, 0.0]);
-    tour.type_enter("9");
+    tour.type_enter("9m");
     tour.hover_world([0.0, 4500.0]);
-    tour.type_enter("14");
+    tour.type_enter("14m");
     tour.click_world([-7000.0, -4500.0]);
     assert_eq!(count(tour.state(), "wall"), 1);
     tour.expect_step(3, "floor");

@@ -59,11 +59,12 @@ pub fn has_options(tool: Tool) -> bool {
 
 pub fn tool_options(ui: &mut Ui, s: &mut Studio) {
     let o = s.ui.options.clone();
+    let u = crate::lengths::of(s);
     let profile_box = |ui: &mut Ui, s: &mut Studio| {
         ui.label(t("option.profile"));
         let r = crate::widgets::combo_w(150.0, "truss_profile").selected_text(&o.truss_profile).show_ui(ui, |ui| {
             for p in stagecraft_geom::truss_profiles() {
-                let label = format!("{}  {} · {} mm", p.name, p.maker, p.width);
+                let label = format!("{}  {} · {}", p.name, p.maker, u.field_with_unit(p.width));
                 if ui.selectable_label(p.name == o.truss_profile, label).clicked() {
                     let _ = s.run("ui.set_tool_options", json!({ "truss_profile": p.name }));
                 }
@@ -128,7 +129,8 @@ pub fn tool_options(ui: &mut Ui, s: &mut Studio) {
                     let _ = s.run("ui.set_tool_options", json!({ "platform_system": "" }));
                 }
                 for sys in stagecraft_geom::platform_systems() {
-                    let label = format!("{} · {}–{} mm", sys.name, sys.min_height, sys.max_height);
+                    let label =
+                        format!("{} · {}–{}", sys.name, u.field(sys.min_height), u.field_with_unit(sys.max_height));
                     if ui.selectable_label(o.platform_system == sys.name, label).clicked() {
                         let _ = s.run("ui.set_tool_options", json!({ "platform_system": sys.name }));
                     }
@@ -166,7 +168,7 @@ pub fn hint(s: &Studio) -> String {
         (Tool::Wall, n) if n >= 3 => "hint.wall.close",
         (tool, _) => hint_key(tool),
     };
-    t(key).to_owned()
+    tf(key, &[("unit", &crate::lengths::of(s).label())])
 }
 
 fn mm_option(ui: &mut Ui, s: &mut Studio, label: &str, field: &str, value: f64) {
@@ -174,13 +176,19 @@ fn mm_option(ui: &mut Ui, s: &mut Studio, label: &str, field: &str, value: f64) 
     if field.ends_with("_z") || field.ends_with("_base") || field.ends_with("height") || field.ends_with("trim") {
         r.on_hover_text(t("option.above_layer"));
     }
+    let u = crate::lengths::of(s);
+    let feet = u.unit == stagecraft_core::units::LengthUnit::FtIn;
     let id = egui::Id::unique(("tool_option", field));
-    if let Some(v) = edit_field(ui, id, &fmt_mm(value), 56.0, &format!("Option {}", t(label)))
-        && let Some(mm) = parse_mm(&v)
+    let w = if feet { 92.0 } else { 56.0 };
+    if let Some(v) = edit_field(ui, id, &u.field(value), w, &format!("Option {}", t(label)))
+        && let Some(mm) = crate::lengths::parse_or_error(s, &v)
     {
         let _ = s.run("ui.set_tool_options", json!({ field: mm }));
     }
-    ui.label(RichText::new("mm").weak());
+    // Feet and inches carry their marks.
+    if !feet {
+        ui.label(RichText::new(u.label()).weak());
+    }
 }
 
 fn hint_key(tool: Tool) -> &'static str {
@@ -206,22 +214,6 @@ fn hint_key(tool: Tool) -> &'static str {
     }
 }
 
-/// mm without trailing zeros.
-pub fn fmt_mm(v: f64) -> String {
-    let r = (v * 10.0).round() / 10.0;
-    if r.fract() == 0.0 { format!("{r:.0}") } else { format!("{r:.1}") }
-}
-
-/// A number of mm; "m"/"cm" suffixes allowed ("4.5m").
-pub fn parse_mm(s: &str) -> Option<f64> {
-    let s = s.trim();
-    if s.ends_with("mm") || !s.ends_with('m') {
-        let n = s.trim_end_matches("mm").trim().replace(',', ".");
-        return n.parse().ok().filter(|v: &f64| v.is_finite());
-    }
-    crate::tools::parse_length(s)
-}
-
 pub fn snap_key(k: stagecraft_geom::snap::SnapKind) -> &'static str {
     use stagecraft_geom::snap::SnapKind::*;
     match k {
@@ -235,6 +227,7 @@ pub fn snap_key(k: stagecraft_geom::snap::SnapKind) -> &'static str {
 }
 
 pub fn layers(ui: &mut Ui, s: &mut Studio) {
+    let u = crate::lengths::of(s);
     let layers: Vec<Layer> = s.engine.doc().layers_sorted().into_iter().cloned().collect();
     let active = s.ui.active_layer.or(layers.first().map(|l| l.id));
     ui.horizontal(|ui| {
@@ -252,7 +245,7 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
                 let _ = s.run("layer.create", json!({ "name": name }));
             }
             ui.add_space(42.0);
-            ui.label(RichText::new(t("layers.elevation")).small().weak());
+            ui.label(RichText::new(tf("layers.elevation", &[("unit", &u.label())])).small().weak());
         });
     });
     for (i, l) in layers.iter().enumerate() {
@@ -272,7 +265,8 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
                 let _ = s.run("ui.set_active_layer", json!({ "layer": l.id }));
             }
             // Name takes what the elevation field and the three buttons leave.
-            let name_w = (ui.available_width() - 56.0 - 3.0 * 22.0 - 8.0).max(50.0);
+            let elev_w = if u.unit == stagecraft_core::units::LengthUnit::FtIn { 76.0 } else { 48.0 };
+            let name_w = (ui.available_width() - elev_w - 8.0 - 3.0 * 22.0 - 8.0).max(50.0);
             let id = egui::Id::unique(("layer_name", l.id));
             if let Some(name) = edit_field(ui, id, &l.name, name_w, &format!("Layer name {}", l.name))
                 && !name.trim().is_empty()
@@ -280,8 +274,8 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
                 let _ = s.run("layer.update", json!({ "layer": l.id, "name": name.trim() }));
             }
             let id = egui::Id::unique(("layer_elev", l.id));
-            if let Some(v) = edit_field(ui, id, &fmt_mm(l.elevation), 48.0, &format!("Elevation {}", l.name)) {
-                match parse_mm(&v) {
+            if let Some(v) = edit_field(ui, id, &u.field(l.elevation), elev_w, &format!("Elevation {}", l.name)) {
+                match u.parse(&v) {
                     Some(mm) => {
                         let _ = s.run("layer.update", json!({ "layer": l.id, "elevation": mm }));
                     }
@@ -359,19 +353,4 @@ pub fn tags(ui: &mut Ui, s: &mut Studio) {
             let _ = s.run("tag.create", json!({ "name": name.trim() }));
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mm_fields_take_plain_mm_and_metres() {
-        assert_eq!(parse_mm("150"), Some(150.0));
-        assert_eq!(parse_mm("150 mm"), Some(150.0));
-        assert_eq!(parse_mm("4.5m"), Some(4500.0));
-        assert_eq!(parse_mm("x"), None);
-        assert_eq!(fmt_mm(1500.0), "1500");
-        assert_eq!(fmt_mm(12.34), "12.3");
-    }
 }

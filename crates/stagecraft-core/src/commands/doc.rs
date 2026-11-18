@@ -9,7 +9,7 @@ use crate::engine::Ctx;
 use crate::file;
 use crate::model::Document;
 use crate::sheet::text;
-use crate::units::{DimFormat, Language};
+use crate::units::{DimFormat, Language, LengthUnit};
 
 pub(super) fn register(r: &mut Registry) {
     r.add("doc.info", Kind::Query, "File, dirty flag, counts, meta", info);
@@ -21,6 +21,12 @@ pub(super) fn register(r: &mut Registry) {
         Kind::Edit,
         "Set title block fields (project, venue, address, dates, company, drawn-by, website, logo …), sheet language and dimension format",
         set_meta,
+    );
+    r.add(
+        "doc.set_units",
+        Kind::Edit,
+        "Set the project unit the GUI shows and takes lengths in (mm, cm, m, ft-in) and its precision. Display and typing only: the document and every command argument stay in mm",
+        set_units,
     );
 }
 
@@ -116,7 +122,9 @@ struct MetaArgs {
     /// Language of sheet text: `en` (default) or `de`. Viewports still named by
     /// default ("Plan", "Section" …) are renamed into the new language.
     sheet_language: Option<Language>,
-    /// Dimension text: `m_sup_mm` (6.15⁵, default), `m` (6.155 m) or `mm` (6155).
+    /// Dimension text: `project` (follow the project unit, default of new documents),
+    /// `m_sup_mm` (6.15⁵), `m` (6.155 m), `mm` (6155), `ft_in` (20' 2 5/16") or `ft`
+    /// (20.19').
     dimension_format: Option<DimFormat>,
     /// Decimal separator of lengths: `.` or `,`; `auto` (or empty) follows the sheet
     /// language (en `.`, de `,`).
@@ -195,6 +203,43 @@ fn set_meta(ctx: &mut Ctx, a: MetaArgs) -> CmdResult {
     let mut out = serde_json::to_value(&*m).unwrap_or_default();
     out["logo"] = json!(m.logo.is_some());
     Ok(out)
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct UnitsArgs {
+    /// Unit of lengths in the GUI (Inspector, tool options, heads-up boxes, table,
+    /// status bar): `mm` (default), `cm`, `m` or `ft_in`. Only display and input:
+    /// command arguments stay mm whatever is set here.
+    length_unit: Option<LengthUnit>,
+    /// Decimals for mm (0–2, default 0), cm (0–3, default 1) and m (1–4, default 3);
+    /// for `ft_in` the finest inch fraction's denominator: 1, 2, 4, 8, 16 (default),
+    /// 32 or 64. Omitted with a new `length_unit`: that unit's default; `-1` resets.
+    precision: Option<i32>,
+}
+
+fn set_units(ctx: &mut Ctx, a: UnitsArgs) -> CmdResult {
+    let cur = ctx.doc().meta.units;
+    let unit = a.length_unit.unwrap_or(cur.length);
+    let precision = match a.precision {
+        Some(p) if p < 0 => None,
+        Some(p) => {
+            let p = u8::try_from(p).ok().filter(|p| unit.precisions().contains(p)).ok_or_else(|| {
+                CmdError::invalid_args(format!(
+                    "precision {p} does not fit {}: use one of {:?}",
+                    unit.code(),
+                    unit.precisions()
+                ))
+            })?;
+            Some(p)
+        }
+        None if unit != cur.length => None,
+        None => cur.precision,
+    };
+    let m = &mut ctx.doc_mut().meta;
+    m.units.length = unit;
+    m.units.precision = precision;
+    let u = crate::units::Units::of(m);
+    Ok(json!({ "length_unit": unit, "precision": u.precision, "label": u.label(), "example": u.with_unit(6155.0) }))
 }
 
 /// Viewports whose name is the default for their view in `from` get the one in `to`.

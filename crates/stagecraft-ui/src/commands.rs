@@ -178,6 +178,11 @@ fn register(r: &mut UiRegistry) {
         "The guided tour \"Build a basic stage\": start (opens the Tutorial panel), next, back, stop; returns the step",
         tutorial,
     );
+    r.add(
+        "ui.project_settings",
+        "Open or close the Project Settings window (units, sheet text, title block fields); no `open` toggles",
+        project_settings,
+    );
     r.add("ui.screenshot", "Write a PNG of the window to `path` (answered after the next frame)", screenshot);
 }
 
@@ -213,6 +218,7 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "plan_labels": ui.plan_labels,
         "tutorial": tutorial_json(ui),
         "tutorial_offer": ui.tutorial_offer,
+        "project_settings": ui.project_settings,
         "sketch": { "show": ui.sketch.show, "colours": ui.sketch.colours, "dimensions": ui.sketch.dimensions,
                     "selected_dimension": ui.sketch.selected.map(crate::sketch_ui::dim_args),
                     "picked_layer": ui.sketch.picked_layer,
@@ -238,6 +244,17 @@ fn tutorial_json(ui: &UiState) -> Value {
         "title": step.map(|s| crate::i18n::t(&format!("tutorial.{}.title", s.id)).to_owned()),
         "finished": tut.finished(),
     })
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ProjectSettingsArgs {
+    /// true opens, false closes; omitted toggles.
+    open: Option<bool>,
+}
+
+fn project_settings(c: &mut UiCtx, a: ProjectSettingsArgs) -> CmdResult {
+    c.ui.project_settings = a.open.unwrap_or(!c.ui.project_settings);
+    Ok(json!({ "open": c.ui.project_settings }))
 }
 
 fn tutorial(c: &mut UiCtx, a: TutorialArgs) -> CmdResult {
@@ -386,7 +403,8 @@ fn dimension(c: &mut UiCtx, a: DimensionArgs) -> CmdResult {
         if !d.driving {
             return Err(CmdError::invalid("reference dimensions have no value to edit; make it driving first"));
         }
-        let text = if d.measure.is_angle() { format!("{:.1}", d.value) } else { format!("{}", d.value / 1000.0) };
+        let u = stagecraft_core::units::Units::of(&c.engine.doc().meta);
+        let text = if d.measure.is_angle() { format!("{:.1}", d.value) } else { u.field(d.value) };
         c.ui.sketch.editing = Some(crate::sketch_ui::DimEdit { source: src, text, focus: true });
     }
     Ok(json!({ "selected": crate::sketch_ui::dim_args(src) }))

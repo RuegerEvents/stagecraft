@@ -100,8 +100,19 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   Tab cycles length → angle, a box whose text parses is locked (lock icon) and Enter or a
   click takes the point and empties the boxes; Shift squares the pointer's direction, a
   typed length holds along it. Esc drops the typed value, a second Esc ends the drawing
-  (keeps what makes an object), a third leaves the tool. Plain numbers are metres; `mm`,
-  `cm`, `m`, feet/inches (`15'`, `6"`). Tests in `tests/drawing.rs` use real key events.
+  (keeps what makes an object), a third leaves the tool. Plain numbers are the project
+  unit; `mm`, `cm`, `m`, feet/inches (`15'`, `6"`) win. Tests in `tests/drawing.rs` use
+  real key events (most in a metre project).
+- Project unit: `meta.units` (`doc.set_units {length_unit: mm|cm|m|ft_in, precision}`,
+  default mm) is how the GUI shows and takes lengths; the document and all command
+  arguments stay mm. `stagecraft_core::units::Units` (`Units::of(&meta)`: `field`,
+  `fixed`, `with_unit`, `parse`, `label`) is the only formatter/parser; `lengths.rs` has
+  the GUI helpers (`lengths::of(s)`, `label(&u, "Width")` → "Width (m)"). A new length
+  field must use them, never `{} mm` or `/ 1000.0`; plain numbers (kg, counts) use
+  `lengths::fmt_number`/`parse_number`. Table length columns: `Col::is_length`.
+  Project Settings (`settings.rs`, File menu, ⌘,, `ui.project_settings`) is a
+  non-blocking window with units, sheet text and title block fields; the Inspector's
+  Document section only links to it.
 - All visible text goes through `i18n::t("key")`; the catalog is
   `assets/i18n/en.json`, and a test fails on keys used but missing.
 - egui 0.37 comes from storytold's fork (root `[patch.crates-io]`, same revision as
@@ -246,8 +257,10 @@ Title blocks: `None` = the built-in compact one (zoned border, legend on top of 
 same width), `TitleBlock::GENERIC_ID` the old one; template text takes
 `{field}`, `{a|b}` and `{t:key}`. Every word StageCraft prints on a sheet comes from
 `stagecraft_core::sheet::text` (en/de, `meta.sheet_language`). Lengths on drawings go
-through `stagecraft_core::units::LengthFormat::of(&doc.meta)` (`m_sup_mm` 6.15⁵,
-`m`, `mm`; separator from the language unless set): `m_sup_mm` writes the mm digit
+through `stagecraft_core::units::LengthFormat::of(&doc.meta)` (`project` = the project
+unit and precision, default of new documents; `m_sup_mm` 6.15⁵, `m`, `mm`, `ft_in`,
+`ft`; separator from the language unless set; files before format 5 without the field
+read as `m_sup_mm`): `m_sup_mm` writes the mm digit
 as a Unicode superscript, and every renderer (PDF, SVG, Sheets mode via
 `render::text_runs`, plan canvas via `sketch_ui::dim_text_job`) draws superscript
 runs smaller and raised. Vector viewports are
@@ -287,7 +300,9 @@ Craft suite's reference screenshots, and `70-78-palette-*` (groups, selection, g
 search, alias, form, objects, `>`), `80-crisp-{1x,1.5x,2x}-*` (plan and palette at those
 pixel densities) `81-tools-{two,one}-*` (the folded tool palette), `90-92-hud-*` (heads-up dimension
 boxes: live, typed and locked, Shift), `93-viewport-1-{100,50}-*` (same frame, other
-scale), `94-viewport-live-drag-*` and `95-first-run-offer-*`. kittest's 8 pt margin is cut off and the traffic
+scale), `94-viewport-live-drag-*`, `95-first-run-offer-*`, `96-project-settings-*` and
+`97-inspector-m-*` / `98-inspector-ft-in-*` (a batten, fly bar list and status bar in m
+and ft-in). kittest's 8 pt margin is cut off and the traffic
 lights are painted where AppKit puts them (`chrome::traffic_light_centres`). The overview shots (`53-craft-3d` too) hide the `ceiling` tag, which would cover the house. With
 `testdata/private/vectorworks/sample_show.mvr` present it also renders that
 import in plan and 3D (`26-mvr-*`, `27-mvr-*`).

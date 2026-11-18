@@ -237,7 +237,7 @@ fn screenshots() {
         h.run();
         h.hover_at(b);
         h.run();
-        h.event(Event::Text("4.5".into()));
+        h.event(Event::Text("4.5m".into()));
         save(&mut h, &dir, &format!("3-drawing-{tn}"));
         h.key_press(Key::Escape);
         h.key_press(Key::Escape);
@@ -680,7 +680,10 @@ fn hud_screens() {
         }
     };
     for (theme, tn) in [(ThemePref::Light, "light"), (ThemePref::Dark, "dark")] {
-        let mut h = harness_with(theme, stagecraft_core::Engine::new());
+        // A metre project: plain numbers are metres.
+        let mut e = stagecraft_core::Engine::new();
+        e.execute("doc.set_units", json!({ "length_unit": "m" })).unwrap();
+        let mut h = harness_with(theme, e);
         h.state_mut().run("ui.zoom", json!({ "scale": 0.06 })).unwrap();
         h.state_mut().run("ui.pan", json!({ "center": [3000, 2000] })).unwrap();
         h.state_mut().run("ui.set_tool", json!({ "tool": "wall" })).unwrap();
@@ -769,5 +772,39 @@ fn viewport_and_offer_screens() {
         let mut h = harness_with(theme, stagecraft_core::Engine::new());
         h.state_mut().offer_tutorial();
         save(&mut h, &dir, &format!("95-first-run-offer-{tn}"));
+    }
+}
+
+/// Project Settings over the demo (`96-project-settings-*`), and the demo in a metre
+/// project: a batten in the Inspector, the fly bar list and the status bar in m
+/// (`97-inspector-m-*`), and feet and inches (`98-inspector-ft-in-*`).
+#[test]
+fn project_unit_screens() {
+    let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") else { return };
+    std::fs::create_dir_all(&dir).expect("screenshot dir");
+    for (theme, tn) in [(ThemePref::Light, "light"), (ThemePref::Dark, "dark")] {
+        let mut h = harness(theme);
+        h.state_mut().run("ui.project_settings", json!({ "open": true })).unwrap();
+        for _ in 0..3 {
+            h.run();
+        }
+        save(&mut h, &dir, &format!("96-project-settings-{tn}"));
+
+        for (unit, name) in [("m", "97-inspector-m"), ("ft_in", "98-inspector-ft-in")] {
+            let mut h = harness(theme);
+            h.state_mut().run("doc.set_units", json!({ "length_unit": unit })).unwrap();
+            let doc = h.state().engine.doc().clone();
+            let batten = doc.objects.values().find(|o| o.kind.type_name() == "batten").unwrap().id;
+            h.state_mut().run("selection.set", json!({ "ids": [batten] })).unwrap();
+            h.state_mut().ui.table.kind = Some("batten".into());
+            h.state_mut().run("ui.set_tool", json!({ "tool": "batten" })).unwrap();
+            h.run();
+            let pos = h.state().ui.camera.to_screen([1250.0, 3500.0]);
+            h.hover_at(pos);
+            for _ in 0..3 {
+                h.run();
+            }
+            save(&mut h, &dir, &format!("{name}-{tn}"));
+        }
     }
 }

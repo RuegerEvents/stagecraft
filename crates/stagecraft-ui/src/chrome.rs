@@ -343,7 +343,7 @@ pub fn status_bar(ui: &mut Ui, s: &mut Studio) {
             }
             let grid = s.ui.snap.grid.map_or_else(
                 || t("status.grid_off").to_owned(),
-                |g| tf("status.grid", &[("mm", &crate::panels::fmt_mm(g))]),
+                |g| tf("status.grid", &[("size", &crate::lengths::of(s).field_with_unit(g))]),
             );
             ui.label(egui::RichText::new(grid).color(c.text2));
             ui.add_space(8.0);
@@ -351,11 +351,16 @@ pub fn status_bar(ui: &mut Ui, s: &mut Studio) {
                 if let Some(cur) = s.ui.gesture.cursor
                     && s.ui.view != View::Sheets
                 {
-                    let f = |v: f64| crate::panels::fmt_mm(v);
+                    let u = crate::lengths::of(s);
+                    let unit = if u.unit == stagecraft_core::units::LengthUnit::FtIn { "" } else { u.label() };
                     ui.label(
-                        egui::RichText::new(format!("X {}   Y {}", f(cur.point[0]), f(cur.point[1])))
-                            .font(theme::proportional(theme::BODY))
-                            .color(c.text),
+                        egui::RichText::new(format!(
+                            "X {}   Y {} {unit}",
+                            u.fixed(cur.point[0]),
+                            u.fixed(cur.point[1])
+                        ))
+                        .font(theme::proportional(theme::BODY))
+                        .color(c.text),
                     );
                     ui.label(egui::RichText::new(t(crate::panels::snap_key(cur.kind))).color(c.text2));
                 }

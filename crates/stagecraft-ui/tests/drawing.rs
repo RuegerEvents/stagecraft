@@ -1,6 +1,8 @@
 //! Typed dimensions while drawing, through real key events: the heads-up length and
 //! angle boxes next to the rubber band, typing on every segment (also after a click),
-//! Shift squaring with a typed length, Tab, Esc, and the other length tools.
+//! Shift squaring with a typed length, Tab, Esc, and the other length tools. Most run
+//! in a metre project (`harness`); plain numbers follow the project unit, so the mm and
+//! ft-in tests type the same keys and get other lengths.
 
 use egui::{Event, Key, Modifiers, PointerButton, vec2};
 use egui_kittest::Harness;
@@ -10,7 +12,16 @@ use stagecraft_core::model::P2;
 use stagecraft_core::{Engine, ObjectKind};
 use stagecraft_ui::Studio;
 
+/// A project in metres.
 fn harness(engine: Engine) -> Harness<'static, Studio> {
+    let mut h = harness_in(engine, "mm");
+    run(&mut h, "doc.set_units", json!({ "length_unit": "m" }));
+    h
+}
+
+fn harness_in(engine: Engine, unit: &str) -> Harness<'static, Studio> {
+    let mut engine = engine;
+    engine.execute("doc.set_units", json!({ "length_unit": unit })).unwrap();
     let mut h = Harness::builder()
         .with_max_steps(8)
         .with_size(vec2(1400.0, 900.0))
@@ -246,7 +257,7 @@ fn truss_move_and_rotate_take_typed_values() {
     h.run();
     click(&mut h, [0.0, 0.0], Modifiers::NONE);
     hover(&mut h, [1000.0, 0.0]);
-    assert!(has(&h, "Length: 1.00 m"), "the truss tool shows the boxes");
+    assert!(has(&h, "Length: 1.000 m"), "the truss tool shows the boxes");
     keys(&mut h, "6");
     click(&mut h, [1000.0, 0.0], Modifiers::NONE);
     let truss = h.state().engine.doc().objects.values().find(|o| o.kind.type_name() == "truss").cloned().unwrap();
@@ -272,4 +283,43 @@ fn truss_move_and_rotate_take_typed_values() {
     press(&mut h, Key::Enter);
     let rot = h.state().engine.doc().objects[&truss.id].placement.rotation[2];
     assert!((rot - 90.0).abs() < 1e-6, "{rot}");
+}
+
+#[test]
+fn plain_numbers_are_millimetres_in_a_mm_project() {
+    // New documents are mm: "1500" is 1.5 m (it used to be 1500 m).
+    let mut h = harness_in(Engine::new(), "mm");
+    wall_tool(&mut h);
+    click(&mut h, [0.0, 0.0], Modifiers::NONE);
+    hover(&mut h, [3000.0, 0.0]);
+    assert!(has(&h, "Length: 3000 mm"), "live length in mm");
+    assert!(has(&h, "type a length (mm)"), "the prompt names the unit");
+    keys(&mut h, "1500");
+    assert!(has(&h, "Length: 1500 mm (locked, typing)"));
+    press(&mut h, Key::Enter);
+    assert!(near(points(&h)[1], [1500.0, 0.0]), "{:?}", points(&h));
+    // An explicit unit wins.
+    hover(&mut h, [1500.0, 3000.0]);
+    keys(&mut h, "2,5m");
+    press(&mut h, Key::Enter);
+    assert!(near(points(&h)[2], [1500.0, 2500.0]), "{:?}", points(&h));
+}
+
+#[test]
+fn feet_and_inches_projects_take_inches_and_marks() {
+    let mut h = harness_in(Engine::new(), "ft_in");
+    run(&mut h, "ui.set_snap", json!({ "grid": 0, "endpoints": false, "midpoints": false }));
+    wall_tool(&mut h);
+    click(&mut h, [0.0, 0.0], Modifiers::NONE);
+    hover(&mut h, [6155.0, 0.0]);
+    assert!(has(&h, "Length: 20' 2 5/16\""), "live length in ft-in");
+    keys(&mut h, "15' 6\"");
+    press(&mut h, Key::Enter);
+    assert!(near(points(&h)[1], [15.0 * 304.8 + 6.0 * 25.4, 0.0]), "{:?}", points(&h));
+    // A bare number is inches.
+    hover(&mut h, [4724.4, 3000.0]);
+    keys(&mut h, "6");
+    assert!(has(&h, "Length: 6\" (locked, typing)"));
+    press(&mut h, Key::Enter);
+    assert!(near(points(&h)[2], [4724.4, 6.0 * 25.4]), "{:?}", points(&h));
 }
