@@ -133,6 +133,11 @@ fn register(r: &mut UiRegistry) {
         set_options,
     );
     r.add("ui.palette", "Open or close the command palette", palette);
+    r.add(
+        "ui.file_dialog",
+        "Show a file dialog: open, save_as, export_pdf, import_gdtf, import_mvr, export_mvr, import_model",
+        file_dialog,
+    );
     r.add("ui.screenshot", "Write a PNG of the window to `path` (answered after the next frame)", screenshot);
 }
 
@@ -769,6 +774,30 @@ fn palette(c: &mut UiCtx, a: PaletteArgs) -> CmdResult {
         c.ui.palette.close();
     }
     Ok(json!({ "open": a.open }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct FileDialogArgs {
+    /// `open`, `save_as`, `export_pdf`, `import_gdtf`, `import_mvr`, `export_mvr` or
+    /// `import_model`. The dialog shows after this frame; the GUI then runs the
+    /// matching command (`mvr.import`, `model.import` …).
+    dialog: String,
+}
+
+fn file_dialog(c: &mut UiCtx, a: FileDialogArgs) -> CmdResult {
+    use crate::state::FileRequest as F;
+    let r = match a.dialog.as_str() {
+        "open" => F::Open,
+        "save_as" => F::SaveAs,
+        "export_pdf" => F::ExportPdf,
+        "import_gdtf" => F::ImportGdtf,
+        "import_mvr" => F::ImportMvr,
+        "export_mvr" => F::ExportMvr,
+        "import_model" => F::ImportModel,
+        d => return Err(CmdError::invalid_args(format!("unknown dialog `{d}`"))),
+    };
+    c.ui.file_request = Some(r);
+    Ok(json!({ "dialog": a.dialog }))
 }
 
 #[derive(Deserialize, JsonSchema)]

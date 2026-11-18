@@ -331,6 +331,49 @@ impl StageApp {
                     }
                 }
             }
+            FileRequest::ImportMvr => {
+                if let Some(path) = rfd::FileDialog::new().add_filter("MVR", &["mvr"]).pick_file()
+                    && let Ok(r) = s.run("mvr.import", json!({ "path": path }))
+                {
+                    s.ui.fit_pending = true;
+                    s.ui.view3d.fit_pending = true;
+                    let n = |k: &str| r[k].as_u64().unwrap_or(0).to_string();
+                    let warnings = r["warnings"].as_array().map_or(0, Vec::len).to_string();
+                    s.ui.info(tf(
+                        "status.mvr_imported",
+                        &[
+                            ("fixtures", &n("fixtures")),
+                            ("trusses", &n("trusses")),
+                            ("models", &n("models")),
+                            ("warnings", &warnings),
+                        ],
+                    ));
+                }
+            }
+            FileRequest::ExportMvr => {
+                let name = s
+                    .engine
+                    .path()
+                    .and_then(|p| p.file_stem())
+                    .map_or_else(|| "Untitled".to_owned(), |n| n.to_string_lossy().into_owned());
+                if let Some(path) =
+                    rfd::FileDialog::new().add_filter("MVR", &["mvr"]).set_file_name(format!("{name}.mvr")).save_file()
+                    && s.run("mvr.export", json!({ "path": path })).is_ok()
+                {
+                    s.ui.info(tf("status.exported", &[("path", &path.display())]));
+                }
+            }
+            FileRequest::ImportModel => {
+                if let Some(path) =
+                    rfd::FileDialog::new().add_filter("3D model", &["glb", "gltf", "obj", "3ds"]).pick_file()
+                {
+                    let mut args = json!({ "path": path });
+                    args["layer"] = s.active_layer_arg();
+                    if s.run("model.import", args).is_ok() {
+                        s.ui.view3d.fit_pending = true;
+                    }
+                }
+            }
             FileRequest::Logo => {
                 if let Some(path) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() {
                     let _ = s.run("doc.set_meta", json!({ "logo_file": path }));

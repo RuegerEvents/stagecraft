@@ -406,6 +406,12 @@ pub enum FileRequest {
     Logo,
     /// Import `.gdtf` files into the library.
     ImportGdtf,
+    /// Import an `.mvr` file into the document.
+    ImportMvr,
+    /// Write the document as `.mvr`.
+    ExportMvr,
+    /// Import a 3D model (`.glb`, `.gltf`, `.obj`, `.3ds`).
+    ImportModel,
 }
 
 impl Default for UiState {

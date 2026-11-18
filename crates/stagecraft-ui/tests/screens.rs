@@ -21,7 +21,11 @@ fn renderer() -> (egui_kittest::wgpu::WgpuTestRenderer, stagecraft_ui::view3d::o
 }
 
 fn harness(theme: ThemePref) -> Harness<'static, Studio> {
-    let mut studio = Studio::new(stagecraft_ui::demo::engine());
+    harness_with(theme, stagecraft_ui::demo::engine())
+}
+
+fn harness_with(theme: ThemePref, engine: stagecraft_core::Engine) -> Harness<'static, Studio> {
+    let mut studio = Studio::new(engine);
     studio.ui.theme = theme;
     let (renderer, off) = renderer();
     studio.offscreen = Some(off);
@@ -297,4 +301,26 @@ fn gdtf_shots(h: &mut Harness<'static, Studio>, dir: &str, tn: &str) {
         save(h, dir, &format!("25-private-plan-{tn}"));
     }
     run(h, "ui.set_tag_visible", json!({ "tag": "masking", "visible": true }));
+}
+
+/// A real Vectorworks MVR (client data, git-ignored) imported and shown in plan and
+/// 3D. Skips without the file.
+#[test]
+fn imported_mvr() {
+    let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") else { return };
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/private/vectorworks/sample_show.mvr");
+    if !path.exists() {
+        return;
+    }
+    std::fs::create_dir_all(&dir).expect("screenshot dir");
+    let mut e = stagecraft_core::Engine::new();
+    e.execute("mvr.import", json!({ "path": path })).expect("import");
+    let mut h = harness_with(ThemePref::Light, e);
+    h.state_mut().run("ui.set_view", json!({ "view": "plan" })).unwrap();
+    h.state_mut().run("ui.zoom_to_fit", json!({})).unwrap();
+    save(&mut h, &dir, "26-mvr-plan-light");
+    h.state_mut().run("ui.set_view", json!({ "view": "3d" })).unwrap();
+    h.state_mut().run("ui.camera", json!({ "view": "iso" })).unwrap();
+    save(&mut h, &dir, "27-mvr-3d-light");
 }

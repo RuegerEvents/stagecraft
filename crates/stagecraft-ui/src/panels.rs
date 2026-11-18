@@ -41,6 +41,16 @@ pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
                 save(s, true);
             }
             ui.separator();
+            if ui.button(t("menu.import_mvr")).clicked() {
+                s.ui.file_request = Some(FileRequest::ImportMvr);
+            }
+            if ui.button(t("menu.import_model")).clicked() {
+                s.ui.file_request = Some(FileRequest::ImportModel);
+            }
+            if ui.button(t("menu.export_mvr")).clicked() {
+                s.ui.file_request = Some(FileRequest::ExportMvr);
+            }
+            ui.separator();
             if ui.add_enabled(!s.engine.doc().sheets.is_empty(), egui::Button::new(t("menu.export_pdf"))).clicked() {
                 s.ui.file_request = Some(FileRequest::ExportPdf);
             }

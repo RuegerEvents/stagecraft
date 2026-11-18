@@ -161,6 +161,8 @@ fn local_plan(doc: &Document, obj: &Object) -> Lines {
             pts
         })
         .collect();
+    let mut lines = lines;
+    lines.extend(edge_on(&m));
     let lines = Arc::new(lines);
     if let Ok(mut c) = cache().lock() {
         if c.plans.len() > MAX_ENTRIES {
@@ -169,6 +171,40 @@ fn local_plan(doc: &Document, obj: &Object) -> Lines {
         c.plans.insert(key, lines.clone());
     }
     lines
+}
+
+/// Faces seen edge-on from above (vertical sheets: walls modelled as single quads,
+/// flats) are invisible to the hidden-line top view; each becomes the segment it
+/// projects to. Duplicates (both sides of a sheet, two triangles of a quad) once.
+fn edge_on(m: &Mesh) -> Vec<Vec<P2>> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for t in m.indices.chunks_exact(3) {
+        let [a, b, c] = [0, 1, 2].map(|i| Vec3::from_array(m.positions[t[i] as usize]).as_dvec3());
+        let n = (b - a).cross(c - a);
+        let len = n.length();
+        if len < 1e-9 || (n.z / len).abs() > 1e-3 {
+            continue;
+        }
+        // The two projected points furthest apart.
+        let pts = [a, b, c].map(|p| glam::DVec2::new(p.x, p.y));
+        let (mut i, mut j, mut best) = (0, 1, -1.0);
+        for (p, q) in [(0, 1), (1, 2), (0, 2)] {
+            let d = pts[p].distance_squared(pts[q]);
+            if d > best {
+                (i, j, best) = (p, q, d);
+            }
+        }
+        if best < 1.0 {
+            continue;
+        }
+        let (p, q) = if (pts[i].x, pts[i].y) <= (pts[j].x, pts[j].y) { (pts[i], pts[j]) } else { (pts[j], pts[i]) };
+        let key = [p.x, p.y, q.x, q.y].map(|v| (v * 10.0).round() as i64);
+        if seen.insert(key) {
+            out.push(vec![[p.x, p.y], [q.x, q.y]]);
+        }
+    }
+    out
 }
 
 fn outline(doc: &Document, obj: &Object) -> Arc<Vec<Vec<Vec3>>> {
