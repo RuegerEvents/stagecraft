@@ -199,6 +199,14 @@ fn fill_rings(painter: &Painter, cam: &PaperCam, rings: &[Vec<P2>], fill: Color3
 
 /// A texture for a sheet image (rendered 3D view, logo), cached by the identity of
 /// its bytes, which stay shared while the image is unchanged.
+/// The image as RGBA, scaled down to fit a texture side of `max` pixels.
+pub fn fit_texture(d: image::DynamicImage, max: u32) -> image::RgbaImage {
+    if d.width() <= max && d.height() <= max {
+        return d.to_rgba8();
+    }
+    d.resize(max, max, image::imageops::FilterType::Triangle).to_rgba8()
+}
+
 pub(crate) fn texture(ctx: &egui::Context, data: &ImageData) -> Option<egui::TextureHandle> {
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -223,7 +231,7 @@ pub(crate) fn texture(ctx: &egui::Context, data: &ImageData) -> Option<egui::Tex
             egui::ColorImage::from_rgba_unmultiplied([*width as usize, *height as usize], pixels)
         }
         ImageData::Encoded(bytes) => {
-            let d = image::load_from_memory(bytes).ok()?.to_rgba8();
+            let d = fit_texture(image::load_from_memory(bytes).ok()?, ctx.input(|i| i.max_texture_side) as u32);
             egui::ColorImage::from_rgba_unmultiplied([d.width() as usize, d.height() as usize], d.as_raw())
         }
     };

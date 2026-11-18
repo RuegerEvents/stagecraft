@@ -152,6 +152,18 @@ pub fn interact(ui: &mut Ui, resp: &Response, s: &mut Studio, ids: &[Id], style:
                 create_curtain(s, ids, a, p, tol);
             }
         }
+        Tool::Calibrate => {
+            if s.ui.gesture.points.is_empty() && calibration_target(s, ids, p).is_none() {
+                s.ui.error(t("status.no_underlay"));
+                return;
+            }
+            if s.ui.gesture.points.len() < 2 {
+                s.ui.gesture.points.push(p);
+            }
+            if s.ui.gesture.points.len() == 2 {
+                s.ui.info(t("status.calibrate_type"));
+            }
+        }
         Tool::Batten | Tool::Proscenium | Tool::Wings | Tool::Platform | Tool::Support | Tool::Hoist => {
             place_stage(s, ids, raw, p, tol);
         }
@@ -406,6 +418,15 @@ fn enter(s: &mut Studio) {
     };
     let Some(&last) = g.points.last() else { return };
     let towards = g.cursor.map(|c| c.point);
+    if s.ui.tool == Tool::Calibrate {
+        let pts = g.points.clone();
+        match (pts.as_slice(), parse_length(&dim.length).filter(|l| *l > 0.0)) {
+            ([a, b], Some(len)) => commit_calibrate(s, *a, *b, len),
+            ([_, _], None) => s.ui.error(tf("status.bad_length", &[("text", &dim.length)])),
+            _ => s.ui.error(t("status.calibrate_second")),
+        }
+        return;
+    }
     if s.ui.tool == Tool::Rotate {
         // After the pivot, the typed number is the angle.
         let text = if dim.length.trim().is_empty() { &dim.angle } else { &dim.length };
@@ -436,6 +457,36 @@ fn enter(s: &mut Studio) {
         }
         Tool::Move => commit_move(s, math::sub(p, last)),
         _ => {}
+    }
+}
+
+/// The underlay a calibration applies to: the one selected underlay, else the topmost
+/// unlocked underlay under `p`.
+fn calibration_target(s: &Studio, ids: &[Id], p: P2) -> Option<Id> {
+    let doc = s.engine.doc();
+    let is_underlay =
+        |id: &Id| matches!(doc.objects.get(id).map(|o| &o.kind), Some(ObjectKind::Underlay { locked: false, .. }));
+    let sel: Vec<Id> = s.engine.selection().iter().copied().filter(is_underlay).collect();
+    if sel.len() == 1 {
+        return Some(sel[0]);
+    }
+    let style = PlanStyle::default();
+    ids.iter()
+        .rev()
+        .copied()
+        .filter(is_underlay)
+        .find(|id| stagecraft_geom::pick::distance(&stagecraft_geom::plan(doc, &doc.objects[id], &style), p) <= 0.0)
+}
+
+fn commit_calibrate(s: &mut Studio, a: P2, b: P2, len: f64) {
+    s.ui.gesture = Gesture::default();
+    let ids = crate::canvas::visible_ids(s.engine.doc(), &s.ui);
+    let Some(id) = calibration_target(s, &ids, a) else {
+        s.ui.error(t("status.no_underlay"));
+        return;
+    };
+    if s.run("underlay.calibrate", json!({ "id": id, "p1": a, "p2": b, "distance_mm": len })).is_ok() {
+        let _ = s.run("selection.set", json!({ "ids": [id] }));
     }
 }
 
@@ -887,6 +938,14 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
                 ghosts(ghost(ObjectKind::Truss { length: len, profile: o.truss_profile.clone() }, placement, style));
             }
             length_label(p, cam, pal, a, c);
+        }
+        (Tool::Calibrate, Some(c)) if !pts.is_empty() => {
+            let b = pts.get(1).copied().unwrap_or(c);
+            p.line_segment([cam.to_screen(pts[0]), cam.to_screen(b)], Stroke::new(1.5, pal.preview));
+            for q in [pts[0], b] {
+                p.circle_stroke(cam.to_screen(q), 4.0, thin);
+            }
+            length_label(p, cam, pal, pts[0], b);
         }
         (Tool::Move, Some(c)) if !pts.is_empty() => {
             let d = math::sub(c, pts[0]);

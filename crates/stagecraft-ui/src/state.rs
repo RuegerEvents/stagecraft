@@ -25,6 +25,8 @@ pub enum Tool {
     Wall,
     /// Dimensions between points: driving in a sketch, reference between objects.
     Dimension,
+    /// Two points on an underlay and their real distance: scales the underlay.
+    Calibrate,
     Truss,
     Fixture,
     /// A run of truss along clicked points, corners at the bends.
@@ -42,8 +44,17 @@ pub enum Tool {
 
 impl Tool {
     /// Drawing tools, then stage objects (the toolbar's two groups).
-    pub const DRAW: [Tool; 8] =
-        [Tool::Select, Tool::Move, Tool::Rotate, Tool::Floor, Tool::Wall, Tool::Dimension, Tool::Truss, Tool::Fixture];
+    pub const DRAW: [Tool; 9] = [
+        Tool::Select,
+        Tool::Move,
+        Tool::Rotate,
+        Tool::Floor,
+        Tool::Wall,
+        Tool::Dimension,
+        Tool::Calibrate,
+        Tool::Truss,
+        Tool::Fixture,
+    ];
     pub const STAGE: [Tool; 9] = [
         Tool::Run,
         Tool::Batten,
@@ -55,13 +66,14 @@ impl Tool {
         Tool::Hoist,
         Tool::Ceiling,
     ];
-    pub const ALL: [Tool; 17] = [
+    pub const ALL: [Tool; 18] = [
         Tool::Select,
         Tool::Move,
         Tool::Rotate,
         Tool::Floor,
         Tool::Wall,
         Tool::Dimension,
+        Tool::Calibrate,
         Tool::Truss,
         Tool::Fixture,
         Tool::Run,
@@ -84,6 +96,7 @@ impl Tool {
             Tool::Floor => "tool.floor",
             Tool::Wall => "tool.wall",
             Tool::Dimension => "tool.dimension",
+            Tool::Calibrate => "tool.calibrate",
             Tool::Truss => "tool.truss",
             Tool::Fixture => "tool.fixture",
             Tool::Run => "tool.run",
@@ -108,6 +121,7 @@ impl Tool {
             Tool::Floor => Key::F,
             Tool::Wall => Key::W,
             Tool::Dimension => Key::D,
+            Tool::Calibrate => Key::K,
             Tool::Truss => Key::T,
             Tool::Fixture => Key::L,
             Tool::Run => Key::U,
@@ -125,6 +139,7 @@ impl Tool {
             self,
             Tool::Move
                 | Tool::Rotate
+                | Tool::Calibrate
                 | Tool::Floor
                 | Tool::Wall
                 | Tool::Truss
@@ -437,6 +452,8 @@ pub enum FileRequest {
     ExportMvr,
     /// Import a 3D model (`.glb`, `.gltf`, `.obj`, `.3ds`).
     ImportModel,
+    /// An image, PDF, SVG or DXF under the plan.
+    ImportUnderlay,
 }
 
 impl Default for UiState {

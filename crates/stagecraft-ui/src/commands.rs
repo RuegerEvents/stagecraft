@@ -87,7 +87,11 @@ pub const UI_KIND: &str = "ui";
 
 fn register(r: &mut UiRegistry) {
     r.add("ui.state", "Tool, view, camera, theme, panels, hidden tags, selection and status", state);
-    r.add("ui.set_tool", "Pick the active tool (select, move, rotate, floor, wall, truss, fixture)", set_tool);
+    r.add(
+        "ui.set_tool",
+        "Pick the active tool (select, move, rotate, floor, wall, dimension, calibrate, truss, fixture, …)",
+        set_tool,
+    );
     r.add("ui.set_view", "Show the plan, the 3D view, both side by side (split), or the sheets", set_view);
     r.add(
         "ui.sheet",
@@ -145,7 +149,7 @@ fn register(r: &mut UiRegistry) {
     r.add("ui.palette", "Open or close the command palette", palette);
     r.add(
         "ui.file_dialog",
-        "Show a file dialog: open, save_as, export_pdf, import_gdtf, import_mvr, export_mvr, import_model",
+        "Show a file dialog: open, save_as, export_pdf, import_gdtf, import_mvr, export_mvr, import_model, import_underlay",
         file_dialog,
     );
     r.add("ui.screenshot", "Write a PNG of the window to `path` (answered after the next frame)", screenshot);
@@ -889,8 +893,8 @@ fn palette(c: &mut UiCtx, a: PaletteArgs) -> CmdResult {
 
 #[derive(Deserialize, JsonSchema)]
 struct FileDialogArgs {
-    /// `open`, `save_as`, `export_pdf`, `import_gdtf`, `import_mvr`, `export_mvr` or
-    /// `import_model`. The dialog shows after this frame; the GUI then runs the
+    /// `open`, `save_as`, `export_pdf`, `import_gdtf`, `import_mvr`, `export_mvr`,
+    /// `import_model` or `import_underlay`. The dialog shows after this frame; the GUI then runs the
     /// matching command (`mvr.import`, `model.import` …).
     dialog: String,
 }
@@ -905,6 +909,7 @@ fn file_dialog(c: &mut UiCtx, a: FileDialogArgs) -> CmdResult {
         "import_mvr" => F::ImportMvr,
         "export_mvr" => F::ExportMvr,
         "import_model" => F::ImportModel,
+        "import_underlay" => F::ImportUnderlay,
         d => return Err(CmdError::invalid_args(format!("unknown dialog `{d}`"))),
     };
     c.ui.file_request = Some(r);

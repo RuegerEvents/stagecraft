@@ -382,6 +382,19 @@ impl StageApp {
                     }
                 }
             }
+            FileRequest::ImportUnderlay => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Drawing", &["png", "jpg", "jpeg", "pdf", "svg", "dxf"])
+                    .pick_file()
+                    && let Ok(r) = s.run("underlay.import", json!({ "path": path }))
+                {
+                    s.ui.fit_pending = true;
+                    if let Ok(id) = serde_json::from_value::<stagecraft_core::Id>(r["id"].clone()) {
+                        let _ = s.run("selection.set", json!({ "ids": [id] }));
+                    }
+                    s.ui.info(t("status.underlay_imported"));
+                }
+            }
             FileRequest::Logo => {
                 if let Some(path) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() {
                     let _ = s.run("doc.set_meta", json!({ "logo_file": path }));

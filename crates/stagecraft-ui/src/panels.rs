@@ -47,6 +47,9 @@ pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
             if ui.button(t("menu.import_model")).clicked() {
                 s.ui.file_request = Some(FileRequest::ImportModel);
             }
+            if ui.button(t("menu.import_underlay")).clicked() {
+                s.ui.file_request = Some(FileRequest::ImportUnderlay);
+            }
             if ui.button(t("menu.export_mvr")).clicked() {
                 s.ui.file_request = Some(FileRequest::ExportMvr);
             }
@@ -125,11 +128,17 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
     ui.horizontal(|ui| {
         let groups: Vec<&[Tool]> =
             if s.ui.view == View::Sheets { Vec::new() } else { vec![&Tool::DRAW[..], &Tool::STAGE[..]] };
+        // Calibrate only matters with an underlay in the document.
+        let underlays = s.engine.doc().objects.values().any(|o| o.kind.type_name() == "underlay");
+        ui.spacing_mut().item_spacing.x = 5.0;
         for (i, group) in groups.into_iter().enumerate() {
             if i > 0 {
                 ui.separator();
             }
             for &tool in group {
+                if tool == Tool::Calibrate && !underlays && s.ui.tool != Tool::Calibrate {
+                    continue;
+                }
                 let label = t(tool.key());
                 let r = ui.selectable_label(s.ui.tool == tool, label);
                 widgets::name(&r, WidgetType::Button, tf("a11y.tool", &[("tool", &label)]));
@@ -254,7 +263,10 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
         Tool::Ceiling => mm_option(ui, s, "option.height", "ceiling_height", o.ceiling_height),
         _ => {}
     }
-    if !matches!(s.ui.tool, Tool::Select | Tool::Move | Tool::Rotate | Tool::Floor | Tool::Fixture | Tool::Dimension) {
+    if !matches!(
+        s.ui.tool,
+        Tool::Select | Tool::Move | Tool::Rotate | Tool::Floor | Tool::Fixture | Tool::Dimension | Tool::Calibrate
+    ) {
         ui.separator();
     }
     ui.label(RichText::new(t(hint_key(s.ui.tool))).weak());
@@ -279,6 +291,7 @@ fn hint_key(tool: Tool) -> &'static str {
         Tool::Floor => "hint.floor",
         Tool::Wall => "hint.wall",
         Tool::Dimension => "hint.dimension",
+        Tool::Calibrate => "hint.calibrate",
         Tool::Truss => "hint.truss",
         Tool::Fixture => "hint.fixture",
         Tool::Run => "hint.run",

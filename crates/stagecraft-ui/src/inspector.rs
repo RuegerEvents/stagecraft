@@ -775,6 +775,72 @@ pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Objec
             let show = all_bool(&f!(ObjectKind::Ceiling { show_in_plan, .. } => *show_in_plan));
             flag(ui, s, sel, "inspector.show_in_plan", show, c, "show_in_plan");
         }
+        "underlay" => {
+            let c = "underlay.update";
+            let op = common(objs.iter().map(|o| match &o.kind {
+                ObjectKind::Underlay { opacity, .. } => format!("{:.0}", opacity * 100.0),
+                _ => String::new(),
+            }));
+            if let Some(v) = field(ui, "inspector.opacity", "ul_op", op) {
+                match v.trim().trim_end_matches('%').trim().replace(',', ".").parse::<f64>() {
+                    Ok(x) if (0.0..=100.0).contains(&x) => {
+                        batch(s, sel.iter().map(|id| step(c, json!({ "id": id, "opacity": x / 100.0 }))).collect())
+                    }
+                    _ => s.ui.error(tf("status.bad_number", &[("text", &v)])),
+                }
+            }
+            let locked = all_bool(&f!(ObjectKind::Underlay { locked, .. } => *locked));
+            flag(ui, s, sel, "inspector.locked", locked, c, "locked");
+            let visible = common(objs.iter().map(|o| !o.style.hidden));
+            flag(ui, s, sel, "inspector.visible", visible, c, "visible");
+            if let [o] = objs
+                && let ObjectKind::Underlay { format, extent: [lo, hi], scale, .. } = &o.kind
+            {
+                let size =
+                    format!("{:.2} × {:.2} m", (hi[0] - lo[0]) * scale / 1000.0, (hi[1] - lo[1]) * scale / 1000.0);
+                ui.label(t("inspector.size"));
+                ui.label(RichText::new(format!("{} · {size}", json_str(format))).weak());
+                ui.end_row();
+            }
+            ui.label("");
+            let unlocked = all_bool(&f!(ObjectKind::Underlay { locked, .. } => *locked)) != Some(true);
+            if ui.add_enabled(unlocked, egui::Button::new(t("inspector.calibrate"))).clicked() {
+                s.ui.set_tool(crate::state::Tool::Calibrate);
+            }
+            ui.end_row();
+        }
+        "note" => {
+            let c = "note.update";
+            let text = all_str(&f!(ObjectKind::Note { text, .. } => text.replace('\n', " / ")));
+            if let Some(v) = field(ui, "inspector.text", "note_text", text) {
+                let v = v.replace(" / ", "\n");
+                batch(s, sel.iter().map(|id| step(c, json!({ "id": id, "text": v }))).collect());
+            }
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.text_height",
+                "note_h",
+                f!(ObjectKind::Note { height, .. } => *height),
+                c,
+                "height",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.wrap_width",
+                "note_w",
+                f!(ObjectKind::Note { width, .. } => *width),
+                c,
+                "width",
+            );
+            let frame = all_bool(&f!(ObjectKind::Note { frame, .. } => *frame));
+            flag(ui, s, sel, "inspector.frame", frame, c, "frame");
+        }
         "truss_node" | "truss_run" | "wing_set" => {
             if let [o] = objs {
                 let info = match &o.kind {

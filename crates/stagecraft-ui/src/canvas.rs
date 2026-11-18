@@ -255,33 +255,33 @@ fn draw_grid(p: &Painter, cam: &Camera, pal: &Palette) {
 pub fn draw_images(p: &Painter, cam: &Camera, doc: &Document, prims: &[PlanPrim]) {
     for prim in prims {
         let PlanPrim::Image { corners, asset, opacity } = prim else { continue };
-        let Some(a) = doc.assets.get(asset) else { continue };
-        let data = stagecraft_sheet::ImageData::Encoded(std::sync::Arc::new(a.data.as_slice().to_vec()));
-        let Some(t) = image_texture(p.ctx(), asset, &data) else { continue };
+        let Some(t) = image_texture(p.ctx(), asset, doc) else { continue };
         crate::sheets::image_quad(p, t.id(), corners.map(|c| cam.to_screen(c)), *opacity as f32);
     }
 }
 
-/// Underlay textures by asset hash (decoding a 4k PNG takes a while; do it once).
-fn image_texture(ctx: &egui::Context, hash: &str, data: &stagecraft_sheet::ImageData) -> Option<egui::TextureHandle> {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-    static CACHE: Mutex<Option<HashMap<String, Option<egui::TextureHandle>>>> = Mutex::new(None);
-    let mut guard = CACHE.lock().ok()?;
-    let cache = guard.get_or_insert_with(HashMap::new);
-    if let Some(t) = cache.get(hash) {
-        return t.clone();
+/// Underlay textures by asset hash (decoding a 4k PNG takes a while; do it once), kept
+/// in the context's memory: a texture belongs to one egui context.
+fn image_texture(ctx: &egui::Context, hash: &str, doc: &Document) -> Option<egui::TextureHandle> {
+    type Cache = std::collections::HashMap<String, Option<egui::TextureHandle>>;
+    let key = egui::Id::new("underlay_textures");
+    if let Some(t) = ctx.data(|d| d.get_temp::<Cache>(key).and_then(|c| c.get(hash).cloned())) {
+        return t;
     }
-    let stagecraft_sheet::ImageData::Encoded(bytes) = data else { return None };
-    let t = image::load_from_memory(bytes).ok().map(|d| {
-        let d = d.to_rgba8();
+    let bytes = doc.assets.get(hash)?.data.clone();
+    let max = ctx.input(|i| i.max_texture_side) as u32;
+    let t = image::load_from_memory(bytes.as_slice()).ok().map(|d| {
+        let d = crate::sheets::fit_texture(d, max);
         let img = egui::ColorImage::from_rgba_unmultiplied([d.width() as usize, d.height() as usize], d.as_raw());
         ctx.load_texture(format!("underlay-{hash}"), img, egui::TextureOptions::LINEAR)
     });
-    if cache.len() > 16 {
-        cache.clear();
-    }
-    cache.insert(hash.to_owned(), t.clone());
+    ctx.data_mut(|d| {
+        let c = d.get_temp_mut_or_default::<Cache>(key);
+        if c.len() > 16 {
+            c.clear();
+        }
+        c.insert(hash.to_owned(), t.clone());
+    });
     t
 }
 
