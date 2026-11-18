@@ -62,6 +62,22 @@ struct Preview {
     doc: Document,
 }
 
+/// A picked sketch point or line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SketchItem {
+    Point(PointId),
+    Edge(sk::EdgeId),
+}
+
+impl SketchItem {
+    pub fn item_ref(self) -> sk::ItemRef {
+        match self {
+            SketchItem::Point(p) => sk::ItemRef::Point(p),
+            SketchItem::Edge(e) => sk::ItemRef::Edge(e),
+        }
+    }
+}
+
 /// Sketch view state.
 pub struct SketchUi {
     /// Draw sketch lines, points and dimensions over the plan.
@@ -73,6 +89,10 @@ pub struct SketchUi {
     /// The dimension selected in the plan (shown in the inspector).
     pub selected: Option<DimSource>,
     pub editing: Option<DimEdit>,
+    /// Sketch points and lines picked in the plan (one layer), in pick order: the
+    /// inspector's constraint buttons work on them, Delete removes them.
+    pub picked: Vec<SketchItem>,
+    pub picked_layer: Option<Id>,
     cache: HashMap<Id, (Sketch, Option<Status>)>,
     preview: Option<Preview>,
 }
@@ -85,6 +105,8 @@ impl Default for SketchUi {
             dimensions: true,
             selected: None,
             editing: None,
+            picked: Vec::new(),
+            picked_layer: None,
             cache: HashMap::new(),
             preview: None,
         }
@@ -191,6 +213,249 @@ pub fn point_at(doc: &Document, p: P2, tol: f64) -> Option<(Id, PointId, P2)> {
     best.map(|b| (b.0, b.1, b.2))
 }
 
+/// The sketch line (or arc) near `p` (world mm) on a visible layer.
+pub fn line_at(doc: &Document, p: P2, tol: f64) -> Option<(Id, sk::EdgeId)> {
+    let mut best: Option<(Id, sk::EdgeId, f64)> = None;
+    for l in visible_layers(doc) {
+        let Some(s) = doc.sketches.get(&l) else { continue };
+        for e in &s.edges {
+            let Some((pts, _)) = sk::chain(s, &[e.id]) else { continue };
+            let d = stagecraft_geom::math::polyline_distance(&pts, false, p);
+            if d <= tol && best.is_none_or(|b| d < b.2) {
+                best = Some((l, e.id, d));
+            }
+        }
+    }
+    best.map(|b| (b.0, b.1))
+}
+
+/// A click in the plan with the select tool: picks the sketch point, else the sketch
+/// line under it (Shift adds or removes). Returns false if there is none, so the
+/// click selects objects instead. Lines are picked only close to them (`tol` / 2),
+/// so walls stay clickable on their faces.
+pub fn click_pick(s: &mut Studio, p: P2, tol: f64, shift: bool) -> bool {
+    if !s.ui.sketch.show {
+        return false;
+    }
+    let doc = s.engine.doc();
+    let hit = match point_at(doc, p, tol) {
+        Some((l, pt, _)) => (l, SketchItem::Point(pt)),
+        None => match line_at(doc, p, tol / 2.0) {
+            Some((l, e)) => (l, SketchItem::Edge(e)),
+            None => return false,
+        },
+    };
+    let sui = &mut s.ui.sketch;
+    if !shift || sui.picked_layer != Some(hit.0) {
+        sui.picked.clear();
+    }
+    sui.picked_layer = Some(hit.0);
+    if let Some(i) = sui.picked.iter().position(|x| *x == hit.1) {
+        sui.picked.remove(i);
+    } else {
+        sui.picked.push(hit.1);
+    }
+    sui.selected = None;
+    sui.editing = None;
+    if !s.engine.selection().is_empty() {
+        let _ = s.run("selection.clear", Value::Null);
+    }
+    true
+}
+
+/// Forget the picked sketch items.
+pub fn clear_picks(sui: &mut SketchUi) {
+    sui.picked.clear();
+    sui.picked_layer = None;
+}
+
+/// Picked items that still exist (an undo may have removed some).
+fn live_picks(doc: &Document, sui: &SketchUi) -> Option<(Id, Vec<SketchItem>)> {
+    let l = sui.picked_layer?;
+    let s = doc.sketches.get(&l)?;
+    let v: Vec<SketchItem> = sui
+        .picked
+        .iter()
+        .copied()
+        .filter(|i| match i {
+            SketchItem::Point(p) => s.point(*p).is_some(),
+            SketchItem::Edge(e) => s.edge(*e).is_some(),
+        })
+        .collect();
+    (!v.is_empty()).then_some((l, v))
+}
+
+/// Delete the picked sketch items. True if there were some.
+pub fn delete_picks(s: &mut Studio) -> bool {
+    let Some((layer, items)) = live_picks(s.engine.doc(), &s.ui.sketch) else { return false };
+    let refs: Vec<sk::ItemRef> = items.iter().map(|i| i.item_ref()).collect();
+    if s.run("sketch.remove", json!({ "layer": layer, "items": refs })).is_ok() {
+        clear_picks(&mut s.ui.sketch);
+    }
+    true
+}
+
+/// Constraints the inspector buttons add.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Relation {
+    Horizontal,
+    Vertical,
+    Parallel,
+    Perpendicular,
+    Equal,
+    Symmetric,
+    Lock,
+}
+
+impl Relation {
+    pub const ALL: [Relation; 7] = [
+        Relation::Horizontal,
+        Relation::Vertical,
+        Relation::Parallel,
+        Relation::Perpendicular,
+        Relation::Equal,
+        Relation::Symmetric,
+        Relation::Lock,
+    ];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Relation::Horizontal => "sketch.horizontal",
+            Relation::Vertical => "sketch.vertical",
+            Relation::Parallel => "sketch.parallel",
+            Relation::Perpendicular => "sketch.perpendicular",
+            Relation::Equal => "sketch.equal",
+            Relation::Symmetric => "sketch.symmetric",
+            Relation::Lock => "sketch.lock",
+        }
+    }
+}
+
+/// The constraints a relation adds to the picked items (as JSON for
+/// `sketch.add_constraint`), or `None` if it does not apply to them.
+///
+/// - horizontal / vertical: every picked line (its end points), or two points;
+/// - parallel / perpendicular: two lines; equal length: two or more lines (all equal
+///   to the first);
+/// - symmetric: two points and a line (the axis), or two lines and a line: the first
+///   two mirror each other across the last picked one, end points paired so they
+///   match best;
+/// - lock: every picked point is fixed where it is.
+pub fn relation(s: &Sketch, items: &[SketchItem], r: Relation) -> Option<Vec<Value>> {
+    let lines: Vec<(sk::EdgeId, PointId, PointId)> = items
+        .iter()
+        .filter_map(|i| match i {
+            SketchItem::Edge(e) => match s.edge(*e)?.geom {
+                sk::EdgeGeom::Line { a, b } => Some((*e, a, b)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    let points: Vec<PointId> = items
+        .iter()
+        .filter_map(|i| match i {
+            SketchItem::Point(p) => Some(*p),
+            _ => None,
+        })
+        .collect();
+    let arcs = items.len() - lines.len() - points.len();
+    let c = |ty: &str, a: Value, b: Value| json!({ "type": ty, "a": a, "b": b });
+    let out: Vec<Value> = match r {
+        Relation::Horizontal | Relation::Vertical => {
+            let ty = if r == Relation::Horizontal { "horizontal" } else { "vertical" };
+            match (lines.len(), points.len(), arcs) {
+                (n, 0, 0) if n >= 1 => lines.iter().map(|l| c(ty, json!(l.1), json!(l.2))).collect(),
+                (0, 2, 0) => vec![c(ty, json!(points[0]), json!(points[1]))],
+                _ => return None,
+            }
+        }
+        Relation::Parallel | Relation::Perpendicular => {
+            let ty = if r == Relation::Parallel { "parallel" } else { "perpendicular" };
+            match (lines.len(), points.len(), arcs) {
+                (2, 0, 0) => vec![c(ty, json!(lines[0].0), json!(lines[1].0))],
+                _ => return None,
+            }
+        }
+        Relation::Equal => match (lines.len(), points.len(), arcs) {
+            (n, 0, 0) if n >= 2 => {
+                lines[1..].iter().map(|l| c("equal_length", json!(lines[0].0), json!(l.0))).collect()
+            }
+            _ => return None,
+        },
+        Relation::Symmetric => match (lines.len(), points.len(), arcs) {
+            (1, 2, 0) => vec![json!({ "type": "symmetric", "a": points[0], "b": points[1], "axis": lines[0].0 })],
+            (3, 0, 0) => {
+                let (axis, l1, l2) = (lines[2].0, lines[0], lines[1]);
+                let pos = |p: PointId| s.pos(p);
+                // Pair the ends so mirrored points are the nearer ones across the axis.
+                let straight = pos(l1.1).distance(pos(l2.1)) + pos(l1.2).distance(pos(l2.2));
+                let crossed = pos(l1.1).distance(pos(l2.2)) + pos(l1.2).distance(pos(l2.1));
+                let pairs =
+                    if straight <= crossed { [(l1.1, l2.1), (l1.2, l2.2)] } else { [(l1.1, l2.2), (l1.2, l2.1)] };
+                pairs.iter().map(|(a, b)| json!({ "type": "symmetric", "a": a, "b": b, "axis": axis })).collect()
+            }
+            _ => return None,
+        },
+        Relation::Lock => {
+            if points.is_empty() || !lines.is_empty() || arcs > 0 {
+                return None;
+            }
+            points
+                .iter()
+                .filter(|p| locks(s, **p).is_empty())
+                .map(|p| {
+                    let at = s.pos(*p);
+                    json!({ "type": "fixed", "point": p, "at": { "x": at.x, "y": at.y } })
+                })
+                .collect()
+        }
+    };
+    (!out.is_empty()).then_some(out)
+}
+
+/// Add a relation to the picked items in one undo step.
+pub fn apply_relation(s: &mut Studio, r: Relation) {
+    let Some((layer, items)) = live_picks(s.engine.doc(), &s.ui.sketch) else { return };
+    let Some(sketch) = s.engine.doc().sketches.get(&layer) else { return };
+    let Some(cs) = relation(sketch, &items, r) else { return };
+    let steps: Vec<Value> = cs
+        .into_iter()
+        .map(|c| json!({ "command": "sketch.add_constraint", "args": { "layer": layer, "constraint": c } }))
+        .collect();
+    if s.run("batch", json!({ "commands": steps })).is_ok() {
+        s.ui.info(tf("sketch.added", &[("what", &t(r.key()))]));
+    }
+}
+
+/// Inspector rows for picked sketch items: what is picked, the constraint buttons,
+/// delete.
+fn picked_fields(ui: &mut Ui, s: &mut Studio) {
+    let Some((layer, items)) = live_picks(s.engine.doc(), &s.ui.sketch) else {
+        clear_picks(&mut s.ui.sketch);
+        return;
+    };
+    let Some(sketch) = s.engine.doc().sketches.get(&layer).cloned() else { return };
+    let n_points = items.iter().filter(|i| matches!(i, SketchItem::Point(_))).count();
+    let n_edges = items.len() - n_points;
+    ui.label(RichText::new(tf("sketch.picked", &[("points", &n_points), ("edges", &n_edges)])).strong());
+    ui.horizontal_wrapped(|ui| {
+        for r in Relation::ALL {
+            let ok = relation(&sketch, &items, r).is_some();
+            let label = t(r.key());
+            let resp = ui.add_enabled(ok, egui::Button::new(label));
+            widgets::name(&resp, egui::WidgetType::Button, format!("Sketch {label}"));
+            if resp.clicked() {
+                apply_relation(s, r);
+            }
+        }
+    });
+    if widgets::button(ui, t("sketch.delete_picked"), "Sketch delete").clicked() {
+        delete_picks(s);
+    }
+    ui.add_space(8.0);
+}
+
 /// The box around the sketches and dimensions of the visible layers (zoom to fit),
 /// with room for the dimension values.
 pub fn bounds(doc: &Document, cam: &Camera) -> stagecraft_geom::Bounds {
@@ -272,7 +537,9 @@ pub fn draw(p: &egui::Painter, cam: &Camera, pal: &Palette, doc: &Document, sui:
             let colour = state_colour(pal, colours, bad, full);
             let Some((pts, _)) = sk::chain(s, &[e.id]) else { continue };
             let sp: Vec<Pos2> = pts.iter().map(|q| cam.to_screen(*q)).collect();
-            let stroke = Stroke::new(1.4, colour);
+            let picked = sui.picked_layer == Some(l) && sui.picked.contains(&SketchItem::Edge(e.id));
+            let (colour, width) = if picked { (pal.selected, 3.0) } else { (colour, 1.4) };
+            let stroke = Stroke::new(width, colour);
             if e.construction {
                 p.extend(egui::Shape::dashed_line(&sp, Stroke::new(1.0, colour), 8.0, 4.0));
             } else {
@@ -283,7 +550,9 @@ pub fn draw(p: &egui::Painter, cam: &Camera, pal: &Palette, doc: &Document, sui:
             let bad = bad_points.contains(&q.id);
             let colour = state_colour(pal, colours, bad, full_point(q.id));
             let at = cam.to_screen(sk::p2(q.pos));
-            p.circle_filled(at, 2.6, colour);
+            let picked = sui.picked_layer == Some(l) && sui.picked.contains(&SketchItem::Point(q.id));
+            let colour = if picked { pal.selected } else { colour };
+            p.circle_filled(at, if picked { 4.5 } else { 2.6 }, colour);
             if !locks(s, q.id).is_empty() {
                 let r = egui::Rect::from_center_size(at, vec2(9.0, 9.0));
                 p.rect_stroke(r, 1.0, Stroke::new(1.3, colour), egui::StrokeKind::Middle);
@@ -452,6 +721,9 @@ pub fn editor(ui: &Ui, s: &mut Studio) {
 /// The sketch section of the inspector: the selected dimension, or the active layer's
 /// sketch status (degrees of freedom, conflicts).
 pub fn inspector(ui: &mut Ui, s: &mut Studio) {
+    if !s.ui.sketch.picked.is_empty() {
+        picked_fields(ui, s);
+    }
     if let Some(src) = s.ui.sketch.selected {
         dimension_fields(ui, s, src);
         ui.add_space(8.0);

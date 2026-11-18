@@ -58,7 +58,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let doc = s.engine.doc().clone();
     let objs: Vec<&Object> = sel.iter().filter_map(|id| doc.objects.get(id)).collect();
     if objs.is_empty() {
-        if s.ui.sketch.selected.is_none() {
+        if s.ui.sketch.selected.is_none() && s.ui.sketch.picked.is_empty() {
             ui.label(RichText::new(t("inspector.nothing")).weak());
             ui.add_space(8.0);
         }

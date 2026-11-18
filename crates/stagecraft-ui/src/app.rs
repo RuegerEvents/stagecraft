@@ -225,6 +225,7 @@ fn shortcuts(ui: &mut Ui, s: &mut Studio) {
         if del && !s.engine.selection().is_empty() {
             let ids = s.engine.selection().to_vec();
             let _ = s.run("object.delete", json!({ "ids": ids }));
+        } else if del && crate::sketch_ui::delete_picks(s) {
         } else if del && let Some(src) = s.ui.sketch.selected {
             let mut args = crate::sketch_ui::dim_args(src);
             let id = args["id"].take();

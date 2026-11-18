@@ -252,6 +252,7 @@ fn select_tool(
         let Some(raw) = raw else { return };
         match drag {
             Some(Drag::Box { from }) => {
+                crate::sketch_ui::clear_picks(&mut s.ui.sketch);
                 let mode = if raw[0] >= from[0] { BoxMode::Window } else { BoxMode::Crossing };
                 let mut hit = in_box(s.engine.doc(), ids.iter().copied(), Bounds::from_points(from, raw), mode, style);
                 if shift {
@@ -315,6 +316,11 @@ fn select_tool(
     }
     if resp.clicked_by(PointerButton::Primary) {
         let Some(raw) = raw else { return };
+        // Sketch points and lines are drawn over the objects, so they are picked first.
+        if crate::sketch_ui::click_pick(s, raw, tol, shift) {
+            return;
+        }
+        crate::sketch_ui::clear_picks(&mut s.ui.sketch);
         s.ui.sketch.selected = None;
         s.ui.sketch.editing = None;
         let hit = pick(s.engine.doc(), ids.iter().copied(), raw, tol, style);
@@ -403,6 +409,7 @@ fn keyboard(ui: &mut Ui, s: &mut Studio) {
         } else if s.ui.tool != Tool::Select {
             s.ui.set_tool(Tool::Select);
         } else {
+            crate::sketch_ui::clear_picks(&mut s.ui.sketch);
             let _ = s.run("selection.clear", Value::Null);
         }
     }

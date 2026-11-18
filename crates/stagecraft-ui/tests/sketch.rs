@@ -121,8 +121,10 @@ fn drawing_a_room_with_typed_lengths_makes_dimensions() {
     let driving: Vec<f64> = s.dimensions.iter().filter(|d| d.driving).map(|d| d.value).collect();
     assert_eq!(driving, vec![6000.0, 4000.0], "the third typed length is implied");
     assert_eq!(s.dimensions.len(), 3);
-    // Horizontal/vertical were inferred for every side.
-    assert_eq!(s.constraints.len(), 4);
+    // Horizontal/vertical were inferred for every side, and the first corner is
+    // locked automatically.
+    assert_eq!(s.constraints.len(), 5);
+    assert!(s.constraints.iter().any(|c| matches!(c.kind, stagecraft_core::sketch::ConstraintKind::Fixed { point, .. } if point == s.points[0].id)), "{:?}", s.constraints);
     let path = wall_path(&h);
     assert_eq!(path.len(), 5, "a closed ring: {path:?}");
     assert!((xmax(&path) - 6000.0).abs() < 1e-6);
@@ -130,7 +132,7 @@ fn drawing_a_room_with_typed_lengths_makes_dimensions() {
     assert!(wall.sketch.is_some(), "the wall follows the sketch");
     // The inspector shows the sketch status when nothing is selected.
     run(&mut h, "selection.clear", Value::Null);
-    assert!(h.query_by_label_contains("2 degrees of freedom").is_some(), "the room can still be moved as a whole");
+    assert!(h.query_by_label_contains("Fully constrained").is_some(), "the first corner is locked");
 }
 
 #[test]
@@ -139,8 +141,12 @@ fn double_click_a_dimension_type_a_value_and_the_room_follows() {
     draw_room(&mut h);
     run(&mut h, "ui.set_tool", json!({ "tool": "select" }));
     pause(&mut h);
-    // Lock the first corner: the room is then fully constrained and grows to the right.
+    // The first corner is locked automatically: the room is fully constrained and grows
+    // to the right. A double click unlocks it, another locks it again.
     let corner = screen(&h, [0.0, 0.0]);
+    double_click_at(&mut h, corner);
+    assert_eq!(h.state().ui.status.as_ref().map(|s| s.0.as_str()), Some("Corner unlocked"));
+    pause(&mut h);
     double_click_at(&mut h, corner);
     assert_eq!(h.state().ui.status.as_ref().map(|s| s.0.as_str()), Some("Corner locked (fixed)"));
     run(&mut h, "selection.clear", Value::Null);
@@ -325,4 +331,119 @@ fn dragging_in_a_200_point_sketch_stays_interactive() {
     // unoptimised; release is far faster. Interactive = well under a quarter second.
     let limit = if cfg!(debug_assertions) { 250 } else { 50 };
     assert!(mean.as_millis() < limit, "mean frame {mean:?}");
+}
+
+/// Two free lines and a wall: click picks sketch lines and points, Shift adds, the
+/// inspector's buttons constrain them, Delete removes a picked point, and a wall
+/// clicked on its face is still selected as an object.
+#[test]
+fn sketch_lines_and_points_are_picked_constrained_and_deleted() {
+    let mut h = harness(Engine::new());
+    run(&mut h, "ui.zoom", json!({ "scale": 0.08 }));
+    run(&mut h, "ui.pan", json!({ "center": [3000, 2000] }));
+    let a = run(&mut h, "sketch.add_line", json!({ "from": [0, 0], "to": [4000, 300] }));
+    let b = run(&mut h, "sketch.add_line", json!({ "from": [0, 2000], "to": [4000, 2600] }));
+    let (ea, eb) = (a["id"].as_u64().unwrap(), b["id"].as_u64().unwrap());
+    let wall = run(&mut h, "wall.create", json!({ "path": [[6000, 0], [6000, 4000]], "thickness": 300 }));
+    run(&mut h, "ui.set_tool", json!({ "tool": "select" }));
+    pause(&mut h);
+
+    // click on the first line, Shift-click on the second
+    click_world(&mut h, [2000.0, 150.0]);
+    pause(&mut h);
+    hover_world(&mut h, [2000.0, 2300.0]);
+    let pos = screen(&h, [2000.0, 2300.0]);
+    h.event(Event::ModifiersChanged(Modifiers::SHIFT));
+    h.event(Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::SHIFT });
+    h.event(Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::SHIFT });
+    h.run();
+    h.event(Event::ModifiersChanged(Modifiers::NONE));
+    h.run();
+    let picked = h.state().ui.sketch.picked.clone();
+    use stagecraft_core::sketch::EdgeId;
+    use stagecraft_ui::sketch_ui::SketchItem;
+    assert_eq!(picked, vec![SketchItem::Edge(EdgeId(ea as u32)), SketchItem::Edge(EdgeId(eb as u32))]);
+    assert!(h.state().engine.selection().is_empty());
+
+    // Perpendicular is offered for two lines, Symmetric is not
+    assert!(h.query_by_label("Sketch Symmetric").is_some());
+    h.get_by_label("Sketch Parallel").click();
+    h.run();
+    let s = h.state().engine.doc().sketches.values().next().unwrap().clone();
+    assert!(s.constraints.iter().any(|c| matches!(c.kind, stagecraft_core::sketch::ConstraintKind::Parallel { .. })));
+    let dir = |e: u64| {
+        let (p, q) = s.edge(EdgeId(e as u32)).unwrap().geom.ends();
+        let d = s.pos(q) - s.pos(p);
+        d.y.atan2(d.x)
+    };
+    assert!((dir(ea) - dir(eb)).abs() < 1e-6, "parallel now");
+    // horizontal on both: one undo step
+    h.get_by_label("Sketch Horizontal").click();
+    h.run();
+    let s = h.state().engine.doc().sketches.values().next().unwrap().clone();
+    let (p, q) = s.edge(EdgeId(eb as u32)).unwrap().geom.ends();
+    assert!((s.pos(p).y - s.pos(q).y).abs() < 1e-6);
+    let n = s.constraints.len();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(h.state().engine.doc().sketches.values().next().unwrap().constraints.len(), n - 2);
+
+    // a point: click, Delete; its line goes too
+    pause(&mut h);
+    let end = h.state().engine.doc().sketches.values().next().unwrap().pos(q);
+    click_world(&mut h, [end.x, end.y]);
+    assert!(matches!(h.state().ui.sketch.picked.as_slice(), [SketchItem::Point(_)]));
+    h.key_press(Key::Delete);
+    h.run();
+    let s = h.state().engine.doc().sketches.values().next().unwrap();
+    assert!(s.edge(EdgeId(eb as u32)).is_none(), "the line of the deleted point went");
+    assert!(h.state().ui.sketch.picked.is_empty());
+
+    // the wall's face selects the wall
+    pause(&mut h);
+    click_world(&mut h, [6120.0, 2000.0]);
+    let w: stagecraft_core::Id = serde_json::from_value(wall["id"].clone()).unwrap();
+    assert_eq!(h.state().engine.selection(), &[w]);
+    if let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") {
+        run(&mut h, "ui.sketch_pick", json!({ "edges": [ea] }));
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render().unwrap().save(format!("{dir}/36-sketch-picked.png")).unwrap();
+    }
+}
+
+#[test]
+fn relations_apply_to_fitting_picks_only() {
+    use stagecraft_core::sketch::{Sketch, Vec2};
+    use stagecraft_ui::sketch_ui::{Relation, SketchItem, relation};
+    let mut s = Sketch::new();
+    let p = [(-3000.0, 0.0), (-3000.0, 2000.0), (3100.0, 50.0), (2900.0, 2100.0), (0.0, -1000.0), (0.0, 3000.0)]
+        .map(|(x, y)| s.add_point(Vec2::new(x, y)));
+    let left = s.add_line(p[0], p[1]);
+    let right = s.add_line(p[3], p[2]); // reversed on purpose
+    let axis = s.add_line(p[4], p[5]);
+    let e = SketchItem::Edge;
+    // symmetric: two lines and the axis; ends paired by position, not by order
+    let c = relation(&s, &[e(left), e(right), e(axis)], Relation::Symmetric).unwrap();
+    assert_eq!(c.len(), 2);
+    assert_eq!(c[0]["a"], json!(p[0]));
+    assert_eq!(c[0]["b"], json!(p[2]));
+    // two points and the axis
+    let c = relation(&s, &[SketchItem::Point(p[1]), SketchItem::Point(p[3]), e(axis)], Relation::Symmetric).unwrap();
+    assert_eq!(c, vec![json!({ "type": "symmetric", "a": p[1], "b": p[3], "axis": axis })]);
+    // equal length chains to the first line
+    assert_eq!(relation(&s, &[e(left), e(right), e(axis)], Relation::Equal).unwrap().len(), 2);
+    // nothing for mismatched picks
+    assert!(relation(&s, &[e(left)], Relation::Parallel).is_none());
+    assert!(relation(&s, &[e(left), SketchItem::Point(p[4])], Relation::Horizontal).is_none());
+    assert_eq!(relation(&s, &[SketchItem::Point(p[4])], Relation::Lock).unwrap()[0]["type"], "fixed");
+    // the solver accepts what the button builds (axis held on x = 0)
+    s.fix(p[4]);
+    s.fix(p[5]);
+    for c in relation(&s, &[e(left), e(right), e(axis)], Relation::Symmetric).unwrap() {
+        let kind = serde_json::from_value(c).unwrap();
+        s.add_constraint(kind);
+    }
+    let out = s.solve(&Default::default()).unwrap();
+    let q = |id| out.sketch.pos(id);
+    assert!((q(p[0]).x + q(p[2]).x).abs() < 1e-6 && (q(p[0]).y - q(p[2]).y).abs() < 1e-6);
 }

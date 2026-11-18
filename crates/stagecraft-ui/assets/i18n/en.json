@@ -27,7 +27,7 @@
   "tool.truss": "Truss",
   "tool.fixture": "Fixture",
   "tool.tip": "{tool} ({key})",
-  "hint.select": "Click or drag a box to select · Shift adds · drag a selected object to move it · drag sketch corners · double-click a dimension to type its value, a corner to lock it",
+  "hint.select": "Click or drag a box to select · click sketch lines and corners to constrain them · Shift adds · drag a selected object to move it · drag sketch corners · double-click a dimension to type its value, a corner to lock it",
   "hint.move": "Click a base point, then the target · or type a distance and Enter",
   "hint.rotate": "Click the pivot, a reference direction and the new direction · or type an angle",
   "hint.floor": "Click the corners · type a length (m) · Enter or click the first point closes",
@@ -455,5 +455,15 @@
   "type.group": "Group",
   "type.group.plural": "Groups",
   "type.model": "Model",
-  "type.model.plural": "Models"
+  "type.model.plural": "Models",
+  "sketch.horizontal": "Horizontal",
+  "sketch.vertical": "Vertical",
+  "sketch.parallel": "Parallel",
+  "sketch.perpendicular": "Perpendicular",
+  "sketch.equal": "Equal length",
+  "sketch.symmetric": "Symmetric",
+  "sketch.lock": "Lock",
+  "sketch.picked": "Sketch: {points} point(s), {edges} line(s)",
+  "sketch.delete_picked": "Delete from sketch",
+  "sketch.added": "Added: {what}"
 }

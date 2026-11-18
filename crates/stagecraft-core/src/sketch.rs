@@ -306,7 +306,17 @@ pub fn sync_objects(doc: &mut Document, ids: &[Id]) {
 }
 
 /// Stores a solved sketch for a layer and lets the linked objects follow.
-pub fn store(doc: &mut Document, layer: Id, sketch: Sketch) {
+pub fn store(doc: &mut Document, layer: Id, mut sketch: Sketch) {
+    // A sketch's first point is locked where it is, so the first dimension change
+    // moves the far side instead of spreading over both (FreeCAD users lock a corner
+    // by hand; here it is the default). Only when nothing is locked yet.
+    let was_empty = doc.sketches.get(&layer).is_none_or(|s| s.points.is_empty());
+    if was_empty
+        && let Some(first) = sketch.points.first().map(|p| p.id)
+        && !sketch.constraints.iter().any(|c| matches!(c.kind, stagecraft_sketch::ConstraintKind::Fixed { .. }))
+    {
+        sketch.fix(first);
+    }
     doc.sketches.insert(layer, sketch);
     sync_layer(doc, layer);
     // Reference dimensions on vanished sketch points are dropped.
@@ -452,7 +462,9 @@ pub fn adopt(doc: &mut Document, ids: &[Id], infer_axes: bool) -> Result<Vec<Id>
 }
 
 /// Moves the sketch points of linked objects as `f` moves plan points (object moves
-/// and rotations). The points are dragged, so constraints hold: a fixed corner stays.
+/// and rotations). The points are dragged, so constraints hold; locks (`fixed`) on the
+/// moved object's own points move with it, since moving the object is explicit. Locks
+/// elsewhere in the sketch stay.
 pub fn transform_linked(doc: &mut Document, ids: &[Id], f: impl Fn(P2) -> P2) -> Result<(), CmdError> {
     let mut by_layer: std::collections::BTreeMap<Id, Vec<PointId>> = Default::default();
     for id in ids {
@@ -470,9 +482,17 @@ pub fn transform_linked(doc: &mut Document, ids: &[Id], f: impl Fn(P2) -> P2) ->
         }
     }
     for (layer, pts) in by_layer {
-        let s = &doc.sketches[&layer];
+        let mut s = doc.sketches[&layer].clone();
+        for c in &mut s.constraints {
+            if let stagecraft_sketch::ConstraintKind::Fixed { point, at } = &mut c.kind
+                && pts.contains(point)
+            {
+                *at = v2(f(p2(*at)));
+            }
+        }
         let targets = pts.iter().map(|&p| DragTarget { point: p, to: v2(f(p2(s.pos(p)))) }).collect();
-        apply(doc, layer, &Edit::Drag { targets }, &edit_options())?;
+        let solved = s.apply(&Edit::Drag { targets }, &edit_options()).map_err(solve_error)?;
+        store(doc, layer, solved.sketch);
     }
     Ok(())
 }

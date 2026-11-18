@@ -261,3 +261,33 @@ fn documents_without_sketches_still_load() {
     assert!(doc.sketches.is_empty() && doc.dimensions.is_empty());
     assert!(doc.objects.values().all(|o| o.sketch.is_none()));
 }
+
+#[test]
+fn the_first_point_of_a_sketch_is_locked() {
+    let mut e = Engine::new();
+    let seg = json!({ "axis_lock": true, "length": 4000 });
+    let out =
+        run(&mut e, "sketch.draw", json!({ "points": [[1000, 0], [5000, 0]], "segments": [seg], "make": "wall" }));
+    let wall = id(&out);
+    let s = run(&mut e, "sketch.get", Value::Null);
+    let fixed: Vec<&Value> =
+        s["sketch"]["constraints"].as_array().unwrap().iter().filter(|c| c["kind"]["type"] == "fixed").collect();
+    assert_eq!(fixed.len(), 1, "{s}");
+    assert_eq!(fixed[0]["kind"]["point"], s["sketch"]["points"][0]["id"]);
+    assert_eq!(s["status"]["fully_constrained"], true);
+    // a longer wall grows away from the locked start
+    let dim = s["sketch"]["dimensions"][0]["id"].as_u64().unwrap();
+    run(&mut e, "dimension.set_value", json!({ "id": dim, "value": 6000 }));
+    let ObjectKind::Wall { path, .. } = kind(&e, wall) else { panic!() };
+    assert_eq!(xs(&path), (1000.0, 7000.0));
+    // moving the wall takes its lock along
+    run(&mut e, "object.move", json!({ "ids": [wall], "delta": [500, 0, 0] }));
+    let ObjectKind::Wall { path, .. } = kind(&e, wall) else { panic!() };
+    let (lo, hi) = xs(&path);
+    assert!((lo - 1500.0).abs() < 1e-6 && (hi - 7500.0).abs() < 1e-6, "{path:?}");
+    // a second drawing does not add another lock
+    run(&mut e, "sketch.draw", json!({ "points": [[0, 3000], [2000, 3000]] }));
+    let s = run(&mut e, "sketch.get", Value::Null);
+    let n = s["sketch"]["constraints"].as_array().unwrap().iter().filter(|c| c["kind"]["type"] == "fixed").count();
+    assert_eq!(n, 1);
+}

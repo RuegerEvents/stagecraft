@@ -137,6 +137,11 @@ fn register(r: &mut UiRegistry) {
         set_options,
     );
     r.add(
+        "ui.sketch_pick",
+        "Pick sketch points and lines in the plan (as clicking them does), for the inspector's constraint buttons",
+        sketch_pick,
+    );
+    r.add(
         "ui.sketch",
         "Sketch overlay in the plan: show lines/points, FreeCAD colours (green = fully constrained, red = conflicting), dimensions",
         sketch,
@@ -186,8 +191,61 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "plan_labels": ui.plan_labels,
         "sketch": { "show": ui.sketch.show, "colours": ui.sketch.colours, "dimensions": ui.sketch.dimensions,
                     "selected_dimension": ui.sketch.selected.map(crate::sketch_ui::dim_args),
+                    "picked_layer": ui.sketch.picked_layer,
+                    "picked": ui.sketch.picked.iter().map(|i| i.item_ref()).collect::<Vec<_>>(),
                     "editing": ui.sketch.editing.as_ref().map(|e| json!({ "dimension": crate::sketch_ui::dim_args(e.source), "text": e.text })) },
     }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SketchPickArgs {
+    /// Layer id or name. Default: the first layer.
+    layer: Option<String>,
+    /// Sketch point ids.
+    #[serde(default)]
+    points: Vec<u32>,
+    /// Sketch edge (line) ids.
+    #[serde(default)]
+    edges: Vec<u32>,
+    /// Add to the current picks instead of replacing them.
+    #[serde(default)]
+    add: bool,
+}
+
+fn sketch_pick(c: &mut UiCtx, a: SketchPickArgs) -> CmdResult {
+    use crate::sketch_ui::SketchItem;
+    use stagecraft_core::sketch::{EdgeId, PointId};
+    let doc = c.engine.doc();
+    let layer = match a.layer.as_deref() {
+        Some(r) => doc.layers.values().find(|l| l.name == r || l.id.to_string() == r).map(|l| l.id),
+        None => doc.layers_sorted().first().map(|l| l.id),
+    }
+    .ok_or_else(|| CmdError::not_found("layer", a.layer.as_deref().unwrap_or("")))?;
+    let sk = doc.sketches.get(&layer).ok_or_else(|| CmdError::invalid("the layer has no sketch"))?;
+    let mut items = Vec::new();
+    for p in a.points {
+        sk.point(PointId(p)).ok_or_else(|| CmdError::not_found("sketch point", p))?;
+        items.push(SketchItem::Point(PointId(p)));
+    }
+    for e in a.edges {
+        sk.edge(EdgeId(e)).ok_or_else(|| CmdError::not_found("sketch edge", e))?;
+        items.push(SketchItem::Edge(EdgeId(e)));
+    }
+    let v = &mut c.ui.sketch;
+    if !a.add || v.picked_layer != Some(layer) {
+        v.picked.clear();
+    }
+    v.picked_layer = Some(layer);
+    for i in items {
+        if !v.picked.contains(&i) {
+            v.picked.push(i);
+        }
+    }
+    v.selected = None;
+    if !v.picked.is_empty() {
+        c.engine.execute("selection.clear", Value::Null)?;
+    }
+    Ok(json!({ "layer": layer, "picked": v.picked.iter().map(|i| i.item_ref()).collect::<Vec<_>>() }))
 }
 
 #[derive(Deserialize, JsonSchema)]
