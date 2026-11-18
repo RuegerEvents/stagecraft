@@ -65,3 +65,8 @@ cross aisle has a straight middle as wide as the tribune's middle block, so "13 
 middle" is the leg plus half of it; the knees lie behind the middle and the hall's rear
 wall is straight. Seats are real `seat_row` objects with the user's counts (535 in all);
 the front rows stand on 0.25 m tiers, the stage is 1.00 m above the pit floor.
+
+Round 4: the pit's risers and rows are parallel offsets of the stage front (each row bends
+once); the tribune's blocks keep straight rows, the middle block farthest from the stage,
+the side blocks turned forward. "21 m" holds; the sketch's 9 m and 13 m cannot with this
+shape (5.17 m and 11.82 m now, noted in A3).
