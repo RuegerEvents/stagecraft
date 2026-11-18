@@ -457,6 +457,7 @@
   "sketch.driving": "Driving",
   "sketch.name": "Name",
   "sketch.remove_dimension": "Remove dimension",
+  "sketch.dimensions_selected": "{n} dimensions",
   "sketch.geometry": "Geometry",
   "sketch.follows": "Follows the sketch",
   "sketch.free": "Free",

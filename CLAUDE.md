@@ -265,9 +265,11 @@ read as `m_sup_mm`): `m_sup_mm` writes the mm digit
 as a Unicode superscript, and every renderer (PDF, SVG, Sheets mode via
 `render::text_runs`, plan canvas via `sketch_ui::dim_text_job`) draws superscript
 runs smaller and raised. Vector viewports are
-Plan viewports pick dimensions: `dimension_tags` shows only reference dimensions with
-one of those tags (`dimension.add_reference {tags}`, `dimension.set_tags`), `hidden_tags`
-also hides tagged dimensions, `dimension_names` writes "name value".
+Plan viewports pick dimensions: `dimension_tags` shows only dimensions (sketch and
+reference) with one of those tags (`dimension.add_reference {tags}`, `dimension.set_tags
+{ids, tags|add|remove}`; GUI: select dimensions, Shift adds, Inspector tag field),
+`hidden_tags` also hides tagged dimensions, `dimension_names` writes "name value". How
+to build a director's sheet: `docs/howto/director-sheet.md`.
 `elevation`, `section` (cut faces hatched by material) and `plan_3d` (top view from
 meshes, optional cut height, labels as in `plan`); `hidden_lines` adds dashed
 hidden edges, `tag_lines` restyles objects by tag. Core cannot depend on it, so

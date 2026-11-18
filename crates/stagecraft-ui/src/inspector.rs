@@ -1096,35 +1096,15 @@ fn number_or_error(s: &mut Studio, v: &str) -> Option<f64> {
 }
 
 fn tags_field(ui: &mut Ui, s: &mut Studio, doc: &stagecraft_core::Document, objs: &[&Object], sel: &[Id]) {
-    crate::widgets::section(ui, t("inspector.tags"));
     let mut all: Vec<Id> = objs.iter().flat_map(|o| o.tags.iter().copied()).collect();
     all.sort();
     all.dedup();
-    ui.horizontal_wrapped(|ui| {
-        for tag in &all {
-            let Some(tg) = doc.tags.get(tag) else { continue };
-            let on_all = objs.iter().all(|o| o.tags.contains(tag));
-            let text = if on_all { tg.name.clone() } else { format!("{} ({})", tg.name, t("inspector.some")) };
-            egui::Frame::new()
-                .fill(ui.visuals().faint_bg_color)
-                .corner_radius(10)
-                .inner_margin(egui::Margin { left: 8, right: 2, top: 1, bottom: 1 })
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    ui.label(text);
-                    let r = widgets::icon_button(ui, widgets::Icon::Close, &format!("Remove tag {}", tg.name));
-                    if r.on_hover_text(t("inspector.remove_tag")).clicked() {
-                        let _ = s.run("object.untag", json!({ "ids": sel, "tags": [tag] }));
-                    }
-                });
-        }
+    let current: Vec<(Id, bool)> = all.iter().map(|t| (*t, objs.iter().all(|o| o.tags.contains(t)))).collect();
+    let sel = sel.to_vec();
+    crate::widgets::tag_editor(ui, s, doc, &current, "", move |s, tag, add| {
+        let cmd = if add { "object.tag" } else { "object.untag" };
+        let _ = s.run(cmd, json!({ "ids": sel, "tags": [tag] }));
     });
-    let id = egui::Id::unique("inspector_add_tag");
-    if let Some(name) = edit_field_hint(ui, id, "", f32::INFINITY, "Add tag", t("inspector.add_tag"))
-        && !name.trim().is_empty()
-    {
-        let _ = s.run("object.tag", json!({ "ids": sel, "tags": [name.trim()] }));
-    }
 }
 
 /// With nothing selected: what the document is, and the way to its settings.

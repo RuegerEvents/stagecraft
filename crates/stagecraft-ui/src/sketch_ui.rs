@@ -89,6 +89,8 @@ pub struct SketchUi {
     pub dimensions: bool,
     /// The dimension selected in the plan (shown in the inspector).
     pub selected: Option<DimSource>,
+    /// Further dimensions selected with Shift (the inspector then edits their tags).
+    pub also: Vec<DimSource>,
     pub editing: Option<DimEdit>,
     /// Sketch points and lines picked in the plan (one layer), in pick order: the
     /// inspector's constraint buttons work on them, Delete removes them.
@@ -105,6 +107,7 @@ impl Default for SketchUi {
             colours: true,
             dimensions: true,
             selected: None,
+            also: Vec::new(),
             editing: None,
             picked: Vec::new(),
             picked_layer: None,
@@ -747,7 +750,15 @@ pub fn inspector(ui: &mut Ui, s: &mut Studio) {
         picked_fields(ui, s);
     }
     if let Some(src) = s.ui.sketch.selected {
-        dimension_fields(ui, s, src);
+        if s.ui.sketch.also.is_empty() {
+            dimension_fields(ui, s, src);
+        } else {
+            let n = 1 + s.ui.sketch.also.len();
+            crate::widgets::section(ui, tf("sketch.dimensions_selected", &[("n", &n.to_string())]));
+        }
+        let mut all = vec![src];
+        all.extend(s.ui.sketch.also.iter().copied());
+        dimension_tags(ui, s, &all);
         ui.add_space(8.0);
     }
     let doc = s.engine.doc();
@@ -801,6 +812,45 @@ pub fn inspector(ui: &mut Ui, s: &mut Studio) {
         if ui.checkbox(&mut show, t("sketch.show")).changed() {
             let _ = s.run("ui.sketch", json!({ "show": show }));
         }
+    });
+}
+
+/// The tags of the selected dimensions, as for objects: chips with ×, a field to add
+/// one, and the tags not on all of them yet as suggestions.
+fn dimension_tags(ui: &mut Ui, s: &mut Studio, sel: &[DimSource]) {
+    let doc = s.engine.doc().clone();
+    let tags_of = |src: &DimSource| -> Vec<Id> {
+        match src {
+            DimSource::Sketch { layer, id } => doc
+                .sketches
+                .get(layer)
+                .and_then(|sk| sk.dimension(*id))
+                .map(|d| d.tags.iter().filter_map(|t| t.parse().ok()).collect())
+                .unwrap_or_default(),
+            DimSource::Reference(id) => doc.dimensions.get(id).map(|d| d.tags.clone()).unwrap_or_default(),
+        }
+    };
+    let per: Vec<Vec<Id>> = sel.iter().map(tags_of).collect();
+    let ids: Vec<Value> = sel.iter().map(|d| dim_args(*d)["id"].clone()).collect();
+    let layer = sel.iter().find_map(|d| match d {
+        DimSource::Sketch { layer, .. } => Some(*layer),
+        DimSource::Reference(_) => None,
+    });
+    let run = |s: &mut Studio, key: &str, tag: &str| {
+        let mut args = json!({ "ids": ids, key: [tag] });
+        if let Some(l) = layer {
+            args["layer"] = json!(l);
+        }
+        let _ = s.run("dimension.set_tags", args);
+    };
+    let current: Vec<(Id, bool)> = {
+        let mut all: Vec<Id> = per.iter().flatten().copied().collect();
+        all.sort();
+        all.dedup();
+        all.into_iter().map(|t| (t, per.iter().all(|p| p.contains(&t)))).collect()
+    };
+    crate::widgets::tag_editor(ui, s, &doc, &current, "Dimension", |s, tag, add| {
+        run(s, if add { "add" } else { "remove" }, tag)
     });
 }
 

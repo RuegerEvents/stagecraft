@@ -349,12 +349,16 @@ struct DimensionArgs {
     /// Open the value editor (driving dimensions), as a double-click does.
     #[serde(default)]
     edit: bool,
+    /// Add it to the selected dimensions (as Shift-click does) instead of selecting it alone.
+    #[serde(default)]
+    add: bool,
 }
 
 fn dimension(c: &mut UiCtx, a: DimensionArgs) -> CmdResult {
     use stagecraft_geom::dims::DimSource;
     let Some(id) = a.id.filter(|v| !v.is_null()) else {
         c.ui.sketch.selected = None;
+        c.ui.sketch.also.clear();
         c.ui.sketch.editing = None;
         return Ok(json!({}));
     };
@@ -394,7 +398,14 @@ fn dimension(c: &mut UiCtx, a: DimensionArgs) -> CmdResult {
         [] => return Err(CmdError::not_found("dimension", &id)),
         _ => return Err(CmdError::invalid("several dimensions match; pass layer")),
     };
+    if a.add && c.ui.sketch.selected.is_some_and(|x| x != src) {
+        if !c.ui.sketch.also.contains(&src) {
+            c.ui.sketch.also.push(src);
+        }
+        return Ok(json!({ "selected": 1 + c.ui.sketch.also.len() }));
+    }
     c.ui.sketch.selected = Some(src);
+    c.ui.sketch.also.clear();
     if a.edit {
         let DimSource::Sketch { layer, id } = src else {
             return Err(CmdError::invalid("reference dimensions have no value to edit"));

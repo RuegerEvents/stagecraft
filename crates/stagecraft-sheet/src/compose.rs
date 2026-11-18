@@ -516,19 +516,33 @@ pub fn viewport_dims(doc: &Document, vp: &Viewport) -> Vec<stagecraft_geom::dims
     let shown = |l: &Id| !vp.hidden_layers.contains(l) && doc.layers.get(l).is_some_and(|l| l.visible);
     let st = stagecraft_geom::dims::DimStyle::for_scale(1.0 / vp.scale, 1.2).with_format(LengthFormat::of(&doc.meta));
     let mut dims = Vec::new();
-    let only_tagged = !vp.dimension_tags.is_empty();
-    if vp.sketch_dimensions && !only_tagged {
+    if vp.sketch_dimensions {
         for (layer, s) in doc.sketches.iter().filter(|(l, _)| shown(l)) {
             dims.extend(stagecraft_geom::dims::sketch_dims(*layer, s, &st));
         }
     }
     if vp.reference_dimensions {
-        dims.extend(stagecraft_geom::dims::reference_dims(doc, &st, |d| {
-            shown(&d.layer)
-                && !d.tags.iter().any(|t| vp.hidden_tags.contains(t))
-                && (!only_tagged || d.tags.iter().any(|t| vp.dimension_tags.contains(t)))
-        }));
+        dims.extend(stagecraft_geom::dims::reference_dims(doc, &st, |d| shown(&d.layer)));
     }
+    // tags: `hidden_tags` leaves tagged dimensions out, `dimension_tags` keeps only those
+    let tags_of = |src: &stagecraft_geom::dims::DimSource| -> Vec<Id> {
+        match src {
+            stagecraft_geom::dims::DimSource::Sketch { layer, id } => doc
+                .sketches
+                .get(layer)
+                .and_then(|s| s.dimension(*id))
+                .map(|d| d.tags.iter().filter_map(|t| t.parse().ok()).collect())
+                .unwrap_or_default(),
+            stagecraft_geom::dims::DimSource::Reference(id) => {
+                doc.dimensions.get(id).map(|d| d.tags.clone()).unwrap_or_default()
+            }
+        }
+    };
+    dims.retain(|d| {
+        let tags = tags_of(&d.source);
+        !tags.iter().any(|t| vp.hidden_tags.contains(t))
+            && (vp.dimension_tags.is_empty() || tags.iter().any(|t| vp.dimension_tags.contains(t)))
+    });
     if vp.dimension_names {
         for d in &mut dims {
             if let Some(n) = &d.name {

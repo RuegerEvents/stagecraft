@@ -225,9 +225,9 @@ pub struct Viewport {
     /// Plan viewports: draw the reference dimensions between objects.
     #[serde(default = "yes")]
     pub reference_dimensions: bool,
-    /// Plan viewports: if not empty, draw only the reference dimensions carrying one of
-    /// these tags (and no sketch dimensions). Dimensions with a tag in `hidden_tags`
-    /// are left out either way.
+    /// Plan viewports: if not empty, draw only the dimensions (sketch and reference)
+    /// carrying one of these tags. Dimensions with a tag in `hidden_tags` are left out
+    /// either way.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dimension_tags: Vec<Id>,
     /// Plan viewports: write a named dimension as "name value" (and reference

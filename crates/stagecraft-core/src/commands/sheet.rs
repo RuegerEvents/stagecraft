@@ -478,7 +478,7 @@ struct VpCreateArgs {
     /// Elevations, sections, plan_3d: draw hidden edges dashed. Default false.
     #[serde(default)]
     hidden_lines: bool,
-    /// Plan viewports: show only the reference dimensions with one of these tags (ids
+    /// Plan viewports: show only the dimensions with one of these tags (ids
     /// or names). Default: all dimensions.
     #[serde(default)]
     dimension_tags: Vec<String>,
@@ -568,7 +568,7 @@ struct VpUpdateArgs {
     /// Replace the hidden tags (ids or names).
     hidden_tags: Option<Vec<String>>,
     hidden_layers: Option<Vec<String>>,
-    /// Plan viewports: show only reference dimensions with one of these tags (ids or
+    /// Plan viewports: show only dimensions with one of these tags (ids or
     /// names); empty = all.
     dimension_tags: Option<Vec<String>>,
     /// Plan viewports: write named dimensions as "name value".

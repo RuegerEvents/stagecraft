@@ -853,23 +853,52 @@ struct DimAddRefArgs {
 
 #[derive(Deserialize, JsonSchema)]
 struct DimTagsArgs {
-    /// A reference dimension: its UUID or name.
-    id: String,
-    /// Tag ids or names; unknown names are created. Replaces the dimension's tags.
-    tags: Vec<String>,
+    /// Dimensions: sketch dimension ids (numbers), reference dimension UUIDs or names.
+    ids: Vec<DimRef>,
+    /// Layer of the sketch dimensions (needed when an id exists on several layers).
+    layer: Option<String>,
+    /// Replace the tags with these (ids or names; unknown names are created).
+    tags: Option<Vec<String>>,
+    /// Add these tags.
+    #[serde(default)]
+    add: Vec<String>,
+    /// Remove these tags.
+    #[serde(default)]
+    remove: Vec<String>,
 }
 
 fn dim_set_tags(ctx: &mut Ctx, a: DimTagsArgs) -> CmdResult {
+    let found: Vec<Found> =
+        a.ids.iter().map(|r| find_dim(ctx.doc(), r, a.layer.as_deref())).collect::<Result<_, _>>()?;
+    let set = a.tags.as_deref().map(|t| super::tag::ensure_tags(ctx.doc_mut(), t)).transpose()?;
+    let add = super::tag::ensure_tags(ctx.doc_mut(), &a.add)?;
     let doc = ctx.doc();
-    let id = doc
-        .dimensions
-        .values()
-        .find(|d| d.id.to_string() == a.id || d.name.as_deref() == Some(a.id.as_str()))
-        .map(|d| d.id)
-        .ok_or_else(|| CmdError::not_found("reference dimension", &a.id))?;
-    let tags = super::tag::ensure_tags(ctx.doc_mut(), &a.tags)?;
-    ctx.doc_mut().dimensions.get_mut(&id).expect("found").tags = tags.clone();
-    Ok(json!({ "id": id, "tags": tags }))
+    let remove: Vec<Id> = a.remove.iter().filter_map(|r| super::resolve_tag(doc, r)).collect();
+    let apply = |tags: &mut Vec<Id>| {
+        if let Some(s) = &set {
+            *tags = s.clone();
+        }
+        for t in &add {
+            if !tags.contains(t) {
+                tags.push(*t);
+            }
+        }
+        tags.retain(|t| !remove.contains(t));
+    };
+    let doc = ctx.doc_mut();
+    for f in &found {
+        match *f {
+            Found::Ref(id) => apply(&mut doc.dimensions.get_mut(&id).expect("found").tags),
+            Found::Sketch(l, id) => {
+                let sk = doc.sketches.get_mut(&l).expect("found");
+                let d = sk.dimensions.iter_mut().find(|d| d.id == id).expect("found");
+                let mut tags: Vec<Id> = d.tags.iter().filter_map(|t| t.parse().ok()).collect();
+                apply(&mut tags);
+                d.tags = tags.iter().map(|t| t.to_string()).collect();
+            }
+        }
+    }
+    Ok(json!({ "dimensions": found.len() }))
 }
 
 fn dim_add_reference(ctx: &mut Ctx, a: DimAddRefArgs) -> CmdResult {

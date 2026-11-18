@@ -297,8 +297,16 @@ fn select_tool(
     {
         if double {
             crate::sketch_ui::open_editor(s, d.source);
+        } else if shift && s.ui.sketch.selected.is_some_and(|x| x != d.source) {
+            let sk = &mut s.ui.sketch;
+            if sk.also.contains(&d.source) {
+                sk.also.retain(|x| *x != d.source);
+            } else {
+                sk.also.push(d.source);
+            }
         } else {
             s.ui.sketch.selected = Some(d.source);
+            s.ui.sketch.also.clear();
             if !s.engine.selection().is_empty() {
                 let _ = s.run("selection.clear", Value::Null);
             }
@@ -313,6 +321,7 @@ fn select_tool(
         }
         crate::sketch_ui::clear_picks(&mut s.ui.sketch);
         s.ui.sketch.selected = None;
+        s.ui.sketch.also.clear();
         s.ui.sketch.editing = None;
         let hit = pick(s.engine.doc(), ids.iter().copied(), raw, tol, style);
         let sel = s.engine.selection().to_vec();

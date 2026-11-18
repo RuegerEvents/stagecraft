@@ -566,7 +566,9 @@ fn the_iron_has_a_hatched_keep_clear_strip_and_wings_can_go_without_borders() {
     assert!(prims.iter().any(|q| matches!(q, PlanPrim::Text { text, .. } if text == "Safety curtain — keep clear")));
     run(&mut e, "doc.set_meta", json!({ "sheet_language": "de" }));
     let prims = obj_plan(&e, p);
-    assert!(prims.iter().any(|q| matches!(q, PlanPrim::Text { text, .. } if text.starts_with("Eiserner Vorhang"))));
+    assert!(
+        prims.iter().any(|q| matches!(q, PlanPrim::Text { text, .. } if text == "Feuerschutzvorhang — freihalten"))
+    );
     let w = run(&mut e, "wingset.create", json!({ "count": 5, "borders": false }));
     assert_eq!(w["legs"].as_array().unwrap().len(), 10);
     assert!(w["borders"].as_array().unwrap().is_empty());

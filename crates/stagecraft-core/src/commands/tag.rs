@@ -102,6 +102,15 @@ fn delete(ctx: &mut Ctx, a: DeleteArgs) -> CmdResult {
         doc.objects.get_mut(oid).expect("listed").tags.retain(|t| *t != id);
         n += 1;
     }
+    let text = id.to_string();
+    let layers: Vec<Id> = doc.sketches.keys().copied().collect();
+    for l in layers {
+        if doc.sketches[&l].dimensions.iter().any(|d| d.tags.contains(&text)) {
+            for d in &mut doc.sketches.get_mut(&l).expect("listed").dimensions {
+                d.tags.retain(|t| *t != text);
+            }
+        }
+    }
     let dims: Vec<Id> = doc.dimensions.values().filter(|d| d.tags.contains(&id)).map(|d| d.id).collect();
     for d in dims {
         doc.dimensions.get_mut(&d).expect("listed").tags.retain(|t| *t != id);

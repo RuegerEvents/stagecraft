@@ -384,8 +384,10 @@ impl Builder<'_> {
         Ok(self.sys.eqs.len() - 1)
     }
 
+    /// A point's position; a missing point reads as the origin, and `pt` then reports
+    /// it as missing (no panic on a dimension naming a point that does not exist).
     fn p(&self, id: PointId) -> Vec2 {
-        self.pos[&id]
+        self.pos.get(&id).copied().unwrap_or(Vec2::ZERO)
     }
 }
 

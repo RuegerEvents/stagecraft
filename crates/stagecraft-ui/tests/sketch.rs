@@ -453,3 +453,51 @@ fn relations_apply_to_fitting_picks_only() {
     let q = |id| out.sketch.pos(id);
     assert!((q(p[0]).x + q(p[2]).x).abs() < 1e-6 && (q(p[0]).y - q(p[2]).y).abs() < 1e-6);
 }
+
+/// Dimensions take tags in the inspector like objects: one selected or several (Shift),
+/// a tag typed in or picked from the suggestions, removed with its ×.
+#[test]
+fn dimensions_take_tags_in_the_inspector() {
+    let mut e = Engine::new();
+    let at = |x: f64, y: f64| json!({ "type": "point", "at": [x, y, 0] });
+    let a = e.execute("dimension.add_reference", json!({ "from": at(0.0, 0.0), "to": at(3000.0, 0.0) })).unwrap();
+    let b = e.execute("dimension.add_reference", json!({ "from": at(0.0, 2000.0), "to": at(5000.0, 2000.0) })).unwrap();
+    // a dimension naming points that do not exist is refused, not a crash
+    assert!(
+        e.execute("dimension.add", json!({ "measure": { "type": "distance", "a": 7, "b": 8 }, "value": 1000.0 }))
+            .is_err()
+    );
+    e.execute("tag.create", json!({ "name": "regie" })).unwrap();
+    let (a, b) = (a["id"].as_str().unwrap().to_owned(), b["id"].as_str().unwrap().to_owned());
+    let mut h = harness(e);
+    run(&mut h, "ui.dimension", json!({ "id": a }));
+    run(&mut h, "ui.dimension", json!({ "id": b, "add": true }));
+    assert!(h.query_by_label_contains("2 dimensions").is_some());
+    // typing shows the matching tag; picking it tags both
+    h.get_by_label("Add dimension tag").click();
+    h.run();
+    h.get_by_label("Add dimension tag").type_text("reg");
+    h.run();
+    h.get_by_label("Suggested tag regie").click();
+    h.run();
+    let tags = |h: &Harness<'static, Studio>| -> Vec<usize> {
+        h.state().engine.doc().dimensions.values().map(|d| d.tags.len()).collect()
+    };
+    assert_eq!(tags(&h), vec![1, 1]);
+    // a new name typed and Enter: a new tag on both
+    h.get_by_label("Add dimension tag").click();
+    h.run();
+    h.get_by_label("Add dimension tag").type_text("choreo");
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(tags(&h), vec![2, 2]);
+    assert!(h.state().engine.doc().tags.values().any(|t| t.name == "choreo"));
+    // one dimension alone: remove a tag with its ×
+    run(&mut h, "ui.dimension", json!({ "id": a }));
+    h.get_by_label("Remove tag regie").click();
+    h.run();
+    let d = &h.state().engine.doc().dimensions;
+    let a_id: stagecraft_core::Id = a.parse().unwrap();
+    assert_eq!(d[&a_id].tags.len(), 1);
+}

@@ -256,6 +256,9 @@ pub struct Dimension {
     /// Optional parameter name ("portal width").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Tags of the application using the sketch (ids as text); the solver ignores them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// A parametric 2D sketch.
@@ -413,7 +416,15 @@ impl Sketch {
     ) -> ConstraintId {
         let value = value.unwrap_or_else(|| self.measure(&measure).unwrap_or(0.0));
         let id = ConstraintId(self.alloc());
-        self.dimensions.push(Dimension { id, measure, value, driving, label_offset: Vec2::ZERO, name });
+        self.dimensions.push(Dimension {
+            id,
+            measure,
+            value,
+            driving,
+            label_offset: Vec2::ZERO,
+            name,
+            tags: Vec::new(),
+        });
         id
     }
 

@@ -225,3 +225,78 @@ pub fn segmented(ui: &mut Ui, c: &crate::theme::Tokens, items: &[(String, String
     }
     clicked
 }
+
+/// The tag editor of the Inspector, for objects and dimensions alike: one chip per tag
+/// (`(tag, on every selected item)`, "(some)" otherwise) with a × to remove it, a field
+/// to add one (Enter; unknown names become new tags) and, while typing, the existing
+/// tags that match as buttons to pick. `on(studio, tag name, add)` runs the command.
+pub fn tag_editor(
+    ui: &mut Ui,
+    s: &mut crate::app::Studio,
+    doc: &stagecraft_core::Document,
+    current: &[(stagecraft_core::Id, bool)],
+    what: &str,
+    mut on: impl FnMut(&mut crate::app::Studio, &str, bool),
+) {
+    use crate::i18n::t;
+    crate::widgets::section(ui, t("inspector.tags"));
+    ui.horizontal_wrapped(|ui| {
+        for (tag, on_all) in current {
+            let Some(tg) = doc.tags.get(tag) else { continue };
+            let text = if *on_all { tg.name.clone() } else { format!("{} ({})", tg.name, t("inspector.some")) };
+            egui::Frame::new()
+                .fill(ui.visuals().faint_bg_color)
+                .corner_radius(10)
+                .inner_margin(egui::Margin { left: 8, right: 2, top: 1, bottom: 1 })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    ui.label(text);
+                    let r = icon_button(ui, Icon::Close, &format!("Remove tag {}", tg.name));
+                    if r.on_hover_text(t("inspector.remove_tag")).clicked() {
+                        on(s, &tg.name, false);
+                    }
+                });
+        }
+    });
+    let label = if what.is_empty() { "Add tag".to_owned() } else { format!("Add {} tag", what.to_lowercase()) };
+    let id = egui::Id::unique(("tag_editor", what));
+    let mut buf: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
+    let width = ui.available_width() - 8.0;
+    let r = ui.add(TextEdit::singleline(&mut buf).id(id).desired_width(width).hint_text(t("inspector.add_tag")));
+    name(&r, Role::TextInput, &label);
+    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    let typed = buf.trim().to_owned();
+    let mut add: Option<String> = None;
+    if enter && !typed.is_empty() {
+        add = Some(typed.clone());
+    }
+    if !typed.is_empty() && add.is_none() {
+        let low = typed.to_lowercase();
+        let mut names: Vec<&str> = doc
+            .tags
+            .values()
+            .filter(|tg| tg.name.to_lowercase().starts_with(&low))
+            .filter(|tg| !current.iter().any(|(id, all)| *id == tg.id && *all))
+            .map(|tg| tg.name.as_str())
+            .collect();
+        names.sort();
+        ui.horizontal_wrapped(|ui| {
+            for n in names.into_iter().take(8) {
+                let r = ui.small_button(n);
+                name(&r, Role::Button, format!("Suggested tag {n}"));
+                if r.clicked() {
+                    add = Some(n.to_owned());
+                }
+            }
+        });
+    }
+    match add {
+        Some(tag) => {
+            ui.data_mut(|d| d.remove::<String>(id));
+            on(s, &tag, true);
+        }
+        None => {
+            ui.data_mut(|d| d.insert_temp(id, buf));
+        }
+    }
+}
