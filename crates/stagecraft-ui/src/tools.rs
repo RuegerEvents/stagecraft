@@ -642,6 +642,7 @@ fn ghost_in(
         kind,
         style: Default::default(),
         attrs: Default::default(),
+        sketch: None,
     };
     let w = stagecraft_core::geom::placement_to_affine(&obj.placement);
     stagecraft_geom::kinds::plan_at(doc, &w, &obj, style)

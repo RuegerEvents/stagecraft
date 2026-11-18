@@ -260,6 +260,7 @@ fn sample(key: &str) -> Object {
         },
         style: Default::default(),
         attrs: Default::default(),
+        sketch: None,
     }
 }
 

@@ -117,6 +117,7 @@ fn delete(ctx: &mut Ctx, a: DeleteArgs) -> CmdResult {
         return Err(CmdError::invalid_args("move_objects_to is the layer being deleted"));
     }
     let doc = ctx.doc_mut();
+    crate::sketch::forget_layer(doc, id);
     if let Some(t) = target {
         for oid in &on_it {
             doc.objects.get_mut(oid).expect("listed").layer = t;

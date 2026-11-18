@@ -4618,6 +4618,7 @@ dependencies = [
  "sha2",
  "stagecraft-gdtf",
  "stagecraft-mvr",
+ "stagecraft-sketch",
  "tempfile",
  "thiserror 2.0.21",
  "uuid",

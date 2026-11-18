@@ -13,6 +13,7 @@ mod object;
 mod rigging;
 mod selection;
 pub(crate) mod sheet;
+mod sketch;
 mod stage;
 mod tag;
 
@@ -35,6 +36,7 @@ pub(crate) fn register(r: &mut Registry) {
     selection::register(r);
     sheet::register(r);
     mvr::register(r);
+    sketch::register(r);
     r.add::<crate::engine::BatchArgs>(
         "batch",
         crate::command::Kind::Meta,
@@ -125,6 +127,9 @@ pub(crate) fn detail(doc: &Document, o: &Object) -> Value {
     m.insert("children".into(), json!(doc.children(o.id)));
     if !o.style.is_default() {
         m.insert("style".into(), json!(o.style));
+    }
+    if let Some(link) = &o.sketch {
+        m.insert("sketch".into(), json!(link));
     }
     let l = crate::load::load_of(doc, o.id);
     m.insert("load".into(), json!({ "own_kg": l.own_kg, "attached_kg": l.attached_kg, "unknown_weights": l.unknown }));

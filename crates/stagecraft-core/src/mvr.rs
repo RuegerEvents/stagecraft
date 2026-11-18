@@ -310,6 +310,7 @@ impl<'m> Importer<'m> {
             kind,
             style: Default::default(),
             attrs: Default::default(),
+            sketch: None,
         };
         let id = match mo.kind {
             mvr::ObjectKind::FocusPoint => {

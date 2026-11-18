@@ -128,6 +128,11 @@ fn delete(ctx: &mut Ctx, a: DeleteArgs) -> CmdResult {
     for id in &doomed {
         doc.objects.remove(id);
     }
+    let dims: Vec<Id> =
+        doc.dimensions.values().filter(|d| doomed.iter().any(|id| d.uses_object(*id))).map(|d| d.id).collect();
+    for d in dims {
+        doc.dimensions.remove(&d);
+    }
     Ok(json!({ "deleted": doomed, "detached": orphans.iter().map(|o| o.0).collect::<Vec<_>>() }))
 }
 
@@ -145,8 +150,19 @@ fn rename(ctx: &mut Ctx, a: RenameArgs) -> CmdResult {
 
 /// Applies `f` to the world transform of each top-level object and writes back local
 /// placements. Descendants follow because their placements are relative.
-fn transform_world(doc: &mut Document, ids: &[Id], f: impl Fn(DAffine3) -> DAffine3) {
-    for id in top_level(doc, ids) {
+///
+/// Walls and floors that follow the sketch move by dragging their sketch points instead,
+/// so constraints hold (a fixed corner stays put).
+fn transform_world(doc: &mut Document, ids: &[Id], f: impl Fn(DAffine3) -> DAffine3) -> Result<(), CmdError> {
+    let (linked, free): (Vec<Id>, Vec<Id>) =
+        top_level(doc, ids).into_iter().partition(|id| doc.objects[id].sketch.is_some());
+    if !linked.is_empty() {
+        crate::sketch::transform_linked(doc, &linked, |p| {
+            let q = f(DAffine3::from_translation(DVec3::new(p[0], p[1], 0.0))).translation;
+            [q.x, q.y]
+        })?;
+    }
+    for id in free {
         let w = world(doc, id).expect("exists");
         let (parent, layer) = {
             let o = &doc.objects[&id];
@@ -155,6 +171,7 @@ fn transform_world(doc: &mut Document, ids: &[Id], f: impl Fn(DAffine3) -> DAffi
         let local = local_for_world(doc, &f(w), parent, layer);
         doc.objects.get_mut(&id).expect("exists").placement = local;
     }
+    Ok(())
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -167,7 +184,7 @@ struct MoveArgs {
 fn move_by(ctx: &mut Ctx, a: MoveArgs) -> CmdResult {
     ensure_exists(ctx.doc(), &a.ids)?;
     let t = DAffine3::from_translation(DVec3::from_array(a.delta));
-    transform_world(ctx.doc_mut(), &a.ids, |w| t * w);
+    transform_world(ctx.doc_mut(), &a.ids, |w| t * w)?;
     Ok(json!({}))
 }
 
@@ -195,7 +212,7 @@ fn rotate(ctx: &mut Ctx, a: RotateArgs) -> CmdResult {
     let r = DAffine3::from_translation(pivot)
         * DAffine3::from_quat(DQuat::from_rotation_z(a.angle.to_radians()))
         * DAffine3::from_translation(-pivot);
-    transform_world(ctx.doc_mut(), &a.ids, |w| r * w);
+    transform_world(ctx.doc_mut(), &a.ids, |w| r * w)?;
     Ok(json!({ "pivot": pivot.to_array() }))
 }
 
@@ -217,7 +234,10 @@ fn set_placement(ctx: &mut Ctx, a: SetPlacementArgs) -> CmdResult {
     if let Some(r) = a.rotation {
         o.placement.rotation = r;
     }
-    Ok(json!(o.placement))
+    // Sketch-backed walls and floors keep only their height; x, y and rotation come
+    // from the sketch.
+    crate::sketch::sync_objects(ctx.doc_mut(), &[a.id]);
+    Ok(json!(ctx.doc().objects[&a.id].placement))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -242,7 +262,12 @@ fn set_layer(ctx: &mut Ctx, a: SetLayerArgs) -> CmdResult {
     for id in &a.ids {
         let w = world(doc, *id).expect("exists");
         let parent = doc.objects[id].parent;
-        doc.objects.get_mut(id).expect("exists").layer = layer;
+        let o = doc.objects.get_mut(id).expect("exists");
+        if o.layer != layer {
+            // Its edges stay in the old layer's sketch.
+            o.sketch = None;
+        }
+        o.layer = layer;
         if a.keep_world && parent.is_none() {
             let local = local_for_world(doc, &w, None, layer);
             doc.objects.get_mut(id).expect("exists").placement = local;
@@ -266,6 +291,12 @@ fn attach(ctx: &mut Ctx, a: AttachArgs) -> CmdResult {
     ensure_exists(doc, &a.ids)?;
     object(doc, a.parent)?;
     for &id in &a.ids {
+        if doc.objects[&id].sketch.is_some() {
+            return Err(CmdError::invalid(format!(
+                "{} follows the layer sketch and cannot hang on another object; sketch.unlink it first",
+                doc.objects[&id].name
+            )));
+        }
         if doc.is_ancestor(id, a.parent) {
             return Err(CmdError::invalid(format!("attaching {id} to {} would make a loop", a.parent)));
         }
@@ -328,6 +359,8 @@ fn duplicate(ctx: &mut Ctx, a: DuplicateArgs) -> CmdResult {
             map.insert(id, new_id);
             let mut o = doc.objects[&id].clone();
             o.id = new_id;
+            // A copy of a sketch-backed wall or floor is free geometry.
+            o.sketch = None;
             if let Some(l) = layer {
                 o.layer = l;
             }
@@ -348,7 +381,7 @@ fn duplicate(ctx: &mut Ctx, a: DuplicateArgs) -> CmdResult {
         doc.objects.insert(o.id, o);
     }
     let t = DAffine3::from_translation(DVec3::from_array(a.offset));
-    transform_world(doc, &new_tops, |w| t * w);
+    transform_world(doc, &new_tops, |w| t * w)?;
     let pairs: HashMap<String, Id> = map.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     Ok(json!({ "ids": new_tops, "map": pairs }))
 }

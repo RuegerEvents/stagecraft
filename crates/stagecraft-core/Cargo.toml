@@ -10,6 +10,7 @@ license.workspace = true
 glam.workspace = true
 stagecraft-gdtf.workspace = true
 stagecraft-mvr.workspace = true
+stagecraft-sketch.workspace = true
 sha2.workspace = true
 imbl.workspace = true
 schemars = { workspace = true, features = ["uuid1"] }

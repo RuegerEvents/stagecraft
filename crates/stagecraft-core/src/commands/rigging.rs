@@ -261,6 +261,7 @@ fn join(ctx: &mut Ctx, a: JoinArgs) -> CmdResult {
         kind: ObjectKind::TrussRun { profile: profile.unwrap_or_else(f34) },
         style: Default::default(),
         attrs: Default::default(),
+        sketch: None,
     };
     let run_id = run.id;
     let doc = ctx.doc_mut();

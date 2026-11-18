@@ -18,8 +18,9 @@ pub type P3 = [f64; 3];
 /// File format version written into every `.stagecraft`.
 ///
 /// 1: block 1–7 documents. 2: embedded assets (`assets/` in the ZIP) and the fixture
-/// type library. Version 1 files load unchanged (both maps start empty).
-pub const FORMAT_VERSION: u32 = 2;
+/// type library. 3: layer sketches, sketch-backed walls/floors and reference
+/// dimensions. Older files load unchanged (the new maps start empty).
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Document {
@@ -42,6 +43,14 @@ pub struct Document {
     /// Fixture types by key (`Manufacturer@Name`), each backed by a GDTF asset.
     #[serde(default)]
     pub fixture_types: OrdMap<String, crate::fixture_type::FixtureType>,
+    /// One parametric sketch per layer (keyed by layer id): the room outline, walls and
+    /// floors drawn with constraints and dimensions (block 9).
+    #[serde(default)]
+    pub sketches: OrdMap<Id, crate::sketch::Sketch>,
+    /// Reference dimensions between points of objects or sketches. They measure live
+    /// and drive nothing.
+    #[serde(default)]
+    pub dimensions: OrdMap<Id, crate::sketch::RefDimension>,
 }
 
 impl Default for Document {
@@ -64,6 +73,8 @@ impl Document {
             title_blocks: OrdMap::new(),
             assets: OrdMap::new(),
             fixture_types: OrdMap::new(),
+            sketches: OrdMap::new(),
+            dimensions: OrdMap::new(),
         };
         let stage = Layer { id: Uuid::new_v4(), name: "Stage".into(), elevation: 0.0, order: 0, visible: true };
         doc.layers.insert(stage.id, stage);
@@ -201,6 +212,10 @@ pub struct Object {
     /// anything else. Labels and tables can show them.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub attrs: std::collections::BTreeMap<String, String>,
+    /// Walls and floors whose geometry follows the layer's sketch: the edges they are
+    /// made of. `None` = free geometry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketch: Option<crate::sketch::SketchLink>,
 }
 
 /// Per-object plan style. Unset fields follow the view.

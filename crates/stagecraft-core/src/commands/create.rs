@@ -60,6 +60,7 @@ pub(crate) fn insert(
         kind,
         style: Default::default(),
         attrs: Default::default(),
+        sketch: None,
     };
     let id = o.id;
     ctx.doc_mut().objects.insert(id, o);
@@ -165,7 +166,7 @@ fn truss(ctx: &mut Ctx, a: TrussArgs) -> CmdResult {
     insert(ctx, a.common, "Truss", p, ObjectKind::Truss { length, profile: a.profile })
 }
 
-pub(super) fn positive(what: &str, v: f64) -> Result<(), CmdError> {
+pub(crate) fn positive(what: &str, v: f64) -> Result<(), CmdError> {
     if v > 0.0 && v.is_finite() {
         Ok(())
     } else {
@@ -188,6 +189,9 @@ fn floor_update(ctx: &mut Ctx, a: FloorUpdateArgs) -> CmdResult {
     }
     if let Some(t) = a.thickness {
         positive("thickness", t)?;
+    }
+    if a.outline.is_some() && ctx.doc().objects.get(&a.id).is_some_and(|o| o.sketch.is_some()) {
+        return Err(CmdError::invalid("this floor follows the sketch; change the sketch, or sketch.unlink it first"));
     }
     let o = kind_mut(ctx, a.id, "floor")?;
     let ObjectKind::Floor { outline, thickness } = &mut o.kind else { unreachable!() };
@@ -219,6 +223,9 @@ fn wall_update(ctx: &mut Ctx, a: WallUpdateArgs) -> CmdResult {
         if let Some(v) = v {
             positive(what, v)?;
         }
+    }
+    if a.path.is_some() && ctx.doc().objects.get(&a.id).is_some_and(|o| o.sketch.is_some()) {
+        return Err(CmdError::invalid("this wall follows the sketch; change the sketch, or sketch.unlink it first"));
     }
     let o = kind_mut(ctx, a.id, "wall")?;
     let ObjectKind::Wall { path, height, thickness } = &mut o.kind else { unreachable!() };
