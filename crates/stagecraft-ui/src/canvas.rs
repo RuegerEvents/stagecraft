@@ -23,6 +23,62 @@ pub fn visible_ids(doc: &Document, ui: &UiState) -> Vec<Id> {
     stagecraft_geom::pick::back_to_front(doc, shown)
 }
 
+/// The objects' plan primitives (world mm), kept while the document and the plan style
+/// stay the same: panning and zooming only map them to the screen. Any edit drops them
+/// all (an object's drawing can depend on others: parents, attachments, types).
+#[derive(Default)]
+pub struct PlanCache {
+    rev: Option<PlanRev>,
+    prims: std::collections::HashMap<Id, Vec<PlanPrim>>,
+}
+
+/// What plan primitives are made from: a snapshot of the document (its imbl maps are
+/// shared, so this is cheap and compared by identity) and the style.
+struct PlanRev {
+    doc: Document,
+    style: PlanStyle,
+}
+
+impl PlanRev {
+    fn is(&self, doc: &Document, style: &PlanStyle) -> bool {
+        let d = &self.doc;
+        d.objects.ptr_eq(&doc.objects)
+            && d.layers.ptr_eq(&doc.layers)
+            && d.tags.ptr_eq(&doc.tags)
+            && d.fixture_types.ptr_eq(&doc.fixture_types)
+            && d.assets.ptr_eq(&doc.assets)
+            && d.meta == doc.meta
+            && self.style == *style
+    }
+}
+
+impl PlanCache {
+    /// Forget everything if `doc` or `style` is not what the primitives were made from.
+    pub fn sync(&mut self, doc: &Document, style: &PlanStyle) {
+        if self.rev.as_ref().is_some_and(|r| r.is(doc, style)) {
+            return;
+        }
+        self.prims.clear();
+        self.rev = Some(PlanRev { doc: doc.clone(), style: style.clone() });
+    }
+
+    /// An object's primitives, made now if not cached. Call [`PlanCache::sync`] first.
+    pub fn get(&mut self, doc: &Document, o: &stagecraft_core::Object) -> &[PlanPrim] {
+        let style = self.rev.as_ref().map(|r| r.style.clone()).unwrap_or_default();
+        self.prims.entry(o.id).or_insert_with(|| stagecraft_geom::plan(doc, o, &style))
+    }
+
+    /// An object's primitives if they are cached.
+    pub fn cached(&self, id: Id) -> Option<&[PlanPrim]> {
+        self.prims.get(&id).map(Vec::as_slice)
+    }
+
+    /// Whether the cache was made from this document and style.
+    pub fn is_for(&self, doc: &Document, style: &PlanStyle) -> bool {
+        self.rev.as_ref().is_some_and(|r| r.is(doc, style))
+    }
+}
+
 /// Detail and labels by zoom: truss outlines only when a 290 mm profile is a few
 /// points wide, labels only when readable.
 pub fn plan_style(cam: &Camera) -> PlanStyle {
@@ -61,7 +117,6 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     if template.is_some() {
         style.labels = false;
     }
-    let hover = crate::tools::hovered(ui, &resp, s, &ids, &style);
     // While a sketch point is dragged, draw the document as the drag would leave it.
     let drag = match &s.ui.gesture.drag {
         Some(crate::state::Drag::SketchPoint { layer, point }) => {
@@ -70,6 +125,14 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         _ => None,
     };
     let preview = s.ui.sketch.preview_doc(s.engine.doc(), drag).cloned();
+    let doc = preview.as_ref().unwrap_or(s.engine.doc());
+    s.ui.plan.sync(doc, &style);
+    for id in &ids {
+        if let Some(o) = doc.objects.get(id) {
+            s.ui.plan.get(doc, o);
+        }
+    }
+    let hover = crate::tools::hovered(ui, &resp, s, &ids, &style);
     let doc = preview.as_ref().unwrap_or(s.engine.doc());
     let sel = s.engine.selection();
     for id in &ids {
@@ -81,16 +144,16 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         } else {
             None
         };
-        let prims = stagecraft_geom::plan(doc, o, &style);
+        let Some(prims) = s.ui.plan.cached(*id) else { continue };
         // Underlays: pictures from the assets, linework faded by their opacity.
         let colour = match &o.kind {
             stagecraft_core::ObjectKind::Underlay { opacity, .. } => {
-                draw_images(&painter, &s.ui.camera, doc, &prims);
+                draw_images(&painter, &s.ui.camera, doc, prims);
                 colour.or(Some(pal.line.gamma_multiply(*opacity as f32)))
             }
             _ => colour,
         };
-        draw_prims(&painter, &s.ui.camera, &pal, &prims, colour, 1.0);
+        draw_prims(&painter, &s.ui.camera, &pal, prims, colour, 1.0);
     }
 
     draw_conflicts(&painter, &s.ui.camera, &pal, doc, &ids);
@@ -204,33 +267,142 @@ fn draw_labels(
     crate::sheets::paint_prims(painter, &pcam, &prims);
 }
 
+/// Zoom per mouse wheel notch (one line of scrolling): about what CAD programs use.
+pub const WHEEL_ZOOM: f64 = 1.25;
+/// Zoom per point of ⌘- or Ctrl-scrolling on a trackpad: e-fold per 100 points.
+pub const SCROLL_ZOOM: f64 = 0.01;
+/// Trackpad pinch: the platform's magnification raised to this power, so a pinch
+/// covers a plan's range of scales in a gesture or two.
+pub const PINCH_GAIN: f64 = 1.5;
+/// The most one frame zooms by (fast free-spinning wheels).
+const MAX_FRAME_ZOOM: f64 = 4.0;
+
+/// The zoom factor this frame's input asks for: wheel notches, ⌘/Ctrl-scroll on a
+/// trackpad and pinch, proportional to their deltas and applied as they arrive (no
+/// smoothing, which lags behind the fingers). Plain trackpad scrolling is not zoom.
+pub fn zoom_factor(events: &[Event]) -> f64 {
+    let mut f = 1.0f64;
+    for e in events {
+        match e {
+            Event::MouseWheel { unit, delta, modifiers, .. } => {
+                let dy = delta.y as f64;
+                match unit {
+                    MouseWheelUnit::Line => f *= WHEEL_ZOOM.powf(dy),
+                    MouseWheelUnit::Page => f *= WHEEL_ZOOM.powf(dy * 3.0),
+                    MouseWheelUnit::Point if modifiers.command || modifiers.ctrl => f *= (dy * SCROLL_ZOOM).exp(),
+                    MouseWheelUnit::Point => {}
+                }
+            }
+            Event::Zoom(z) if *z > 0.0 => f *= (*z as f64).powf(PINCH_GAIN),
+            _ => {}
+        }
+    }
+    f.clamp(1.0 / MAX_FRAME_ZOOM, MAX_FRAME_ZOOM)
+}
+
 /// Scroll and pinch. Mouse wheels (line units) zoom, trackpad scrolling (point units)
-/// pans, pinch or ⌘-scroll zooms; middle or Space-drag pans.
+/// pans, pinch or ⌘-scroll zooms ([`zoom_factor`]); middle or Space-drag pans.
 fn navigate(ui: &Ui, resp: &egui::Response, cam: &mut Camera) {
     let pointer = ui.input(|i| i.pointer.hover_pos());
     let over = pointer.is_some_and(|p| cam.rect.contains(p));
+    let before = cam.scale;
     if over {
-        let (events, zoom) = ui.input(|i| (i.events.clone(), i.zoom_delta()));
+        let events = ui.input(|i| i.events.clone());
         let at = pointer.unwrap_or(cam.rect.center());
-        for e in events {
-            if let Event::MouseWheel { unit, delta, modifiers, .. } = e {
-                if modifiers.command || modifiers.ctrl {
-                    continue; // egui turns these into zoom_delta
-                }
-                match unit {
-                    MouseWheelUnit::Line | MouseWheelUnit::Page => cam.zoom_at(at, 1.15f64.powf(delta.y as f64)),
-                    MouseWheelUnit::Point => cam.pan_screen(delta),
-                }
+        for e in &events {
+            if let Event::MouseWheel { unit: MouseWheelUnit::Point, delta, modifiers, .. } = e
+                && !(modifiers.command || modifiers.ctrl)
+            {
+                cam.pan_screen(*delta);
             }
         }
+        let zoom = zoom_factor(&events);
         if zoom != 1.0 {
-            cam.zoom_at(at, zoom as f64);
+            cam.zoom_at(at, zoom);
         }
     }
     let space = ui.input(|i| i.key_down(egui::Key::Space));
     if resp.dragged_by(PointerButton::Middle) || (space && resp.dragged_by(PointerButton::Primary)) {
         cam.pan_screen(resp.drag_delta());
     }
+    note_zoom(ui.ctx(), before != cam.scale);
+}
+
+/// How long after the last zoom step plan text is laid out at its own size again.
+const ZOOM_SETTLE: f64 = 0.25;
+
+fn zoom_key() -> egui::Id {
+    egui::Id::unique("plan_zoomed_at")
+}
+
+/// Remember when the plan last zoomed, and ask for the frame after it settles (text
+/// laid out at its exact size again).
+fn note_zoom(ctx: &egui::Context, zoomed: bool) {
+    let now = ctx.input(|i| i.time);
+    if zoomed {
+        ctx.data_mut(|d| d.insert_temp(zoom_key(), now));
+    }
+    if let Some(t) = ctx.data(|d| d.get_temp::<f64>(zoom_key())) {
+        let left = t + ZOOM_SETTLE - now;
+        if left > 0.0 {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+        }
+    }
+}
+
+/// Whether the plan is being zoomed (a zoom step in the last [`ZOOM_SETTLE`] seconds).
+pub fn zooming(ctx: &egui::Context) -> bool {
+    let now = ctx.input(|i| i.time);
+    ctx.data(|d| d.get_temp::<f64>(zoom_key())).is_some_and(|t| now - t < ZOOM_SETTLE)
+}
+
+/// The text size glyphs are rasterised at while zooming: the next half octave at or
+/// above `px`, so a zoom gesture meets only a few sizes and finds them in egui's glyph
+/// atlas.
+pub fn ladder_size(px: f32) -> f32 {
+    2f32.powf((px.max(0.5).log2() * 2.0 - 1e-4).ceil() / 2.0).min(MAX_TEXT_PX)
+}
+
+/// Plan text is never rasterised bigger than this (points); larger text is the glyphs
+/// of this size scaled up. A note zoomed to half a metre on screen would otherwise put
+/// glyphs of a thousand pixels into egui's atlas, which fills and is rebuilt.
+pub const MAX_TEXT_PX: f32 = 96.0;
+
+/// Plan text laid out at `px` points. Rasterising glyphs at a new size is what made
+/// zooming slow (every frame of a zoom met new sizes for every note and label): while
+/// the plan zooms, the text is laid out at [`ladder_size`] and its glyph quads are scaled
+/// down to `px`; once the zoom settles it is laid out at its own size, crisp.
+pub fn plan_galley(p: &Painter, text: String, px: f32, colour: Color32, zooming: bool) -> std::sync::Arc<egui::Galley> {
+    if !zooming && px <= MAX_TEXT_PX {
+        return p.layout_no_wrap(text, theme::proportional(px), colour);
+    }
+    let q = if zooming { ladder_size(px) } else { MAX_TEXT_PX };
+    let g = p.layout_no_wrap(text, theme::proportional(q), colour);
+    scale_galley(&g, px / q)
+}
+
+/// A galley with its glyph quads (and rows, bounds) scaled by `k` about its origin. The
+/// texture coordinates stay, so the glyphs come from the atlas at the size laid out.
+pub fn scale_galley(g: &egui::Galley, k: f32) -> std::sync::Arc<egui::Galley> {
+    let rect = |r: Rect| Rect::from_min_max((r.min.to_vec2() * k).to_pos2(), (r.max.to_vec2() * k).to_pos2());
+    let mut g = g.clone();
+    for placed in &mut g.rows {
+        placed.pos = (placed.pos.to_vec2() * k).to_pos2();
+        let row = std::sync::Arc::make_mut(&mut placed.row);
+        for v in &mut row.visuals.mesh.vertices {
+            v.pos = (v.pos.to_vec2() * k).to_pos2();
+        }
+        row.visuals.mesh_bounds = rect(row.visuals.mesh_bounds);
+        row.size *= k;
+        for glyph in &mut row.glyphs {
+            glyph.pos = (glyph.pos.to_vec2() * k).to_pos2();
+            glyph.advance_width *= k;
+            glyph.line_height *= k;
+        }
+    }
+    g.rect = rect(g.rect);
+    g.mesh_bounds = rect(g.mesh_bounds);
+    std::sync::Arc::new(g)
 }
 
 const GRID_STEPS: [f64; 13] =
@@ -314,6 +486,7 @@ pub fn draw_prims(p: &Painter, cam: &Camera, pal: &Palette, prims: &[PlanPrim], 
     let extra = if colour.is_some() { 0.6 } else { 0.0 };
     let stroke = |c: LineClass| Stroke::new(theme::line_width(c) + extra, line_colour);
     let pts = |v: &[[f64; 2]]| v.iter().map(|q| cam.to_screen(*q)).collect::<Vec<_>>();
+    let zooming = zooming(p.ctx());
     for prim in prims {
         match prim {
             PlanPrim::Polygon { points, fill, line } => {
@@ -360,19 +533,23 @@ pub fn draw_prims(p: &Painter, cam: &Camera, pal: &Palette, prims: &[PlanPrim], 
             }
             PlanPrim::Text { pos, text, height, rotation, anchor } => {
                 let px = (*height * cam.scale) as f32 * 1.3;
+                if !text_may_show(p.clip_rect(), cam.to_screen(*pos), text, px) {
+                    continue;
+                }
                 let c = colour.unwrap_or(pal.text);
                 match anchor {
                     // Symbol labels: capped so they stay labels when zooming in.
                     stagecraft_geom::TextAnchor::Center if *rotation == 0.0 => {
                         if px >= 7.0 {
-                            let font = theme::proportional(px.min(28.0));
-                            p.text(cam.to_screen(*pos), Align2::CENTER_CENTER, text, font, c);
+                            let galley = plan_galley(p, text.clone(), px.min(28.0), c, zooming);
+                            let at = cam.to_screen(*pos) - galley.size() / 2.0;
+                            p.galley(at, galley, c);
                         }
                     }
                     // Notes and drawing text scale with the plan, like on paper.
                     _ => {
                         if px >= 4.0 {
-                            let galley = p.layout_no_wrap(text.clone(), theme::proportional(px), c);
+                            let galley = plan_galley(p, text.clone(), px, c, zooming);
                             let size = galley.size();
                             let a = -(rotation.to_radians() as f32);
                             let dx = if *anchor == stagecraft_geom::TextAnchor::Center { -size.x / 2.0 } else { 0.0 };
@@ -387,6 +564,16 @@ pub fn draw_prims(p: &Painter, cam: &Camera, pal: &Palette, prims: &[PlanPrim], 
             PlanPrim::Image { .. } => {}
         }
     }
+}
+
+/// Whether text at `at` (its anchor, screen) of `px` points can reach `clip`, judged
+/// before laying it out: a circle around the anchor as wide as the longest line could
+/// be. Zoomed in, most notes are off screen; laying them out is what costs.
+pub fn text_may_show(clip: Rect, at: Pos2, text: &str, px: f32) -> bool {
+    let longest = text.lines().map(|l| l.chars().count()).max().unwrap_or(0) as f32;
+    let lines = text.lines().count().max(1) as f32;
+    let r = longest * px * 0.7 + lines * px * 1.4 + 4.0;
+    clip.expand(r).contains(at)
 }
 
 fn fill_polygon(p: &Painter, world: &[[f64; 2]], screen: &[Pos2], fill: Color32) {
@@ -436,5 +623,109 @@ mod tests {
         assert!((before[0] - after[0]).abs() < 1e-6 && (before[1] - after[1]).abs() < 1e-6);
         // y is up in the world, down on screen.
         assert!(cam.to_screen([0.0, 1000.0]).y < cam.to_screen([0.0, 0.0]).y);
+    }
+
+    fn wheel(unit: MouseWheelUnit, dy: f32, modifiers: egui::Modifiers) -> Event {
+        Event::MouseWheel {
+            unit,
+            delta: egui::vec2(0.0, dy),
+            modifiers,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+        }
+    }
+
+    #[test]
+    fn zoom_follows_the_deltas() {
+        let none = egui::Modifiers::NONE;
+        let f = zoom_factor(&[wheel(MouseWheelUnit::Line, 1.0, none)]);
+        assert!((f - WHEEL_ZOOM).abs() < 1e-9);
+        // Two notches in one frame zoom twice as far (in log), half a notch half.
+        let two = zoom_factor(&[wheel(MouseWheelUnit::Line, 1.0, none), wheel(MouseWheelUnit::Line, 1.0, none)]);
+        assert!((two - WHEEL_ZOOM * WHEEL_ZOOM).abs() < 1e-9);
+        assert!((zoom_factor(&[wheel(MouseWheelUnit::Line, 0.5, none)]) - WHEEL_ZOOM.sqrt()).abs() < 1e-9);
+        // Notches out undo notches in.
+        let back = zoom_factor(&[wheel(MouseWheelUnit::Line, 1.0, none), wheel(MouseWheelUnit::Line, -1.0, none)]);
+        assert!((back - 1.0).abs() < 1e-9);
+        // Trackpad scrolling pans; with ⌘ it zooms by its points.
+        assert_eq!(zoom_factor(&[wheel(MouseWheelUnit::Point, 40.0, none)]), 1.0);
+        let cmd = zoom_factor(&[wheel(MouseWheelUnit::Point, 40.0, egui::Modifiers::COMMAND)]);
+        assert!((cmd - (40.0 * SCROLL_ZOOM).exp()).abs() < 1e-9);
+        // Pinch is amplified, and a free-spinning wheel is capped.
+        let pinch = zoom_factor(&[Event::Zoom(1.1)]);
+        assert!(pinch > 1.1 && (pinch - 1.1f64.powf(PINCH_GAIN)).abs() < 1e-6);
+        assert_eq!(zoom_factor(&[wheel(MouseWheelUnit::Line, 40.0, none)]), MAX_FRAME_ZOOM);
+    }
+
+    #[test]
+    fn zooming_text_meets_few_sizes() {
+        // Every size maps to a half octave at or above it, so a zoom over 10..40 points
+        // rasterises five sizes, not one per frame.
+        let mut sizes: Vec<u32> = (0..300).map(|i| ladder_size(10.0 * 1.0047f32.powi(i)).to_bits()).collect();
+        sizes.dedup();
+        assert!(sizes.len() <= 5, "{} sizes", sizes.len());
+        for px in [4.0f32, 7.3, 11.5, 16.0, 31.9, 60.0] {
+            let q = ladder_size(px);
+            assert!(q >= px - 1e-3 && q < px * 1.42, "{px} -> {q}");
+        }
+        assert_eq!(ladder_size(500.0), MAX_TEXT_PX);
+    }
+
+    #[test]
+    fn a_scaled_galley_keeps_its_glyphs_and_shrinks() {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            let p = ui.painter();
+            let g = p.layout_no_wrap("Note A1".into(), theme::proportional(32.0), Color32::WHITE);
+            let s = scale_galley(&g, 0.5);
+            assert!((s.size().x - g.size().x * 0.5).abs() < 0.01 && (s.size().y - g.size().y * 0.5).abs() < 0.01);
+            let (a, b) = (&g.rows[0].visuals.mesh, &s.rows[0].visuals.mesh);
+            assert_eq!(a.vertices.len(), b.vertices.len());
+            for (va, vb) in a.vertices.iter().zip(&b.vertices) {
+                assert_eq!(va.uv, vb.uv, "same atlas texels");
+                assert!((vb.pos.x - va.pos.x * 0.5).abs() < 1e-4);
+            }
+            // While zooming the plan lays out at a ladder size and scales: same size.
+            let z = plan_galley(p, "Note A1".into(), 27.0, Color32::WHITE, true);
+            let exact = plan_galley(p, "Note A1".into(), 27.0, Color32::WHITE, false);
+            assert!((z.size().x - exact.size().x).abs() < exact.size().x * 0.05);
+        });
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn off_screen_text_is_skipped_before_layout() {
+        let clip = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        assert!(text_may_show(clip, Pos2::new(400.0, 300.0), "A1", 12.0));
+        // Starts left of the screen but is long enough to reach into it.
+        assert!(text_may_show(clip, Pos2::new(-200.0, 300.0), "a long note that reaches in", 20.0));
+        assert!(!text_may_show(clip, Pos2::new(-2000.0, 300.0), "A1", 12.0));
+        assert!(!text_may_show(clip, Pos2::new(400.0, 5000.0), "line\nline", 30.0));
+    }
+
+    #[test]
+    fn plan_primitives_are_kept_until_the_document_changes() {
+        let mut e = crate::demo::engine();
+        let style = PlanStyle::default();
+        let mut cache = PlanCache::default();
+        let id = *e.doc().objects.keys().next().unwrap();
+        let o = e.doc().objects[&id].clone();
+        cache.sync(e.doc(), &style);
+        let made = cache.get(e.doc(), &o).to_vec();
+        assert_eq!(made, stagecraft_geom::plan(e.doc(), &o, &style));
+        // Another frame of the same document: kept (panning and zooming).
+        cache.sync(e.doc(), &style);
+        assert!(cache.cached(id).is_some() && cache.is_for(e.doc(), &style));
+        // Another style (detail by zoom) or an edit: made again.
+        let low = PlanStyle { detail: Detail::Low, ..style.clone() };
+        assert!(!cache.is_for(e.doc(), &low));
+        e.execute("object.move", serde_json::json!({ "ids": [id], "delta": [100.0, 0.0, 0.0] })).unwrap();
+        assert!(!cache.is_for(e.doc(), &style));
+        cache.sync(e.doc(), &style);
+        assert!(cache.cached(id).is_none());
+        // A selection is not an edit of the drawing.
+        cache.get(e.doc(), &e.doc().objects[&id].clone());
+        e.execute("selection.set", serde_json::json!({ "ids": [id] })).unwrap();
+        assert!(cache.is_for(e.doc(), &style));
     }
 }

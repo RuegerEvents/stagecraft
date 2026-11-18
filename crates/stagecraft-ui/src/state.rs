@@ -480,6 +480,8 @@ pub struct UiState {
     pub sheets: crate::sheets::SheetsState,
     /// Label template the plan canvas draws fixture labels with (`None` = FIDs only).
     pub plan_labels: Option<Id>,
+    /// The plan canvas's primitives per object (`canvas::PlanCache`).
+    pub plan: crate::canvas::PlanCache,
     pub shots: Vec<PendingShot>,
     /// Set by the File menu; `Studio::file_dialogs` queues the dialog, which shows after the
     /// frame and is answered on a later one.
@@ -557,6 +559,7 @@ impl Default for UiState {
             status: None,
             sheets: Default::default(),
             plan_labels: None,
+            plan: Default::default(),
             shots: Vec::new(),
             file_request: None,
             native_dialogs: false,

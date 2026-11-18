@@ -29,7 +29,16 @@ pub fn hovered(ui: &Ui, resp: &Response, s: &Studio, ids: &[Id], style: &PlanSty
     }
     let _ = ui;
     let p = s.ui.camera.to_world(resp.hover_pos()?);
-    pick(s.engine.doc(), ids.iter().copied(), p, tolerance(&s.ui.camera), style)
+    let doc = s.engine.doc();
+    if !s.ui.plan.is_for(doc, style) {
+        return pick(doc, ids.iter().copied(), p, tolerance(&s.ui.camera), style);
+    }
+    // The canvas's cached primitives: hovering runs every frame.
+    let cache = &s.ui.plan;
+    stagecraft_geom::pick::pick_by(doc, ids.iter().copied(), p, tolerance(&s.ui.camera), |o| match cache.cached(o.id) {
+        Some(prims) => std::borrow::Cow::Borrowed(prims),
+        None => std::borrow::Cow::Owned(stagecraft_geom::plan(doc, o, style)),
+    })
 }
 
 pub fn interact(ui: &mut Ui, resp: &Response, s: &mut Studio, ids: &[Id], style: &PlanStyle) {

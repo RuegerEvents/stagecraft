@@ -95,7 +95,7 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
 - UI state has its own `ui.*` registry in `src/commands.rs`. In GUI mode the control
   server lists/describes/runs both (`UiExtension`); calls are answered in
   `StageApp::logic`, and `ui.screenshot` is answered after the frame arrives.
-- Canvas drawing in `canvas.rs`, tool behaviour in `tools.rs` (drags are transient
+- Canvas drawing in `canvas.rs` (object primitives cached in `canvas::PlanCache` until an edit; zoom factors `canvas::zoom_factor`; text through `canvas::plan_galley`, which scales cached glyph sizes while zooming; frame budgets on the Hall A file in `tests/perf.rs`, run `--release`), tool behaviour in `tools.rs` (drags are transient
   `Gesture` state; one command on release). Typed dimensions are Fusion-style heads-up boxes (`hud.rs`): length (and angle)
   boxes beside the rubber band show live values; a digit goes straight into the length box,
   Tab cycles length → angle, a box whose text parses is locked (lock icon) and Enter or a

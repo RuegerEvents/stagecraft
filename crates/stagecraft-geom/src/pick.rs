@@ -72,10 +72,21 @@ pub fn distance(prims: &[PlanPrim], p: P2) -> f64 {
 /// The object under `p` among `ids`, within `tolerance` mm. Rank first (fixtures over
 /// truss over walls over floors), then distance.
 pub fn pick(doc: &Document, ids: impl IntoIterator<Item = Id>, p: P2, tolerance: f64, style: &PlanStyle) -> Option<Id> {
+    pick_by(doc, ids, p, tolerance, |o| std::borrow::Cow::Owned(plan(doc, o, style)))
+}
+
+/// [`pick`] with the objects' primitives from `prims_of` (a view's cache).
+pub fn pick_by<'a>(
+    doc: &Document,
+    ids: impl IntoIterator<Item = Id>,
+    p: P2,
+    tolerance: f64,
+    mut prims_of: impl FnMut(&Object) -> std::borrow::Cow<'a, [PlanPrim]>,
+) -> Option<Id> {
     let mut best: Option<(u8, f64, Id)> = None;
     for id in ids {
         let Some(o) = doc.objects.get(&id).filter(|o| pickable(o)) else { continue };
-        let prims = plan(doc, o, style);
+        let prims = prims_of(o);
         if bounds(&prims).distance(p) > tolerance {
             continue;
         }

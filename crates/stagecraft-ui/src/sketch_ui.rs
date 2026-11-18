@@ -60,8 +60,21 @@ pub struct DimEdit {
 
 struct Preview {
     key: (Id, PointId, [u64; 2]),
-    doc: Document,
+    /// `None`: the drag to this point cannot be solved (not tried again each frame).
+    doc: Option<Document>,
 }
+
+/// A sketch analysis running on a worker thread, for the sketch it was started with.
+struct Pending {
+    sketch: Sketch,
+    rx: std::sync::mpsc::Receiver<Option<Status>>,
+}
+
+/// How long a frame waits for a sketch analysis before it draws with the previous one
+/// and picks the result up on a later frame. Debug builds (the GUI tests) wait longer,
+/// so a test sees the analysis of the edit it just made.
+pub const ANALYSIS_WAIT: std::time::Duration =
+    std::time::Duration::from_millis(if cfg!(debug_assertions) { 2000 } else { 12 });
 
 /// A picked sketch point or line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,6 +110,7 @@ pub struct SketchUi {
     pub picked: Vec<SketchItem>,
     pub picked_layer: Option<Id>,
     cache: HashMap<Id, (Sketch, Option<Status>)>,
+    pending: HashMap<Id, Pending>,
     preview: Option<Preview>,
 }
 
@@ -112,6 +126,7 @@ impl Default for SketchUi {
             picked: Vec::new(),
             picked_layer: None,
             cache: HashMap::new(),
+            pending: HashMap::new(),
             preview: None,
         }
     }
@@ -121,7 +136,10 @@ impl SketchUi {
     /// The analysis of a layer's sketch, cached until the sketch changes. With `live`
     /// (a drag preview), only a change of structure (points, edges, constraints,
     /// dimensions; not positions) runs it again: degrees of freedom do not change
-    /// while dragging, and the analysis costs tens of milliseconds on big sketches.
+    /// while dragging. The analysis (a QR decomposition of the constraint Jacobian)
+    /// runs on a worker thread; a frame waits for it at most [`ANALYSIS_WAIT`] and
+    /// otherwise shows the previous analysis until the new one arrives, so a big sketch
+    /// never stalls a click or a frame.
     pub fn status(&mut self, layer: Id, s: &Sketch, live: bool) -> Option<&Status> {
         let same = |c: &Sketch| {
             if !live {
@@ -136,9 +154,36 @@ impl SketchUi {
         };
         let fresh = self.cache.get(&layer).is_some_and(|(c, _)| same(c));
         if !fresh {
-            self.cache.insert(layer, (s.clone(), s.analyse().ok()));
+            let started = self.pending.get(&layer).is_some_and(|p| same(&p.sketch));
+            if !started {
+                let sketch = s.clone();
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(sketch.analyse().ok());
+                });
+                self.pending.insert(layer, Pending { sketch: s.clone(), rx });
+            }
+            let wait = if started { std::time::Duration::ZERO } else { ANALYSIS_WAIT };
+            if let Some(p) = self.pending.get(&layer) {
+                match p.rx.recv_timeout(wait) {
+                    Ok(st) => {
+                        let p = self.pending.remove(&layer).expect("pending");
+                        self.cache.insert(layer, (p.sketch, st));
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        let p = self.pending.remove(&layer).expect("pending");
+                        self.cache.insert(layer, (p.sketch, None));
+                    }
+                }
+            }
         }
         self.cache.get(&layer).and_then(|(_, st)| st.as_ref())
+    }
+
+    /// Whether an analysis is still running (the caller repaints until it is in).
+    pub fn analysing(&self) -> bool {
+        !self.pending.is_empty()
     }
 
     /// The document with a sketch point dragged to `to` (solved, walls and floors
@@ -152,13 +197,19 @@ impl SketchUi {
         let key = (layer, point, [to[0].to_bits(), to[1].to_bits()]);
         if self.preview.as_ref().is_none_or(|p| p.key != key) {
             let s = doc.sketches.get(&layer)?;
-            if let Ok(solved) = s.drag(point, sk::v2(to), &SolveOptions::drag()) {
+            let solved = s.drag(point, sk::v2(to), &SolveOptions::drag()).ok().map(|solved| {
                 let mut d = doc.clone();
                 sk::store(&mut d, layer, solved.sketch);
-                self.preview = Some(Preview { key, doc: d });
+                d
+            });
+            // A drag that cannot be solved keeps the last preview that could.
+            match (solved, self.preview.take()) {
+                (Some(d), _) => self.preview = Some(Preview { key, doc: Some(d) }),
+                (None, Some(old)) if old.doc.is_some() => self.preview = Some(Preview { key, ..old }),
+                (None, _) => self.preview = Some(Preview { key, doc: None }),
             }
         }
-        self.preview.as_ref().map(|p| &p.doc)
+        self.preview.as_ref().and_then(|p| p.doc.as_ref())
     }
 }
 
@@ -522,7 +573,7 @@ pub fn draw(p: &egui::Painter, cam: &Camera, pal: &Palette, doc: &Document, sui:
     for l in visible_layers(doc) {
         let Some(s) = doc.sketches.get(&l) else { continue };
         let colours = sui.colours;
-        let live = sui.preview.is_some();
+        let live = sui.preview.as_ref().is_some_and(|p| p.doc.is_some());
         let status = if colours { sui.status(l, s, live).cloned() } else { None };
         // Edges and points touched by a conflicting constraint.
         let mut bad_edges = Vec::new();
@@ -568,6 +619,9 @@ pub fn draw(p: &egui::Painter, cam: &Camera, pal: &Palette, doc: &Document, sui:
                 p.rect_stroke(r, 1.0, Stroke::new(1.3, colour), egui::StrokeKind::Middle);
             }
         }
+    }
+    if sui.analysing() {
+        p.ctx().request_repaint();
     }
     if !sui.dimensions {
         return;
@@ -1039,4 +1093,34 @@ pub fn dimension_state(sui: &mut SketchUi, doc: &Document, src: DimSource) -> Op
     let DimSource::Sketch { layer, id } = src else { return None };
     let s = doc.sketches.get(&layer)?;
     sui.status(layer, s, false).map(|st| st.constraint_state(id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_analysis_runs_off_the_frame_and_is_cached() {
+        let mut s = Sketch::default();
+        let a = s.add_point(sk::v2([0.0, 0.0]));
+        let b = s.add_point(sk::v2([1000.0, 0.0]));
+        s.add_line(a, b);
+        s.fix(a);
+        let layer = Id::new_v4();
+        let mut sui = SketchUi::default();
+        // Debug builds wait for it; it is there on the first call.
+        let dof = sui.status(layer, &s, false).map(|st| st.dof);
+        assert_eq!(dof, Some(2));
+        assert!(!sui.analysing());
+        // Same sketch: from the cache, nothing started.
+        assert!(sui.status(layer, &s, false).is_some());
+        assert!(!sui.analysing());
+        // Moved points while dragging (`live`): the structure is the same, no new analysis.
+        let mut moved = s.clone();
+        moved.points[1].pos = sk::v2([1200.0, 50.0]);
+        assert!(sui.status(layer, &moved, true).is_some());
+        assert!(!sui.analysing());
+        // After the drop the moved sketch is analysed again.
+        assert_eq!(sui.status(layer, &moved, false).map(|st| st.dof), Some(2));
+    }
 }

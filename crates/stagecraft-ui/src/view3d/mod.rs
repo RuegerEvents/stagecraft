@@ -286,21 +286,22 @@ fn navigate(ui: &Ui, resp: &egui::Response, cam: &mut Camera3d) {
     let pointer = ui.input(|i| i.pointer.hover_pos());
     if pointer.is_some_and(|p| cam.rect.contains(p)) {
         let at = pointer.unwrap_or(cam.rect.center());
-        let (events, zoom) = ui.input(|i| (i.events.clone(), i.zoom_delta()));
-        for e in events {
-            if let Event::MouseWheel { unit, delta, modifiers, .. } = e {
-                if modifiers.command || modifiers.ctrl {
-                    continue; // egui turns these into zoom_delta
-                }
-                match unit {
-                    MouseWheelUnit::Line | MouseWheelUnit::Page => cam.zoom_at(at, 1.15f64.powf(delta.y as f64)),
-                    MouseWheelUnit::Point if modifiers.shift => cam.pan_screen(delta),
-                    MouseWheelUnit::Point => cam.orbit(delta),
+        let events = ui.input(|i| i.events.clone());
+        for e in &events {
+            if let Event::MouseWheel { unit: MouseWheelUnit::Point, delta, modifiers, .. } = e
+                && !(modifiers.command || modifiers.ctrl)
+            {
+                if modifiers.shift {
+                    cam.pan_screen(*delta);
+                } else {
+                    cam.orbit(*delta);
                 }
             }
         }
+        // Wheel notches, ⌘-scroll and pinch zoom as in the plan.
+        let zoom = crate::canvas::zoom_factor(&events);
         if zoom != 1.0 {
-            cam.zoom_at(at, zoom as f64);
+            cam.zoom_at(at, zoom);
         }
     }
     let (shift, space) = ui.input(|i| (i.modifiers.shift, i.key_down(egui::Key::Space)));
