@@ -368,6 +368,11 @@ fn a_fresh_profile_is_offered_the_tutorial_once() {
     let mut h = build(studio);
     assert!(h.query_by_label_contains("Build a basic stage?").is_some());
     assert!(h.query_by_label("Not now").is_some() && h.query_by_label("Don't ask again").is_some());
+    // Not modal: the rest of the window keeps working while the offer shows.
+    h.get_by_label("Tool Wall").click();
+    h.run();
+    assert_eq!(h.state().ui.tool, Tool::Wall, "the window stays usable");
+    assert!(h.state().ui.tutorial_offer, "the offer stays until answered");
     h.get_by_label("Start tutorial").click();
     h.run();
     assert!(h.state().ui.tutorial.active, "the tour starts");
