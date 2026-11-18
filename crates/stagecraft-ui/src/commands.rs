@@ -438,11 +438,12 @@ fn zoom_to_fit(c: &mut UiCtx, a: FitArgs) -> CmdResult {
         c.ui.sheets.fit_pending = true;
     }
     if c.ui.view.shows_plan() {
-        let mut b = stagecraft_geom::pick::objects_bounds(c.engine.doc(), ids.clone(), &Default::default());
-        if !a.selection {
-            b = b.union(&crate::sketch_ui::bounds(c.engine.doc()));
+        let b = stagecraft_geom::pick::objects_bounds(c.engine.doc(), ids.clone(), &Default::default());
+        if a.selection {
+            c.ui.camera.fit(b);
+        } else {
+            crate::sketch_ui::fit(&mut c.ui.camera, c.engine.doc(), b);
         }
-        c.ui.camera.fit(b);
         c.ui.fit_pending = false;
         out["center"] = json!(c.ui.camera.center);
         out["scale"] = json!(c.ui.camera.scale);

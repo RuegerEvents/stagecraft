@@ -882,6 +882,21 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
             }
             ui.end_row();
         }
+        if matches!(vp.view, ViewKind::Plan | ViewKind::PlanFrom3d { .. }) {
+            for (key, field, on) in [
+                ("sheets.sketch_dimensions", "sketch_dimensions", vp.sketch_dimensions),
+                ("sheets.reference_dimensions", "reference_dimensions", vp.reference_dimensions),
+            ] {
+                let mut v = on;
+                ui.label(t(key));
+                let r = ui.checkbox(&mut v, "");
+                crate::widgets::name(&r, egui::WidgetType::Checkbox, t(key));
+                if r.changed() {
+                    up(s, json!({ field: v }));
+                }
+                ui.end_row();
+            }
+        }
     });
 
     if !doc.tags.is_empty() {

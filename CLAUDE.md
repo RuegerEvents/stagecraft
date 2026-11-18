@@ -16,7 +16,7 @@ UX. Commits are GPG-signed.
 
 - `stagecraft-core` holds the document and every command. No UI, no sockets, no clock.
   It must keep building for `wasm32-unknown-unknown`
-  (`cargo check -p stagecraft-core -p stagecraft-geom -p stagecraft-sheet -p stagecraft-gdtf -p stagecraft-hlr -p stagecraft-mvr --target wasm32-unknown-unknown`).
+  (`cargo check -p stagecraft-core -p stagecraft-geom -p stagecraft-sheet -p stagecraft-gdtf -p stagecraft-hlr -p stagecraft-mvr -p stagecraft-sketch --target wasm32-unknown-unknown`).
 - **Every action is a command** registered in `crates/stagecraft-core/src/commands/`.
   The GUI never mutates the document directly. A new feature without a command is not
   done.
@@ -180,6 +180,34 @@ front, sections, a truss close-up, the stage from the house, the fly bar list an
 split. The overview shots hide the `ceiling` tag, which would cover the house. With
 `testdata/private/vectorworks/sample_show.mvr` present it also renders that
 import in plan and 3D (`26-mvr-*`, `27-mvr-*`).
+
+## Parametric sketch (block 9, `docs/spec/sketch.md`)
+
+`stagecraft-sketch` (workspace member, no StageCraft deps; README there) is the
+constraint sketch solved with ezpz: points, lines, arcs, constraints, driving and
+reference dimensions, `Edit`s, loops, drawing inference. The workspace root optimises
+it, faer and ezpz in dev builds (the analysis is ~500× slower unoptimised).
+
+Core (`sketch.rs`, commands in `commands/sketch.rs`): `Document.sketches` holds one
+sketch per layer (layer plan mm). Walls and floors with `Object.sketch =
+Some(SketchLink { edges })` follow it: `sketch::store`/`sync_layer` rewrite their
+`path`/`outline` after every edit, so geom, sheets, HLR and MVR need no sketch
+knowledge. Linked objects are roots at x/y/rotation 0 (only z is theirs);
+`object.move`/`rotate` drag their sketch points. `Document.dimensions` are reference
+dimensions between anchors (object + local point, sketch point, world point).
+Commands: `sketch.get/status/add_point/add_line/add_arc/add_polyline/add_constraint/
+remove_constraint/remove/drag/draw_line/draw/make_wall/make_floor/adopt/unlink/solve/
+edit`, `dimension.add/add_reference/set_value/set_driving/move_label/name/remove/list`
+(ids: number = sketch dimension, UUID = reference, or a name). An edit the solver
+cannot satisfy fails with code `conflict` naming the constraints; the engine rolls
+back. Tests: `crates/stagecraft-core/tests/sketch.rs`.
+
+Drawing: `stagecraft_geom::dims` (shared by canvas and sheets; plan viewports have
+`sketch_dimensions`/`reference_dimensions` toggles). GUI: `src/sketch_ui.rs` (overlay
+in FreeCAD colours with a cached analysis, dimension hit tests, inline value editor,
+drag preview, inspector section, dimension tool picks); wall/floor tools run
+`sketch.draw`; `ui.sketch`, `ui.dimension`. GUI tests in `tests/sketch.rs` (the
+harness there uses 1/60 s steps so double clicks register), screens `30-35-sketch-*`.
 
 ## MVR and imported models
 

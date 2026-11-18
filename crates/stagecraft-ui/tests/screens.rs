@@ -324,3 +324,121 @@ fn imported_mvr() {
     h.state_mut().run("ui.camera", json!({ "view": "iso" })).unwrap();
     save(&mut h, &dir, "27-mvr-3d-light");
 }
+
+/// A small parametric room: walls and floor drawn into the sketch with typed lengths,
+/// a locked corner (fully constrained, green), a free partition line (normal colour),
+/// a reference dimension from a truss to the back wall; then the value editor, a drag
+/// in progress, a sketch loaded with a conflict (red) and a sheet with the dimensions.
+fn sketch_engine() -> stagecraft_core::Engine {
+    let mut e = stagecraft_core::Engine::new();
+    let mut run =
+        |name: &str, args: serde_json::Value| e.execute(name, args).unwrap_or_else(|err| panic!("{name}: {err}"));
+    let seg = |len: f64| json!({ "axis_lock": true, "length": len });
+    run(
+        "sketch.draw",
+        json!({ "points": [[-6000, 0], [6000, 0], [6000, 9000], [-6000, 9000]], "closed": true, "make": "wall",
+                "thickness": 240, "segments": [seg(12000.0), seg(9000.0), seg(12000.0)] }),
+    );
+    run("sketch.make_floor", json!({ "at": [0, 4000] }));
+    let s = run("sketch.get", json!({}));
+    let p0 = s["sketch"]["points"][0]["id"].clone();
+    run(
+        "sketch.add_constraint",
+        json!({ "constraint": { "type": "fixed", "point": p0, "at": { "x": -6000, "y": 0 } } }),
+    );
+    let w = run("dimension.list", json!({}))[0]["id"].clone();
+    run("dimension.name", json!({ "id": w, "name": "room width" }));
+    // A free line across the room (the setting line), not constrained yet.
+    run("sketch.draw_line", json!({ "start": [-6000, 3000], "end": [6000, 3100], "snap_radius": 200 }));
+    let truss = run("truss.create", json!({ "start": [-4000, 5000, 6000], "end": [4000, 5000, 6000] }));
+    let back = s["sketch"]["points"][2]["id"].clone();
+    let layer = s["layer"].clone();
+    run(
+        "dimension.add_reference",
+        json!({ "from": { "type": "object", "object": truss["id"], "local": [8000, 0, 0] },
+                "to": { "type": "sketch_point", "layer": layer, "point": back },
+                "axis": "vertical", "label_offset": [1600, 0], "name": "truss to back wall" }),
+    );
+    e
+}
+
+#[test]
+fn sketch_room() {
+    let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") else { return };
+    std::fs::create_dir_all(&dir).expect("screenshot dir");
+    for (theme, tn) in [(ThemePref::Light, "light"), (ThemePref::Dark, "dark")] {
+        let mut h = harness_with(theme, sketch_engine());
+        let run = |h: &mut Harness<'static, Studio>, name: &str, args: serde_json::Value| {
+            h.state_mut().run(name, args).unwrap_or_else(|e| panic!("{name}: {e}"));
+            h.run();
+        };
+        run(&mut h, "ui.set_view", json!({ "view": "plan" }));
+        run(&mut h, "ui.zoom_to_fit", json!({}));
+        save(&mut h, &dir, &format!("30-sketch-room-{tn}"));
+
+        // The width selected and its value editor open, "14" typed.
+        run(&mut h, "ui.dimension", json!({ "id": "room width", "edit": true }));
+        h.run();
+        if let Some(e) = &mut h.state_mut().ui.sketch.editing {
+            e.text = "14".into();
+        }
+        save(&mut h, &dir, &format!("31-sketch-edit-{tn}"));
+        run(&mut h, "dimension.set_value", json!({ "id": "room width", "value": 14000 }));
+        run(&mut h, "ui.dimension", json!({ "id": null }));
+        run(&mut h, "ui.zoom_to_fit", json!({}));
+        save(&mut h, &dir, &format!("32-sketch-wider-{tn}"));
+
+        // A drag in progress: the free line's right end pulled up.
+        let cam = h.state().ui.camera;
+        let from = cam.to_screen([8000.0, 3100.0]);
+        let to = cam.to_screen([8000.0, 6000.0]);
+        h.hover_at(from);
+        h.run();
+        h.event(Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        });
+        h.run();
+        for i in 1..=4 {
+            h.event(Event::PointerMoved(from + (to - from) * (i as f32 / 4.0)));
+            h.run();
+        }
+        save(&mut h, &dir, &format!("33-sketch-drag-{tn}"));
+        h.event(Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        });
+        h.run();
+
+        // A file whose sketch contradicts itself: the conflict shows red.
+        let mut doc = h.state().engine.doc().clone();
+        let layer = *doc.sketches.keys().next().unwrap();
+        let mut sk = doc.sketches[&layer].clone();
+        let line = sk.edges[0].id;
+        sk.add_dimension(stagecraft_core::sketch::Measure::Length { line }, 10000.0);
+        doc.sketches.insert(layer, sk);
+        let mut h2 = harness_with(theme, stagecraft_core::Engine::with_document(doc));
+        h2.state_mut().run("ui.zoom_to_fit", json!({})).unwrap();
+        save(&mut h2, &dir, &format!("34-sketch-conflict-{tn}"));
+
+        // A sheet with a plan viewport: walls, floor, truss and both kinds of dimension.
+        if theme == ThemePref::Light {
+            let sh = h.state_mut().run("sheet.create", json!({ "name": "Room", "number": "R-1" })).unwrap();
+            run(
+                &mut h,
+                "viewport.create",
+                json!({ "sheet": sh["id"], "view": "plan", "scale": 100, "position": [190, 160] }),
+            );
+            run(&mut h, "ui.set_view", json!({ "view": "sheets" }));
+            run(&mut h, "ui.sheet", json!({ "sheet": "R-1", "fit": true }));
+            for _ in 0..20 {
+                h.run();
+            }
+            save(&mut h, &dir, "35-sketch-sheet-light");
+        }
+    }
+}

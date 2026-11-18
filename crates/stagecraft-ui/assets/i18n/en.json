@@ -428,5 +428,10 @@
   "sketch.became_reference": "The sketch is already constrained there: added as a reference dimension",
   "status.rejected": "Rejected: {message}",
   "sketch.locked": "Corner locked (fixed)",
-  "sketch.unlocked": "Corner unlocked"
+  "sketch.unlocked": "Corner unlocked",
+  "sketch.dof_one": "1 degree of freedom",
+  "sketch.conflicts_one": "1 conflicting constraint",
+  "sketch.redundant_one": "1 redundant constraint",
+  "sheets.sketch_dimensions": "Sketch dims",
+  "sheets.reference_dimensions": "Ref. dims"
 }

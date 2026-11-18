@@ -191,13 +191,30 @@ pub fn point_at(doc: &Document, p: P2, tol: f64) -> Option<(Id, PointId, P2)> {
     best.map(|b| (b.0, b.1, b.2))
 }
 
-/// The box around every sketch point of the visible layers (for zoom to fit).
-pub fn bounds(doc: &Document) -> stagecraft_geom::Bounds {
+/// The box around the sketches and dimensions of the visible layers (zoom to fit),
+/// with room for the dimension values.
+pub fn bounds(doc: &Document, cam: &Camera) -> stagecraft_geom::Bounds {
     let mut b = stagecraft_geom::Bounds::EMPTY;
     for (p, _) in snap_points(doc) {
         b.add(p);
     }
+    for d in plan_dims(doc, cam) {
+        for l in &d.lines {
+            l.iter().for_each(|p| b.add(*p));
+        }
+        let r = 2.0 * LABEL_PX as f64 / cam.scale;
+        b.add([d.label[0] + d.up[0] * r, d.label[1] + d.up[1] * r]);
+    }
     b
+}
+
+/// Fits the plan camera to `objects` plus the sketches and dimensions. Twice, since
+/// dimension text is sized for the zoom.
+pub fn fit(cam: &mut Camera, doc: &Document, objects: stagecraft_geom::Bounds) {
+    for _ in 0..2 {
+        let b = objects.union(&bounds(doc, cam));
+        cam.fit(b);
+    }
 }
 
 /// Sketch points of the visible layers, for snapping.
@@ -452,9 +469,12 @@ pub fn inspector(ui: &mut Ui, s: &mut Studio) {
         return;
     };
     let (text, colour) = if !st.conflicting.is_empty() {
-        (tf("sketch.conflicts", &[("n", &st.conflicting.len())]), theme::WARNING)
+        let key = if st.conflicting.len() == 1 { "sketch.conflicts_one" } else { "sketch.conflicts" };
+        (tf(key, &[("n", &st.conflicting.len())]), theme::WARNING)
     } else if st.dof == 0 {
         (t("sketch.fully_constrained").to_owned(), theme::palette(ui.visuals().dark_mode).constrained)
+    } else if st.dof == 1 {
+        (t("sketch.dof_one").to_owned(), ui.visuals().text_color())
     } else {
         (tf("sketch.dof", &[("n", &st.dof)]), ui.visuals().text_color())
     };
@@ -475,7 +495,8 @@ pub fn inspector(ui: &mut Ui, s: &mut Studio) {
         ui.label(RichText::new(sk::describe(&sketch, *id)).color(theme::WARNING));
     }
     if !st.redundant.is_empty() {
-        ui.label(RichText::new(tf("sketch.redundant", &[("n", &st.redundant.len())])).weak());
+        let key = if st.redundant.len() == 1 { "sketch.redundant_one" } else { "sketch.redundant" };
+        ui.label(RichText::new(tf(key, &[("n", &st.redundant.len())])).weak());
     }
     ui.horizontal(|ui| {
         let mut colours = s.ui.sketch.colours;

@@ -46,7 +46,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     if s.ui.fit_pending {
         let ids = visible_ids(s.engine.doc(), &s.ui);
         let b = stagecraft_geom::pick::objects_bounds(s.engine.doc(), ids, &PlanStyle::default());
-        s.ui.camera.fit(b.union(&crate::sketch_ui::bounds(s.engine.doc())));
+        crate::sketch_ui::fit(&mut s.ui.camera, s.engine.doc(), b);
         s.ui.fit_pending = false;
     }
     navigate(ui, &resp, &mut s.ui.camera);
