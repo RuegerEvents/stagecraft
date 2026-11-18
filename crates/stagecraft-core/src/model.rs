@@ -411,6 +411,17 @@ pub enum ObjectKind {
         /// Platform system from the catalogue (Bütec, Nivoflex …).
         system: Option<String>,
     },
+    /// A straight row of seats (chairs or fixed seats). Origin: the middle of the row on
+    /// the floor; seats sit side by side along local x and face local +y (at rotation 0
+    /// the audience looks upstage).
+    SeatRow {
+        /// Number of seats.
+        count: u32,
+        /// Centre-to-centre distance of the seats, mm.
+        seat_width: f64,
+        /// Front to back of a seat, mm.
+        depth: f64,
+    },
     /// A truss corner or junction. Origin: the node centre; arms are truss stubs of
     /// one profile width.
     TrussNode {
@@ -547,6 +558,7 @@ impl ObjectKind {
             ObjectKind::Masking { .. } => "masking",
             ObjectKind::Batten { .. } => "batten",
             ObjectKind::Platform { .. } => "platform",
+            ObjectKind::SeatRow { .. } => "seat_row",
             ObjectKind::TrussNode { .. } => "truss_node",
             ObjectKind::TrussRun { .. } => "truss_run",
             ObjectKind::Support { .. } => "support",
@@ -560,7 +572,7 @@ impl ObjectKind {
     }
 
     /// Every type name, for docs and filters.
-    pub const TYPE_NAMES: [&'static str; 19] = [
+    pub const TYPE_NAMES: [&'static str; 20] = [
         "floor",
         "wall",
         "truss",
@@ -571,6 +583,7 @@ impl ObjectKind {
         "masking",
         "batten",
         "platform",
+        "seat_row",
         "truss_node",
         "truss_run",
         "support",

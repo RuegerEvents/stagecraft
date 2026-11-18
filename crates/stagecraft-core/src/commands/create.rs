@@ -21,7 +21,7 @@ pub(super) fn register(r: &mut Registry) {
 }
 
 /// Fields every create command takes.
-#[derive(Deserialize, JsonSchema, Default)]
+#[derive(Clone, Deserialize, JsonSchema, Default)]
 pub(crate) struct Common {
     pub name: Option<String>,
     /// Layer id or name. Default: the first layer.

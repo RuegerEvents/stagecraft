@@ -377,6 +377,10 @@ pub static META: &[Meta] = &[
     m("masking.update", Stage, "wings").one(&["masking"]),
     m("platform.create", Stage, "platform"),
     m("platform.update", Stage, "platform").one(&["platform"]),
+    m("seating.row", Stage, "seats"),
+    m("seating.block", Stage, "seats"),
+    m("seating.update", Stage, "seats").one(&["seat_row"]),
+    m("seating.count", Stage, "seats").hidden(),
     m("ceiling.create", Stage, "ceiling").hidden(),
     m("ceiling.update", Stage, "ceiling").one(&["ceiling"]),
     // Rigging

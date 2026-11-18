@@ -360,6 +360,7 @@ fn every_stage_mesh_is_closed_at_every_detail_level() {
         run(&mut e, "platform.create", json!({ "system": "Bütec", "height": 600 })),
         run(&mut e, "platform.create", json!({ "system": "Nivoflex", "height": 600, "preset": "1x2" })),
         run(&mut e, "platform.create", json!({ "under": "none", "height": 50 })),
+        run(&mut e, "seating.row", json!({ "count": 3 })),
         run(&mut e, "truss.node", json!({ "preset": "tee_4way" })),
         run(&mut e, "support.create", json!({ "preset": "Wind-up stand" })),
         run(&mut e, "support.create", json!({ "preset": "Ground support base" })),
@@ -516,4 +517,37 @@ fn the_plan_draws_lower_floors_first() {
     let fixture = id(&run(&mut e, "fixture.create", json!({ "position": [500, 500, 3000] })));
     let order = stagecraft_geom::pick::back_to_front(e.doc(), e.doc().objects.values());
     assert_eq!(order, vec![hall, step, fixture]);
+}
+
+#[test]
+fn a_seat_row_draws_one_chair_per_seat_and_blocks_step_up() {
+    let mut e = Engine::new();
+    let out = run(
+        &mut e,
+        "seating.block",
+        json!({ "name": "Side", "counts": [8, 9, 10, 11], "spacing": 900, "step": 250, "position": [1000, -5000, 0] }),
+    );
+    assert_eq!(out["seats"], 38);
+    let rows: Vec<Id> = serde_json::from_value(out["ids"].clone()).unwrap();
+    assert_eq!(rows.len(), 4);
+    let last = &e.doc().objects[&rows[3]];
+    assert_eq!(last.name, "Side row 4");
+    assert!(near([last.placement.position[0], last.placement.position[1]], [1000.0, -7700.0]));
+    assert!((last.placement.position[2] - 750.0).abs() < 1e-9);
+    // plan: seat and backrest per chair, 0.5 m pitch; 3D: closed chairs facing +y
+    let prims = obj_plan(&e, rows[0]);
+    assert_eq!(prims.len(), 16);
+    let m = mesh_of(&e, rows[3], Lod::Full);
+    assert!(m.is_watertight());
+    let (lo, hi) = m.bounds().unwrap();
+    assert!((hi[0] - lo[0] - 11.0 * 500.0).abs() < 100.0, "{lo:?} {hi:?}");
+    assert!((hi[2] - 850.0).abs() < 1e-3);
+    // the backrest is at the back (−y)
+    let back = m.positions.iter().filter(|p| p[2] > 600.0).map(|p| p[1]).fold(f32::INFINITY, f32::min);
+    assert!(back < -200.0, "{back}");
+    let count = run(&mut e, "seating.count", json!({}));
+    assert_eq!(count["seats"], 38);
+    run(&mut e, "seating.update", json!({ "id": rows[0], "count": 12 }));
+    assert_eq!(run(&mut e, "seating.count", json!({}))["seats"], 42);
+    assert!(e.execute("seating.update", json!({ "id": rows[0], "count": 0 })).is_err());
 }

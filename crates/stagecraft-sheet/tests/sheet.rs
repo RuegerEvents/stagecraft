@@ -126,6 +126,17 @@ fn a_sheet_has_frame_title_block_viewports_labels_and_legend() {
     }
 }
 
+#[test]
+fn the_legend_counts_the_seats_in_its_plans() {
+    let (mut e, s) = rig();
+    run(&mut e, "seating.block", json!({ "counts": [8, 9], "position": [0, -6000, 0] }));
+    let rasters = Default::default();
+    let page = compose(e.doc(), s, &Inputs { source: &stagecraft_sheet::FallbackSource, rasters: &rasters }).unwrap();
+    let mut t = Vec::new();
+    texts(&page.prims, &mut t);
+    assert!(t.iter().any(|x| x == "7 fixtures · 17 seats"), "{t:?}");
+}
+
 fn t_count(prims: &[Prim], want: &str) -> usize {
     let mut t = Vec::new();
     texts(prims, &mut t);

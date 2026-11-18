@@ -38,6 +38,7 @@ static ICONS: &[(&str, &[u8])] = icons![
     "portal" => "stage/portal.svg",
     "wings" => "stage/wings.svg",
     "platform" => "stage/platform.svg",
+    "seats" => "stage/seats.svg",
     "support" => "stage/support.svg",
     "hoist" => "stage/hoist.svg",
     "ceiling" => "stage/ceiling.svg",

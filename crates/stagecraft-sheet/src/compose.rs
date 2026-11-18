@@ -893,7 +893,23 @@ fn legend(doc: &Document, sheet: &Sheet, right: f64, bottom: f64, width: f64, ou
             }
         }
     }
-    if counts.is_empty() {
+    // Seats in the plan viewports, for the header.
+    let mut seat_rows: Vec<Id> = Vec::new();
+    for vp in sheet.viewports.iter().filter(|v| matches!(v.view, ViewKind::Plan | ViewKind::PlanFrom3d { .. })) {
+        for id in shown_ids(doc, vp) {
+            if matches!(doc.objects[&id].kind, ObjectKind::SeatRow { .. }) && !seat_rows.contains(&id) {
+                seat_rows.push(id);
+            }
+        }
+    }
+    let seats: u32 = seat_rows
+        .iter()
+        .map(|id| match doc.objects[id].kind {
+            ObjectKind::SeatRow { count, .. } => count,
+            _ => 0,
+        })
+        .sum();
+    if counts.is_empty() && seats == 0 {
         return;
     }
     let lang = doc.meta.sheet_language;
@@ -911,7 +927,13 @@ fn legend(doc: &Document, sheet: &Sheet, right: f64, bottom: f64, width: f64, ou
     out.push(t);
     let total: usize = counts.values().map(|c| c.0).sum();
     let word = tr(lang, if total == 1 { "fixture" } else { "fixtures" });
-    let mut tt = Prim::text([max[0] - 1.2, max[1] - head + 1.9], format!("{total} {word}"), 1.4);
+    let mut summary = if counts.is_empty() { String::new() } else { format!("{total} {word}") };
+    if seats > 0 {
+        let seat_word = tr(lang, if seats == 1 { "seat" } else { "seats" });
+        let sep = if summary.is_empty() { "" } else { " · " };
+        summary = format!("{summary}{sep}{seats} {seat_word}");
+    }
+    let mut tt = Prim::text([max[0] - 1.2, max[1] - head + 1.9], summary, 1.4);
     if let Prim::Text { h, .. } = &mut tt {
         *h = HAlign::Right;
     }

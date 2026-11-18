@@ -24,6 +24,8 @@ const CATALOG: &[(&str, &str, &str)] = &[
     ("legend", "Legend", "Legende"),
     ("fixtures", "fixtures", "Geräte"),
     ("fixture", "fixture", "Gerät"),
+    ("seats", "seats", "Sitzplätze"),
+    ("seat", "seat", "Sitzplatz"),
     ("generic_fixture", "Generic fixture", "Scheinwerfer (allgemein)"),
     ("channels", "ch", "Kan."),
     ("col_fid", "FID", "FID"),

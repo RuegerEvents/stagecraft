@@ -45,6 +45,8 @@ pub enum Col {
     Footprint,
     /// Patch problems (read only).
     Conflict,
+    /// Seats in a seat row.
+    Seats,
 }
 
 impl Col {
@@ -71,6 +73,7 @@ impl Col {
             Col::FixtureType => "col.gdtf_type",
             Col::Footprint => "col.footprint",
             Col::Conflict => "col.conflict",
+            Col::Seats => "col.seats",
         }
     }
 
@@ -117,6 +120,7 @@ pub fn columns(kind: Option<&str>) -> Vec<Col> {
         Some("batten") => vec![Number, Name, PosY, Trim, Length, Load, MaxLoad, Tags],
         Some("wall") => vec![Name, Height, Thickness, Layer, Tags],
         Some("floor") => vec![Name, Thickness, Layer, Tags],
+        Some("seat_row") => vec![Name, Seats, Layer, Tags],
         _ => vec![Name, Type, Layer, Tags],
     }
 }
@@ -224,6 +228,7 @@ pub fn cell_text(doc: &Document, o: &Object, col: Col) -> String {
             format!("{:.1}{unknown}{}", l.attached_kg, if over { " !" } else { "" })
         }
         (Col::Height, ObjectKind::Wall { height, .. }) => len(*height),
+        (Col::Seats, ObjectKind::SeatRow { count, .. }) => count.to_string(),
         (Col::Thickness, ObjectKind::Wall { thickness, .. } | ObjectKind::Floor { thickness, .. }) => len(*thickness),
         (Col::Layer, _) => doc.layers.get(&o.layer).map(|l| l.name.clone()).unwrap_or_default(),
         (Col::Tags, _) => {
@@ -289,6 +294,10 @@ pub fn edit_steps(doc: &Document, o: &Object, col: Col, text: &str) -> Result<Ve
             step("fixture.update", json!({ "id": id, "weight_kg": w }))
         }
         Col::Height => step("wall.update", json!({ "id": id, "height": mm()? })),
+        Col::Seats => {
+            let n: u32 = text.parse().map_err(|_| tf("status.bad_number", &[("text", &text)]))?;
+            step("seating.update", json!({ "id": id, "count": n }))
+        }
         Col::Thickness => {
             let cmd = if o.kind.type_name() == "wall" { "wall.update" } else { "floor.update" };
             step(cmd, json!({ "id": id, "thickness": mm()? }))
@@ -319,6 +328,7 @@ pub fn edit_steps(doc: &Document, o: &Object, col: Col, text: &str) -> Result<Ve
         Col::Number | Col::PosY | Col::Trim | Col::MaxLoad => matches!(o.kind, ObjectKind::Batten { .. }),
         Col::Weight => matches!(o.kind, ObjectKind::Fixture { .. }),
         Col::Height => matches!(o.kind, ObjectKind::Wall { .. }),
+        Col::Seats => matches!(o.kind, ObjectKind::SeatRow { .. }),
         Col::Thickness => matches!(o.kind, ObjectKind::Wall { .. } | ObjectKind::Floor { .. }),
         _ => true,
     };
@@ -617,6 +627,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             (Some("batten"), "table.fly_bars"),
             (Some("wall"), "type.wall.plural"),
             (Some("floor"), "type.floor.plural"),
+            (Some("seat_row"), "type.seat_row.plural"),
         ];
         for (k, key) in kinds {
             let on = s.ui.table.kind.as_deref() == k;

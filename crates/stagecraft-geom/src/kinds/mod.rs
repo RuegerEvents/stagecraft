@@ -7,6 +7,7 @@ pub mod fixture;
 pub mod floor;
 pub mod model;
 pub mod node;
+pub mod seat;
 pub mod stage;
 pub mod truss;
 pub mod wall;
@@ -55,6 +56,7 @@ pub fn plan_at(doc: &Document, w: &DAffine3, obj: &Object, style: &PlanStyle) ->
         ObjectKind::Masking { .. } => stage::masking_plan(w, obj, style),
         ObjectKind::Batten { .. } => stage::batten_plan(w, obj, style),
         ObjectKind::Platform { .. } => stage::platform_plan(w, obj, style),
+        ObjectKind::SeatRow { .. } => seat::plan(w, obj, style),
         ObjectKind::TrussNode { .. } => node::plan(w, obj, style),
         ObjectKind::Support { .. } => stage::support_plan(w, obj, style),
         ObjectKind::Hoist { .. } => stage::hoist_plan(w, obj, style),
@@ -109,6 +111,7 @@ pub fn mesh(doc: &Document, obj: &Object, lod: Lod) -> Mesh {
         ObjectKind::Curtain { .. } | ObjectKind::Masking { .. } => stage::cloth_mesh(obj, lod),
         ObjectKind::Batten { .. } => stage::batten_mesh(obj, lod),
         ObjectKind::Platform { .. } => stage::platform_mesh(obj, lod),
+        ObjectKind::SeatRow { .. } => seat::mesh(obj, lod),
         ObjectKind::TrussNode { .. } => node::mesh(obj, lod),
         ObjectKind::Support { .. } => stage::support_mesh(obj, lod),
         ObjectKind::Hoist { .. } => stage::hoist_mesh(obj, lod),
@@ -177,6 +180,10 @@ pub fn snap_geometry(doc: &Document, obj: &Object) -> (Vec<P2>, Vec<[P2; 2]>) {
         }
         ObjectKind::Platform { width, depth, .. } => {
             let (hw, hd) = (width / 2.0, depth / 2.0);
+            closed_ring(vec![p2(-hw, -hd), p2(hw, -hd), p2(hw, hd), p2(-hw, hd)])
+        }
+        ObjectKind::SeatRow { count, seat_width, depth } => {
+            let (hw, hd) = (*count as f64 * seat_width / 2.0, depth / 2.0);
             closed_ring(vec![p2(-hw, -hd), p2(hw, -hd), p2(hw, hd), p2(-hw, hd)])
         }
         ObjectKind::Proscenium { width, frame, .. } => {

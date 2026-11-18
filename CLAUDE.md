@@ -31,7 +31,8 @@ UX. Commits are GPG-signed.
   y = 0 is the setting line (the proscenium's downstage face in the demo).
 - Object kinds (`model.rs`): floor, wall, truss, fixture, and from block 4 proscenium,
   curtain, wing_set + masking, batten, platform, truss_node + truss_run, support,
-  hoist, ceiling; from block 8 group, model, underlay and note. `wing_set`, `truss_run` and `group`
+  hoist, ceiling; from block 8 group, model, underlay and note; seat_row (straight row
+  of seats, `commands/seating.rs`: `seating.row/block/update/count`, geom `kinds/seat.rs`). `wing_set`, `truss_run` and `group`
   are groups (children, no geometry).
   Battens keep position and trim in their placement (y, z); things hang on them by
   attachment. Stage commands are in `commands/stage.rs`, truss runs/nodes, load

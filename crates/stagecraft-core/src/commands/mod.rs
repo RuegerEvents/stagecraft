@@ -12,6 +12,7 @@ mod layer;
 mod mvr;
 mod object;
 mod rigging;
+mod seating;
 mod selection;
 pub(crate) mod sheet;
 mod sketch;
@@ -34,6 +35,7 @@ pub(crate) fn register(r: &mut Registry) {
     fixture::register(r);
     stage::register(r);
     rigging::register(r);
+    seating::register(r);
     selection::register(r);
     sheet::register(r);
     mvr::register(r);

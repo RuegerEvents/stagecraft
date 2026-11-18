@@ -412,7 +412,7 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
 }
 
 /// Arguments of [`num`] fields that are not lengths.
-const NOT_LENGTHS: [&str; 6] = ["number", "fullness", "max_load", "kg_per_m", "weight_kg", "capacity_kg"];
+const NOT_LENGTHS: [&str; 7] = ["number", "fullness", "max_load", "kg_per_m", "weight_kg", "capacity_kg", "count"];
 
 /// A number field over the selection: shown when all agree, applied to all.
 #[allow(clippy::too_many_arguments)]
@@ -760,6 +760,42 @@ pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Objec
                 f!(ObjectKind::Batten { kg_per_m, .. } => *kg_per_m),
                 c,
                 "kg_per_m",
+            );
+        }
+        "seat_row" => {
+            let c = "seating.update";
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.seats",
+                "sr_n",
+                f!(ObjectKind::SeatRow { count, .. } => *count as f64),
+                c,
+                "count",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.seat_width",
+                "sr_w",
+                f!(ObjectKind::SeatRow { seat_width, .. } => *seat_width),
+                c,
+                "seat_width",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.depth",
+                "sr_d",
+                f!(ObjectKind::SeatRow { depth, .. } => *depth),
+                c,
+                "depth",
             );
         }
         "platform" => {
