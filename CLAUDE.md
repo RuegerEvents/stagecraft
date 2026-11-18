@@ -99,12 +99,28 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   metres, Tab switches to the angle, Enter takes it, an empty Enter finishes.
 - All visible text goes through `i18n::t("key")`; the catalog is
   `assets/i18n/en.json`, and a test fails on keys used but missing.
-- Theme: `theme.rs` holds both palettes; System/Light/Dark via `ui.set_theme`.
-  Roboto is vendored; it has no arrows or crosses, so use `widgets::icon_button`.
+- egui 0.37 comes from storytold's fork (root `[patch.crates-io]`, same revision as
+  craft-libs); widgets name themselves with `egui::Role` (kittest fails on unnamed inputs
+  and on missing glyphs, so give every combo box and checkbox a name).
+- Theme (Style A · Studio): `theme.rs` holds the canvas `Palette` and the chrome tokens
+  (`theme::chrome(dark)`) for both themes, one accent `theme::ACCENT`; System/Light/Dark
+  via `ui.set_theme`. Roboto is vendored plus a DejaVu cut for arrows and ⌘ ⇧ ⌥; for
+  small glyph buttons use `widgets::icon_button`.
+- Window layout: menu row (not on macOS, where `menu.rs` is the native menu bar through
+  craft-menu), tool bar (`panels::toolbar`: grouped icon buttons, » overflow, segmented
+  view switch; the title bar on macOS via craft-window), options row, then the dock area
+  (`dock.rs`, craft-ui docking: `PanelKind` panels around the protected `canvas`; layout
+  and theme saved per user by craft-settings, memory-only in tests), status bar.
+  `ui.toggle_panel`, `ui.layout`, `ui.float_panel`, `ui.reset_layout` drive the docks.
+  Menu items run registry commands or `app.*` actions (`menu::run`); ⌘ keys from the
+  native menu come back as key presses into `app.rs`'s `shortcuts`.
+- Toolbar icons in `assets/icons/` (Lucide, ISC; own stage icons in the same grid),
+  rasterised by `icons.rs`; `STAGECRAFT_ICONS=<dir> cargo test -p stagecraft-ui --lib
+  icon_sheet` writes them as PNGs.
 - Give clickable things an accessible name (`widgets::name`); tests find them so.
   Table cells are named `"<Column> <row>"`, e.g. `FID 1`.
-- Tools are `Tool::DRAW` then `Tool::STAGE` in the toolbar; tool options
-  (`ToolOptions`, `ui.set_tool_options`) show on the toolbar's second row. One-click
+- Tools sit in `panels::tool_groups`; tool options (`ToolOptions`,
+  `ui.set_tool_options`) show on the options row below the tool bar. One-click
   stage tools go through `place_stage` in `tools.rs`, with ghosts from `stage_ghost`.
   Inspector fields for stage kinds are in `inspector::stage_fields` (helpers `num`,
   `choice`, `flag`, `colour`), loads in `load_section`. The table's "Fly bars" view
@@ -120,8 +136,9 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   `ui.set_view` switches plan / 3d / split (⌘1/⌘2/⌘3); `ui.camera` and
   `ui.section` drive the rest. ⌘4 is the Sheets mode.
 
-- The library panel (`src/library.rs`, left side) lists fixture types (pick one for
-  the fixture tool, assign a symbol, import files) and searches GDTF Share.
+- The library panel (`src/library.rs`) lists fixture types (pick one for the fixture
+  tool, assign a symbol, import files); the GDTF Share panel (`library::share_panel`)
+  searches GDTF Share.
   Requests run on worker threads behind the `ShareBackend` trait; the UI polls a
   channel in `Studio::show`, so the network never blocks a frame. Tests swap in a
   mock (`ui.library.set_backend`). On this Mac LuLu holds new binaries' connections
@@ -185,9 +202,10 @@ STAGECRAFT_SCREENSHOTS=/some/dir cargo test -p stagecraft-ui --test screens
 ```
 
 renders the demo document (`demo.rs`, a small proscenium theatre with battens,
-curtains, wings, truss, platforms) in light and dark to PNG, including 3D iso,
+curtains, wings, truss, platforms) in light and dark to PNG, with the macOS chrome (no
+menu row, window buttons painted in), including 3D iso,
 front, sections, a truss close-up, the stage from the house, the fly bar list and
-split. The overview shots hide the `ceiling` tag, which would cover the house. With
+split, a rearranged dock layout with a floating panel (`40-dock-float-*`). The overview shots hide the `ceiling` tag, which would cover the house. With
 `testdata/private/vectorworks/sample_show.mvr` present it also renders that
 import in plan and 3D (`26-mvr-*`, `27-mvr-*`).
 
