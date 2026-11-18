@@ -14,6 +14,34 @@ pub fn plan(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
     if centre.len() < 2 {
         return Vec::new();
     }
+    let mut ring = centre.clone();
+    ring.dedup_by(|a, b| dist(*a, *b) < 1e-6);
+    if ring.len() > 3 && dist(ring[0], ring[ring.len() - 1]) < 1e-6 {
+        // A closed ring: mitred all round. Filled as two halves split along the mitres
+        // of the first corner and the one halfway round, outlined as two rings so the
+        // splits do not show.
+        ring.pop();
+        let outer = offset_ring(&ring, thickness / 2.0);
+        let inner = offset_ring(&ring, -thickness / 2.0);
+        let n = ring.len();
+        let half = |from: usize, to: usize| {
+            let idx: Vec<usize> = (0..=((to + n - from) % n)).map(|i| (from + i) % n).collect();
+            let mut pts: Vec<P2> = idx.iter().map(|&i| outer[i]).collect();
+            pts.extend(idx.iter().rev().map(|&i| inner[i]));
+            PlanPrim::Polygon { points: pts, fill: FillClass::Wall, line: None }
+        };
+        let k = n / 2;
+        let mut out = vec![
+            half(0, k),
+            half(k, 0),
+            PlanPrim::Polyline { points: outer, closed: true, line: LineClass::Thick },
+            PlanPrim::Polyline { points: inner, closed: true, line: LineClass::Thick },
+        ];
+        if style.centre_lines {
+            out.push(PlanPrim::Polyline { points: ring, closed: true, line: LineClass::Centre });
+        }
+        return out;
+    }
     let mut band = offset_polyline(&centre, thickness / 2.0);
     band.extend(offset_polyline(&centre, -thickness / 2.0).into_iter().rev());
     let mut out = vec![PlanPrim::Polygon { points: band, fill: FillClass::Wall, line: Some(LineClass::Thick) }];
@@ -80,4 +108,39 @@ fn offset_ring(pts: &[P2], d: f64) -> Vec<P2> {
     wrapped.push(pts[0]);
     let off = offset_polyline(&wrapped, d);
     off[1..=n].to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::triangulate;
+
+    #[test]
+    fn a_closed_wall_ring_fills_its_band_exactly() {
+        let ring = vec![[0.0, 0.0], [4000.0, 0.0], [4000.0, 3000.0], [0.0, 3000.0], [0.0, 0.0]];
+        let obj = Object {
+            id: stagecraft_core::Id::nil(),
+            name: String::new(),
+            layer: stagecraft_core::Id::nil(),
+            tags: Vec::new(),
+            parent: None,
+            placement: Default::default(),
+            kind: ObjectKind::Wall { path: ring, height: 3000.0, thickness: 200.0 },
+            style: Default::default(),
+            attrs: Default::default(),
+            sketch: None,
+        };
+        let prims = plan(&DAffine3::IDENTITY, &obj, &PlanStyle::default());
+        let area: f64 = prims[..2]
+            .iter()
+            .flat_map(|p| {
+                let PlanPrim::Polygon { points, .. } = p else { panic!() };
+                triangulate(points).into_iter().map(|t| [points[t[0]], points[t[1]], points[t[2]]])
+            })
+            .map(|[a, b, c]| ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs() / 2.0)
+            .sum();
+        let band = 4200.0 * 3200.0 - 3800.0 * 2800.0;
+        assert!((area - band).abs() < 1.0, "{area} vs {band}");
+        assert_eq!(prims.len(), 4);
+    }
 }

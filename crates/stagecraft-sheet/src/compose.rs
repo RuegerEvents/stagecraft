@@ -321,7 +321,16 @@ pub fn effective_crop(doc: &Document, vp: &Viewport, source: &dyn VectorViewSour
     let ids = shown_ids(doc, vp);
     match vp.view {
         ViewKind::Plan => {
-            let prims: Vec<PlanPrim> = plan_prims(doc, vp, &ids).into_iter().flat_map(|x| x.1).collect();
+            let mut prims: Vec<PlanPrim> = plan_prims(doc, vp, &ids).into_iter().flat_map(|x| x.1).collect();
+            // Dimensions (with room for their text) belong in the fitted view too.
+            for d in viewport_dims(doc, vp) {
+                prims.extend(d.lines.into_iter().map(|l| PlanPrim::line(l, LineClass::Thin)));
+                let r = DIM_TEXT * 1.6 * vp.scale;
+                prims.push(PlanPrim::line(
+                    vec![[d.label[0] - r, d.label[1] - r], [d.label[0] + r, d.label[1] + r]],
+                    LineClass::Thin,
+                ));
+            }
             let b = stagecraft_geom::pick::bounds(&prims);
             (!b.is_empty()).then(|| grow([b.min, b.max], 0.02))
         }
@@ -422,6 +431,9 @@ fn compose_viewport(doc: &Document, vp: &Viewport, inputs: &Inputs) -> Option<Co
         },
         ViewKind::FixtureList => unreachable!(),
     }
+    if matches!(vp.view, ViewKind::Plan | ViewKind::PlanFrom3d { .. }) {
+        dimension_prims(doc, vp, &m, &mut inner);
+    }
     // Plans from 3D share world x/y with the plan, so labels go on top the same way.
     if matches!(vp.view, ViewKind::Plan | ViewKind::PlanFrom3d { .. })
         && let Some(t) = vp.label_template.and_then(|t| doc.label_templates.get(&t))
@@ -437,6 +449,48 @@ fn compose_viewport(doc: &Document, vp: &Viewport, inputs: &Inputs) -> Option<Co
             .collect();
     }
     Some(Composed { prims: vec![Prim::Clip { min: rect[0], max: rect[1], prims: inner }], rect, labels: hits })
+}
+
+/// Text height of dimension values on paper, mm.
+pub const DIM_TEXT: f64 = 2.0;
+
+/// The dimensions a plan viewport shows, in world mm, sized for its scale.
+pub fn viewport_dims(doc: &Document, vp: &Viewport) -> Vec<stagecraft_geom::dims::DimDraw> {
+    let shown = |l: &Id| !vp.hidden_layers.contains(l) && doc.layers.get(l).is_some_and(|l| l.visible);
+    let st = stagecraft_geom::dims::DimStyle::for_scale(1.0 / vp.scale, 1.2);
+    let mut dims = Vec::new();
+    if vp.sketch_dimensions {
+        for (layer, s) in doc.sketches.iter().filter(|(l, _)| shown(l)) {
+            dims.extend(stagecraft_geom::dims::sketch_dims(*layer, s, &st));
+        }
+    }
+    if vp.reference_dimensions {
+        dims.extend(stagecraft_geom::dims::reference_dims(doc, &st, |d| shown(&d.layer)));
+    }
+    dims
+}
+
+/// Dimensions of a plan viewport: the sketches' (if `sketch_dimensions`) and the
+/// reference dimensions between objects (if `reference_dimensions`) of the layers it
+/// shows, thin pen, values in metres.
+pub fn dimension_prims(doc: &Document, vp: &Viewport, m: &Mapping, out: &mut Vec<Prim>) {
+    let pen = Pen::solid(weight(vp, "thin"));
+    for d in viewport_dims(doc, vp) {
+        let rings: Vec<Vec<P2>> = d.lines.iter().map(|l| l.iter().map(|p| m.to_paper(*p)).collect()).collect();
+        out.push(Prim::Path { rings, closed: false, pen: Some(pen.clone()), fill: None });
+        let at = m.to_paper(d.label);
+        let pos = [at[0] + d.up[0] * DIM_TEXT * 0.8, at[1] + d.up[1] * DIM_TEXT * 0.8];
+        out.push(Prim::Text {
+            pos,
+            text: d.text,
+            size: DIM_TEXT,
+            angle: d.rotation,
+            h: HAlign::Center,
+            v: VAlign::Middle,
+            bold: false,
+            color: Rgb::BLACK,
+        });
+    }
 }
 
 /// A scale bar segment length in model mm: a round number giving 8–20 mm on paper.

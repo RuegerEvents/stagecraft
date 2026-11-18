@@ -505,6 +505,14 @@ fn draw(ctx: &mut Ctx, a: DrawArgs) -> CmdResult {
         return Err(CmdError::invalid_args("nothing to draw: every segment has zero length"));
     }
     demote_redundant(&mut s, &created);
+    for c in &created {
+        if let ItemRef::Constraint(id) = c
+            && let Some(m) = s.dimension(*id).map(|d| d.measure)
+        {
+            let off = sketch::default_label_offset(&s, &m);
+            s.dimension_mut(*id).expect("listed").label_offset = off;
+        }
+    }
     sketch::store(ctx.doc_mut(), l, s);
     let object = match a.make {
         Make::None => None,
@@ -744,7 +752,10 @@ fn dim_add(ctx: &mut Ctx, a: DimAddArgs) -> CmdResult {
         value: a.value,
         driving: a.driving.unwrap_or(true),
         name: a.name,
-        label_offset: v2(a.label_offset.unwrap_or_default()),
+        label_offset: match a.label_offset {
+            Some(o) => v2(o),
+            None => sketch::default_label_offset(&current(ctx.doc(), l), &a.measure),
+        },
     };
     let opts = if auto { SolveOptions::default() } else { edit_options() };
     let solved = sketch::apply(ctx.doc_mut(), l, &edit, &opts)?;

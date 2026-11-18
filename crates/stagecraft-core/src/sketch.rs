@@ -134,6 +134,32 @@ pub fn edit_options() -> SolveOptions {
     SolveOptions { analyse: false, ..SolveOptions::default() }
 }
 
+/// How far a new dimension's line sits from what it measures, mm.
+pub const LABEL_OFFSET: f64 = 600.0;
+
+/// A default label offset for a new dimension: beside the measured line, on the side
+/// away from the middle of the sketch (outside a room). Zero for angles and radii.
+pub fn default_label_offset(s: &Sketch, m: &Measure) -> Vec2 {
+    let ends = match *m {
+        Measure::Length { line } => s.line_ends(line),
+        Measure::Distance { a, b } => Some((a, b)),
+        Measure::HorizontalDistance { .. } => return outward(s, m, Vec2::new(0.0, 1.0)),
+        Measure::VerticalDistance { .. } => return outward(s, m, Vec2::new(1.0, 0.0)),
+        _ => None,
+    };
+    let Some((a, b)) = ends else { return Vec2::ZERO };
+    let (Some(pa), Some(pb)) = (s.point(a), s.point(b)) else { return Vec2::ZERO };
+    outward(s, m, (pb.pos - pa.pos).perp().normalized())
+}
+
+fn outward(s: &Sketch, m: &Measure, n: Vec2) -> Vec2 {
+    let Some(mid) = s.measure_anchor(m) else { return Vec2::ZERO };
+    let k = s.points.len().max(1) as f64;
+    let centre = s.points.iter().fold(Vec2::ZERO, |acc, p| acc + p.pos) * (1.0 / k);
+    let side = if (mid - centre).dot(n) < 0.0 { -1.0 } else { 1.0 };
+    n * (side * LABEL_OFFSET)
+}
+
 /// Polyline of one edge from its `ends().0` to `ends().1`, arcs split every 5° at most.
 fn edge_polyline(s: &Sketch, e: &Edge) -> Option<Vec<P2>> {
     match e.geom {

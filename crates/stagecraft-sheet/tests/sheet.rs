@@ -218,3 +218,59 @@ fn gdtf_types_in_labels_legend_and_list() {
         assert!(t.iter().any(|x| x == want), "missing `{want}` in {t:?}");
     }
 }
+
+/// A sketched room with typed lengths and a reference dimension (truss to the back
+/// wall) on a plan viewport; the dimension toggles hide them.
+#[test]
+fn plan_viewports_draw_sketch_and_reference_dimensions() {
+    stagecraft_sheet::install();
+    let mut e = Engine::new();
+    let seg = |len: f64| json!({ "axis_lock": true, "length": len });
+    run(
+        &mut e,
+        "sketch.draw",
+        json!({ "points": [[-5000, 0], [5000, 0], [5000, 8000], [-5000, 8000]], "closed": true, "make": "wall",
+                "segments": [seg(10000.0), seg(8000.0)] }),
+    );
+    run(&mut e, "sketch.make_floor", json!({ "at": [0, 4000] }));
+    let truss = id(&run(&mut e, "truss.create", json!({ "start": [-3000, 3000, 6000], "end": [3000, 3000, 6000] })));
+    let s = run(&mut e, "sketch.get", Value::Null);
+    let back_left = s["sketch"]["points"][3]["id"].as_u64().unwrap();
+    let layer = s["layer"].clone();
+    run(
+        &mut e,
+        "dimension.add_reference",
+        json!({ "from": { "type": "object", "object": truss }, "to": { "type": "sketch_point", "layer": layer, "point": back_left },
+                "axis": "vertical", "label_offset": [-3500, 0] }),
+    );
+    let sh = id(&run(
+        &mut e,
+        "sheet.create",
+        json!({ "name": "Room", "number": "R-1", "paper": "a4", "orientation": "landscape" }),
+    ));
+    let vp = id(&run(
+        &mut e,
+        "viewport.create",
+        json!({ "sheet": sh, "view": "plan", "scale": 100, "position": [140, 110] }),
+    ));
+    let rasters = Default::default();
+    let inputs = Inputs { source: &stagecraft_sheet::FallbackSource, rasters: &rasters };
+    let mut t = Vec::new();
+    texts(&compose(e.doc(), sh, &inputs).unwrap().prims, &mut t);
+    for want in ["10.00", "8.00", "(5.00)"] {
+        assert!(t.iter().any(|x| x == want), "missing `{want}` in {t:?}");
+    }
+    if let Ok(dir) = std::env::var("STAGECRAFT_SHEETS") {
+        std::fs::create_dir_all(&dir).unwrap();
+        run(&mut e, "sheet.export_pdf", json!({ "path": format!("{dir}/room-dimensions.pdf"), "sheet": sh }));
+        run(&mut e, "sheet.export_svg", json!({ "path": format!("{dir}/room-dimensions.svg"), "sheet": sh }));
+    }
+    run(
+        &mut e,
+        "viewport.update",
+        json!({ "viewport": vp, "sketch_dimensions": false, "reference_dimensions": false }),
+    );
+    let mut t = Vec::new();
+    texts(&compose(e.doc(), sh, &inputs).unwrap().prims, &mut t);
+    assert!(!t.iter().any(|x| x == "10.00" || x == "(5.00)"), "{t:?}");
+}

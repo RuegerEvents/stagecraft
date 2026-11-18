@@ -12,6 +12,7 @@
 //! functions on top of the plan primitives, in [`pick`] and [`snap`].
 
 pub mod catalog;
+pub mod dims;
 pub mod gdtf;
 pub mod kinds;
 pub mod math;

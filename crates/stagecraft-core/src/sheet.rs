@@ -215,6 +215,13 @@ pub struct Viewport {
     pub show_title: bool,
     #[serde(default = "yes")]
     pub scale_bar: bool,
+    /// Plan viewports: draw the driving and reference dimensions of the layer
+    /// sketches.
+    #[serde(default = "yes")]
+    pub sketch_dimensions: bool,
+    /// Plan viewports: draw the reference dimensions between objects.
+    #[serde(default = "yes")]
+    pub reference_dimensions: bool,
 }
 
 /// How a viewport draws the lines of objects with one tag.

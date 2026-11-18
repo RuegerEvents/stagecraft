@@ -522,6 +522,8 @@ fn vp_create(ctx: &mut Ctx, a: VpCreateArgs) -> CmdResult {
         label_offsets: BTreeMap::new(),
         show_title: true,
         scale_bar: !matches!(view, ViewKind::FixtureList | ViewKind::Rendered { .. }),
+        sketch_dimensions: true,
+        reference_dimensions: true,
     };
     let id = vp.id;
     ctx.doc_mut().sheets.get_mut(&sid).expect("resolved").viewports.push(vp);
@@ -557,6 +559,10 @@ struct VpUpdateArgs {
     hidden_lines: Option<bool>,
     show_title: Option<bool>,
     scale_bar: Option<bool>,
+    /// Plan viewports: draw the sketches' dimensions (driving and reference).
+    sketch_dimensions: Option<bool>,
+    /// Plan viewports: draw reference dimensions between objects.
+    reference_dimensions: Option<bool>,
     /// Forget all hand-dragged label positions of this viewport.
     #[serde(default)]
     reset_labels: bool,
@@ -636,6 +642,12 @@ fn vp_update(ctx: &mut Ctx, a: VpUpdateArgs) -> CmdResult {
     }
     if let Some(b) = a.scale_bar {
         v.scale_bar = b;
+    }
+    if let Some(b) = a.sketch_dimensions {
+        v.sketch_dimensions = b;
+    }
+    if let Some(b) = a.reference_dimensions {
+        v.reference_dimensions = b;
     }
     if a.reset_labels {
         v.label_offsets.clear();

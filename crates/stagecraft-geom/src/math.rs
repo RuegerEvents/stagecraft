@@ -68,6 +68,32 @@ pub fn project_t(a: P2, b: P2, p: P2) -> f64 {
     (((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1]) / l2).clamp(0.0, 1.0)
 }
 
+pub fn dot(a: P2, b: P2) -> f64 {
+    a[0] * b[0] + a[1] * b[1]
+}
+
+/// The foot of `p` on the infinite line through `a` and `b`.
+pub fn closest_on_line(a: P2, b: P2, p: P2) -> P2 {
+    let d = sub(b, a);
+    let l2 = dot(d, d);
+    if l2 == 0.0 {
+        return a;
+    }
+    add(a, scale(d, dot(sub(p, a), d) / l2))
+}
+
+/// Where the line through `p` along `u` meets the line through `q` along `v`; `None`
+/// if they are parallel.
+pub fn line_intersection(p: P2, u: P2, q: P2, v: P2) -> Option<P2> {
+    let den = u[0] * v[1] - u[1] * v[0];
+    if den.abs() < 1e-12 * length(u).max(1.0) * length(v).max(1.0) {
+        return None;
+    }
+    let w = sub(q, p);
+    let t = (w[0] * v[1] - w[1] * v[0]) / den;
+    Some(add(p, scale(u, t)))
+}
+
 pub fn closest_on_segment(a: P2, b: P2, p: P2) -> P2 {
     lerp(a, b, project_t(a, b, p))
 }
