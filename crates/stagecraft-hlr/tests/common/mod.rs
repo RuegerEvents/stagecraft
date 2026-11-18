@@ -9,7 +9,7 @@ use stagecraft_hlr::{DVec2, Drawing, LineClass};
 pub fn out_dir() -> PathBuf {
     let dir = std::env::var_os("HLR_OUT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target-hlr/hlr-views"));
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/hlr-views"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

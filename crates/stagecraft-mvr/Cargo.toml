@@ -1,18 +1,18 @@
 [package]
 name = "stagecraft-mvr"
-version = "0.1.0"
-edition = "2024"
-authors = ["Hannes Rüger <hannes@rueger.events>"]
-license = "MIT"
 description = "MVR (My Virtual Rig, DIN SPEC 15801) import and export for StageCraft"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
-# Built standalone while it is developed in parallel with the workspace
-# (the root Cargo.toml excludes this crate). Versions match the workspace.
-[workspace]
-
+# No StageCraft dependencies (GDTFs are carried as bytes); builds for wasm32-unknown-unknown.
 [dependencies]
-quick-xml = "0.42"
-thiserror = "2"
-uuid = { version = "1", features = ["v5"] }
-zip = { version = "9", default-features = false, features = ["deflate"] }
+quick-xml.workspace = true
+thiserror.workspace = true
+uuid = { workspace = true, features = ["v5"] }
+zip.workspace = true
 
+# The workspace's uuid has v4 on, which needs a JS randomness source in the browser.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+uuid = { workspace = true, features = ["js"] }

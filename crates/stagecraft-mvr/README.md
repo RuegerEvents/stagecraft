@@ -4,12 +4,12 @@ MVR (My Virtual Rig, DIN SPEC 15801) import and export for StageCraft. Reads MVR
 1.6 files, writes MVR 1.6. No dependency on other StageCraft crates; GDTF files are
 carried as bytes. Builds for `wasm32-unknown-unknown`.
 
-Built standalone for now (the workspace excludes it):
+A workspace member; `stagecraft-core`'s `mvr.import` / `mvr.export` map it to the
+document.
 
 ```
-cd crates/stagecraft-mvr
-CARGO_TARGET_DIR=../../target-mvr cargo test
-CARGO_TARGET_DIR=../../target-mvr cargo test --release --test real_files -- --nocapture
+cargo test -p stagecraft-mvr
+cargo test -p stagecraft-mvr --release --test real_files -- --nocapture
 ```
 
 ## API
@@ -99,6 +99,6 @@ raw XML and written back.
 - `tests/real_files.rs`: imports every `.mvr` in `testdata/private/{vectorworks,other}`
   (skips if absent), prints a summary and warnings, round-trips and checks the scene
   stays equal and export is stable. `STAGECRAFT_MVR_OUT=dir` writes the exports
-  (`*.roundtrip.mvr`, plus `*.nogdtf.mvr` for viewer checks, see DECISIONS.md).
+  (`*.roundtrip.mvr`, plus `*.nogdtf.mvr` for viewer checks, see the "MVR: Perastage check" row in `docs/spec/decisions.md`).
 
-See `DECISIONS.md` for choices where the spec was silent.
+Choices where the spec was silent are in `docs/spec/decisions.md` (rows "MVR: …").

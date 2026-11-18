@@ -4,13 +4,12 @@ Vector views for StageCraft sheets: feature edges, hidden-line removal and secti
 cuts for orthographic projections of triangle meshes. Pure Rust, no other StageCraft
 crate, builds for `wasm32-unknown-unknown`.
 
-While it is developed in parallel, the crate is excluded from the workspace. Build and
-test it standalone:
+A workspace member. `stagecraft-sheet` turns document meshes into its `Scene` and
+the app enables `parallel`.
 
 ```sh
-cd crates/stagecraft-hlr
-CARGO_TARGET_DIR=../../target-hlr cargo test
-CARGO_TARGET_DIR=../../target-hlr cargo test --release --features parallel --test bench -- --ignored --nocapture
+cargo test -p stagecraft-hlr
+cargo test -p stagecraft-hlr --release --features parallel --test bench -- --ignored --nocapture
 ```
 
 ## API

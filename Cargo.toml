@@ -1,11 +1,13 @@
 [workspace]
 resolver = "2"
 # Developed standalone in parallel; joins the workspace when integrated.
-exclude = ["crates/stagecraft-mvr", "crates/stagecraft-hlr", "crates/stagecraft-sketch"]
+exclude = ["crates/stagecraft-sketch"]
 members = [
     "crates/stagecraft-core",
     "crates/stagecraft-gdtf",
     "crates/stagecraft-geom",
+    "crates/stagecraft-hlr",
+    "crates/stagecraft-mvr",
     "crates/stagecraft-sheet",
     "crates/stagecraft-control",
     "crates/stagecraft-ui",
@@ -24,9 +26,12 @@ stagecraft-control = { path = "crates/stagecraft-control" }
 stagecraft-gdtf = { path = "crates/stagecraft-gdtf" }
 stagecraft-geom = { path = "crates/stagecraft-geom" }
 stagecraft-sheet = { path = "crates/stagecraft-sheet" }
+stagecraft-hlr = { path = "crates/stagecraft-hlr" }
+stagecraft-mvr = { path = "crates/stagecraft-mvr" }
 stagecraft-ui = { path = "crates/stagecraft-ui" }
 anyhow = "1"
 earcutr = "0.5"
+rayon = "1.11"
 egui = "0.36.2"
 eframe = "0.36.2"
 egui-wgpu = "0.36.2"
@@ -46,7 +51,12 @@ sha2 = "0.10"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 roxmltree = "0.20"
+quick-xml = "0.42"
 gltf = { version = "1", default-features = false, features = ["utils", "names"] }
 ureq = { version = "3", features = ["cookies"] }
 security-framework = "3"
 zip = { version = "9", default-features = false, features = ["deflate"] }
+
+# HLR tests are heavy on geometry; keep them fast in debug test builds.
+[profile.test.package.stagecraft-hlr]
+opt-level = 2

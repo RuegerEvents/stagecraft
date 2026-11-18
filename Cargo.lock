@@ -3431,6 +3431,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-xml"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3958,6 +3967,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4208,6 +4223,25 @@ dependencies = [
  "stagecraft-core",
  "stagecraft-gdtf",
  "uuid",
+]
+
+[[package]]
+name = "stagecraft-hlr"
+version = "0.1.0"
+dependencies = [
+ "earcutr",
+ "glam",
+ "rayon",
+]
+
+[[package]]
+name = "stagecraft-mvr"
+version = "0.1.0"
+dependencies = [
+ "quick-xml 0.42.0",
+ "thiserror 2.0.21",
+ "uuid",
+ "zip",
 ]
 
 [[package]]
@@ -4768,6 +4802,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 
@@ -5003,7 +5038,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "338e30461b3a2b67d70eb30a6d89f8e0c93a833e07d2ae89085cd070c4a00ac0"
 dependencies = [
  "proc-macro2",
- "quick-xml",
+ "quick-xml 0.41.0",
  "quote",
 ]
 
