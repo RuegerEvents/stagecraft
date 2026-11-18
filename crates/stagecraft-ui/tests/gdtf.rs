@@ -94,7 +94,9 @@ fn settle(h: &mut Harness<'static, Studio>) {
 fn share_search_download_and_import() {
     let mut h = harness(Engine::new());
     h.state_mut().ui.library.set_backend(Box::new(Mock));
-    // Typing into the search field and pressing the button.
+    // The Share tab, then typing into the search field and pressing the button.
+    h.get_by_label("GDTF Share").click();
+    h.run();
     h.get_by_label("Search GDTF Share").click();
     h.run_steps(4);
     h.get_by_label("Search GDTF Share").type_text("spot");

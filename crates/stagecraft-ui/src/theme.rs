@@ -232,3 +232,8 @@ fn style(style: &mut egui::Style, dark: bool) {
     ]
     .into();
 }
+
+/// Colours of the docking chrome (tab strips, borders, floating windows).
+pub fn dock_style(style: &mut craft_ui::docking::DockStyle, _dark: bool) {
+    style.accent = ACCENT;
+}

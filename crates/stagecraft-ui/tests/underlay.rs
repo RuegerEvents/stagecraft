@@ -78,6 +78,8 @@ fn calibrate_tool_scales_the_underlay_under_the_first_click() {
     // without a selected underlay, clicking where there is none says so and starts
     // nothing
     run(&mut h, "selection.clear", Value::Null);
+    // Zoomed out, so the canvas corner is clear of the underlay whatever the canvas shape.
+    run(&mut h, "ui.zoom", json!({ "factor": 0.25 }));
     let cam = h.state().ui.camera;
     let corner = cam.to_world(cam.rect.left_bottom() + vec2(15.0, -15.0));
     click_world(&mut h, corner);

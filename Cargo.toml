@@ -69,6 +69,8 @@ craft-mcp-server = { git = "https://github.com/storytold/craft-libs", rev = "52f
 craft-mesh = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 craft-xml = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 craft-zip = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d", features = ["serde"] }
+craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 
 # storytold's egui fork (0.37 plus the suite's patches) and its winit companion, at the
 # revisions craft-libs pins in its own workspace [patch]. A dependency's [patch] is ignored by

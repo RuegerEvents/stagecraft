@@ -99,17 +99,14 @@ pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
                 }
             });
             ui.separator();
-            for (p, key) in [
-                (PanelKind::Layers, "panel.layers"),
-                (PanelKind::Tags, "panel.tags"),
-                (PanelKind::Inspector, "panel.inspector"),
-                (PanelKind::Table, "panel.table"),
-                (PanelKind::Library, "panel.library"),
-            ] {
-                let mut on = *s.ui.panels.get_mut(p);
-                if ui.checkbox(&mut on, t(key)).changed() {
+            for p in crate::dock::PANELS.into_iter().filter(|p| *p != PanelKind::Canvas) {
+                let mut on = s.ui.layout.layout.contains(&p);
+                if ui.checkbox(&mut on, crate::dock::label(p)).changed() {
                     let _ = s.run("ui.toggle_panel", json!({ "panel": p, "visible": on }));
                 }
+            }
+            if ui.button(t("menu.reset_layout")).clicked() {
+                let _ = s.run("ui.reset_layout", Value::Null);
             }
             ui.separator();
             for (theme, key) in [
@@ -366,7 +363,6 @@ fn snap_key(k: stagecraft_geom::snap::SnapKind) -> &'static str {
 
 pub fn layers(ui: &mut Ui, s: &mut Studio) {
     ui.horizontal(|ui| {
-        ui.heading(t("panel.layers"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if icon_button(ui, Icon::Plus, "Add layer").on_hover_text(t("layers.add")).clicked() {
                 let n = s.engine.doc().layers.len() + 1;
@@ -459,9 +455,6 @@ fn swap_order(s: &mut Studio, a: &Layer, b: &Layer) {
 }
 
 pub fn tags(ui: &mut Ui, s: &mut Studio) {
-    ui.horizontal(|ui| {
-        ui.heading(t("panel.tags"));
-    });
     let mut tags: Vec<(Id, String, usize)> = {
         let doc = s.engine.doc();
         doc.tags

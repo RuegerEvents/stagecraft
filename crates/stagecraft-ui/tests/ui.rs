@@ -636,3 +636,52 @@ fn document_section_sets_sheet_language_and_fields() {
     h.run_steps(6);
     assert_eq!(h.state().engine.doc().meta.venue_address, "1 Street\n12345 Town");
 }
+
+// ---- docking ---------------------------------------------------------------------
+
+fn floating_panels(h: &Harness<'static, Studio>) -> Vec<stagecraft_ui::state::PanelKind> {
+    h.state().ui.layout.layout.floating.iter().flat_map(|w| w.panels().copied().collect::<Vec<_>>()).collect()
+}
+
+#[test]
+fn panels_hide_float_move_and_reset() {
+    use stagecraft_ui::state::PanelKind;
+    let mut h = harness(stagecraft_ui::demo::engine());
+    // Hidden and shown again, the tags panel goes back into its group.
+    run(&mut h, "ui.toggle_panel", json!({ "panel": "tags", "visible": false }));
+    assert_eq!(run(&mut h, "ui.state", Value::Null)["panels"]["tags"], false);
+    assert!(h.query_by_label("Tags").is_none());
+    run(&mut h, "ui.toggle_panel", json!({ "panel": "tags" }));
+    assert!(h.query_by_label("Tags").is_some());
+    // The canvas cannot be closed.
+    assert!(h.state_mut().run("ui.toggle_panel", json!({ "panel": "canvas", "visible": false })).is_err());
+
+    // Floating: the library gets a window of its own and still works there.
+    run(&mut h, "ui.float_panel", json!({ "panel": "library", "x": 400, "y": 200, "width": 300, "height": 300 }));
+    assert_eq!(floating_panels(&h), vec![PanelKind::Library]);
+    assert!(h.query_by_label("Fixture type StageCraft Demo@Spot 300").is_some());
+
+    // A tab dragged onto the inspector's tab strip joins that group.
+    let tags = h.get_by_label("Tags").rect().center();
+    let inspector = h.get_by_label("Inspector").rect();
+    let target = egui::pos2(inspector.right() + 40.0, inspector.center().y);
+    drag(&mut h, tags, target);
+    let ws = run(&mut h, "ui.layout", Value::Null);
+    let text = ws.to_string();
+    let group = |a: &str, b: &str| text.contains(&format!("\"panels\":[\"{a}\",\"{b}\"]"));
+    assert!(group("inspector", "tags"), "{text}");
+
+    // The same through ui.layout, as an AI would.
+    run(
+        &mut h,
+        "ui.layout",
+        json!({ "actions": [{ "Move": { "panel": "share", "anchor": "inspector", "placement": { "Tab": { "before": null } } } }] }),
+    );
+    let text = run(&mut h, "ui.layout", Value::Null).to_string();
+    assert!(text.contains("\"panels\":[\"inspector\",\"tags\",\"share\"]"), "{text}");
+
+    // View > Reset Layout.
+    run(&mut h, "ui.reset_layout", Value::Null);
+    assert_eq!(h.state().ui.layout.layout, stagecraft_ui::dock::default_layout());
+    assert!(floating_panels(&h).is_empty());
+}

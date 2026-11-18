@@ -574,8 +574,6 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let doc = s.engine.doc().clone();
     // Filters.
     ui.horizontal(|ui| {
-        ui.heading(t("panel.table"));
-        ui.add_space(8.0);
         let kinds = [
             (None, "table.all"),
             (Some("fixture"), "type.fixture.plural"),

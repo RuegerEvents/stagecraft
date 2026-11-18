@@ -185,42 +185,22 @@ impl View {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+/// The window's panels (`crate::dock`). `canvas` is the plan/3D/sheets centre and
+/// cannot close.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PanelKind {
+    Canvas,
     Layers,
     Tags,
+    /// The sheet list (Sheets mode).
+    Sheets,
+    /// Fixture types of the document.
+    Library,
+    /// GDTF Share search and downloads.
+    Share,
     Inspector,
     Table,
-    /// Fixture types of the document and GDTF Share.
-    Library,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Panels {
-    pub layers: bool,
-    pub tags: bool,
-    pub inspector: bool,
-    pub table: bool,
-    pub library: bool,
-}
-
-impl Default for Panels {
-    fn default() -> Self {
-        Self { layers: true, tags: true, inspector: true, table: true, library: true }
-    }
-}
-
-impl Panels {
-    pub fn get_mut(&mut self, p: PanelKind) -> &mut bool {
-        match p {
-            PanelKind::Layers => &mut self.layers,
-            PanelKind::Tags => &mut self.tags,
-            PanelKind::Inspector => &mut self.inspector,
-            PanelKind::Table => &mut self.table,
-            PanelKind::Library => &mut self.library,
-        }
-    }
 }
 
 /// The plan camera: world mm at the centre of the canvas and pixels per mm.
@@ -410,7 +390,8 @@ pub struct UiState {
     /// Fit the drawing on the next frame (after the canvas knows its size).
     pub fit_pending: bool,
     pub theme: ThemePref,
-    pub panels: Panels,
+    /// Where the panels are (docks, tabs, floating windows); saved per user.
+    pub layout: craft_ui::docking::Workspace<PanelKind>,
     pub hidden_tags: BTreeSet<Id>,
     /// New objects without a parent go here.
     pub active_layer: Option<Id>,
@@ -468,7 +449,7 @@ impl Default for UiState {
             view3d: Default::default(),
             fit_pending: true,
             theme: ThemePref::System,
-            panels: Panels::default(),
+            layout: crate::dock::default_workspace(),
             hidden_tags: BTreeSet::new(),
             active_layer: None,
             snap: SnapSettings::default(),

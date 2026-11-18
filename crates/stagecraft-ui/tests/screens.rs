@@ -170,6 +170,18 @@ fn screenshots() {
         run(&mut h, "ui.pan", json!({ "center": [0, 2400] }));
         save(&mut h, &dir, &format!("19-plan-labels-{tn}"));
         run(&mut h, "ui.set_label_template", json!({ "template": null }));
+        // A rearranged layout: tags as a tab beside the inspector, the library floating
+        // over the plan, the table closed.
+        run(&mut h, "ui.zoom_to_fit", json!(null));
+        run(
+            &mut h,
+            "ui.layout",
+            json!({ "actions": [{ "Move": { "panel": "tags", "anchor": "inspector", "placement": { "Tab": { "before": null } } } }] }),
+        );
+        run(&mut h, "ui.toggle_panel", json!({ "panel": "table", "visible": false }));
+        run(&mut h, "ui.float_panel", json!({ "panel": "library", "x": 900, "y": 420, "width": 300, "height": 300 }));
+        save(&mut h, &dir, &format!("40-dock-float-{tn}"));
+        run(&mut h, "ui.reset_layout", json!(null));
         gdtf_shots(&mut h, &dir, tn);
         if tn == "light" {
             let pdf = format!("{dir}/demo-sheets.pdf");

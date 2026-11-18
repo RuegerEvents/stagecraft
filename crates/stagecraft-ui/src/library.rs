@@ -303,7 +303,6 @@ fn symbol_preview(ui: &mut Ui, doc: &Document, key: &str) {
 pub fn show(ui: &mut Ui, s: &mut Studio) {
     let doc = s.engine.doc().clone();
     ui.horizontal(|ui| {
-        ui.heading(t("panel.library"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if widgets::button(ui, t("library.import"), "Import GDTF").on_hover_text(t("library.import_tip")).clicked()
             {
@@ -386,13 +385,10 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             });
         }
     }
-
-    ui.add_space(10.0);
-    share_section(ui, s);
 }
 
-fn share_section(ui: &mut Ui, s: &mut Studio) {
-    ui.label(RichText::new(t("share.title")).strong());
+/// The GDTF Share panel: search the cached list, add revisions to the document.
+pub fn share_panel(ui: &mut Ui, s: &mut Studio) {
     let mut search = false;
     ui.horizontal(|ui| {
         let r = ui.add(

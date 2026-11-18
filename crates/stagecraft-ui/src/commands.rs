@@ -117,7 +117,18 @@ fn register(r: &mut UiRegistry) {
         section,
     );
     r.add("ui.set_theme", "Light, dark, or follow the system", set_theme);
-    r.add("ui.toggle_panel", "Show or hide a panel (layers, tags, inspector, table, library)", toggle_panel);
+    r.add(
+        "ui.toggle_panel",
+        "Show or hide a panel (layers, tags, sheets, library, share, inspector, table); it comes back where it was",
+        toggle_panel,
+    );
+    r.add(
+        "ui.layout",
+        "The panel layout (docks, tab groups, floating windows) as JSON, or apply craft-ui docking actions to it",
+        layout,
+    );
+    r.add("ui.float_panel", "Float a panel in its own window inside the app window, at a rect in points", float_panel);
+    r.add("ui.reset_layout", "Put every panel back where a new user has it", reset_layout);
     r.add(
         "ui.share_search",
         "Search GDTF Share in the library panel (loads the cached list off the UI thread; returns hits once loaded)",
@@ -175,7 +186,7 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "section": ui.view3d.section,
         "section_hatch": ui.view3d.hatch,
         "theme": ui.theme,
-        "panels": ui.panels,
+        "panels": crate::dock::PANELS.iter().map(|p| (p, ui.layout.layout.contains(p))).collect::<std::collections::BTreeMap<_, _>>(),
         "hidden_tags": ui.hidden_tags,
         "active_layer": ui.active_layer,
         "snap": ui.snap,
@@ -699,9 +710,79 @@ struct PanelArgs {
 }
 
 fn toggle_panel(c: &mut UiCtx, a: PanelArgs) -> CmdResult {
-    let v = c.ui.panels.get_mut(a.panel);
-    *v = a.visible.unwrap_or(!*v);
-    Ok(json!({ "panel": a.panel, "visible": *v }))
+    let ws = &mut c.ui.layout;
+    let visible = a.visible.unwrap_or(!ws.layout.contains(&a.panel));
+    crate::dock::set_visible(ws, a.panel, visible).map_err(CmdError::invalid_args)?;
+    Ok(json!({ "panel": a.panel, "visible": ws.layout.contains(&a.panel) }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct LayoutArgs {
+    /// craft-ui docking actions, applied all or none, e.g.
+    /// `{"Move": {"panel": "tags", "anchor": "inspector", "placement": {"Tab": {"before": null}}}}`,
+    /// `{"Close": {"panel": "table"}}`, `{"Activate": {"panel": "sheets"}}`. Without
+    /// actions the layout is only returned.
+    #[serde(default)]
+    actions: Vec<Value>,
+}
+
+fn layout(c: &mut UiCtx, a: LayoutArgs) -> CmdResult {
+    let actions = a
+        .actions
+        .into_iter()
+        .map(serde_json::from_value)
+        .collect::<Result<Vec<craft_ui::docking::Action<PanelKind>>, _>>()
+        .map_err(|e| CmdError::invalid_args(format!("ui.layout: {e}")))?;
+    if !actions.is_empty() {
+        crate::dock::apply(&mut c.ui.layout, actions).map_err(CmdError::invalid_args)?;
+    }
+    serde_json::to_value(&c.ui.layout).map_err(|e| CmdError::io(e.to_string()))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct FloatArgs {
+    panel: PanelKind,
+    /// Left edge in points from the window's left. Default 320.
+    #[serde(default = "default_float_x")]
+    x: f32,
+    /// Top edge in points from the window's top. Default 160.
+    #[serde(default = "default_float_y")]
+    y: f32,
+    /// Width in points. Default 300.
+    #[serde(default = "default_float_w")]
+    width: f32,
+    /// Height in points. Default 360.
+    #[serde(default = "default_float_h")]
+    height: f32,
+}
+
+fn default_float_x() -> f32 {
+    320.0
+}
+fn default_float_y() -> f32 {
+    160.0
+}
+fn default_float_w() -> f32 {
+    300.0
+}
+fn default_float_h() -> f32 {
+    360.0
+}
+
+fn float_panel(c: &mut UiCtx, a: FloatArgs) -> CmdResult {
+    let ws = &mut c.ui.layout;
+    if !ws.layout.contains(&a.panel) {
+        crate::dock::set_visible(ws, a.panel, true).map_err(CmdError::invalid_args)?;
+    }
+    let rect = [a.x, a.y, a.width, a.height];
+    crate::dock::apply(ws, vec![craft_ui::docking::Action::Float { panel: a.panel, rect }])
+        .map_err(CmdError::invalid_args)?;
+    Ok(json!({ "panel": a.panel, "rect": rect }))
+}
+
+fn reset_layout(c: &mut UiCtx, _: NoArgs) -> CmdResult {
+    c.ui.layout.reset(&crate::dock::default_layout());
+    Ok(json!({ "reset": true }))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -717,7 +798,7 @@ struct ShareSearchArgs {
 fn share_search(c: &mut UiCtx, a: ShareSearchArgs) -> CmdResult {
     let lib = &mut c.ui.library;
     lib.query = a.query;
-    c.ui.panels.library = true;
+    crate::dock::bring_forward(&mut c.ui.layout, PanelKind::Share);
     let started = lib.load_list(a.refresh);
     let hits: Vec<Value> = lib
         .hits(40)

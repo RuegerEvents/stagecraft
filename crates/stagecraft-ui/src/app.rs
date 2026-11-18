@@ -13,7 +13,7 @@ use stagecraft_core::{CmdError, Engine};
 use crate::commands::{UiCtx, UiExtension, check_shot_path, ui_registry};
 use crate::i18n::{t, tf};
 use crate::state::{FileRequest, PendingShot, Tool, UiState, View};
-use crate::{canvas, palette, panels, table, theme, view3d};
+use crate::{canvas, palette, panels, theme, view3d};
 
 pub struct Studio {
     pub engine: Engine,
@@ -23,12 +23,25 @@ pub struct Studio {
     pub offscreen: Option<view3d::offscreen::Offscreen>,
     /// File and message dialogs: queued during the frame, answered on a later one.
     pub dialogs: craft_dialogs::Dialogs<crate::dialogs::Then>,
+    /// Per-user settings: panel layout and theme. In memory unless [`Studio::with_prefs`]
+    /// got a store on disk.
+    pub prefs: craft_settings::SettingsStore<crate::dock::Prefs>,
 }
 
 impl Studio {
     pub fn new(engine: Engine) -> Self {
+        Self::with_prefs(engine, craft_settings::SettingsStore::open(craft_settings::Location::Memory).0)
+    }
+
+    /// A studio that starts from saved settings and keeps them there.
+    pub fn with_prefs(engine: Engine, prefs: craft_settings::SettingsStore<crate::dock::Prefs>) -> Self {
         stagecraft_sheet::install();
-        Self { engine, ui: UiState::default(), offscreen: None, dialogs: crate::dialogs::queue() }
+        let ui = UiState {
+            layout: crate::dock::load(prefs.get().layout.workspace.clone()),
+            theme: prefs.get().appearance.theme,
+            ..Default::default()
+        };
+        Self { engine, ui, offscreen: None, dialogs: crate::dialogs::queue(), prefs }
     }
 
     /// Run a command of either registry. Errors also go to the status bar.
@@ -109,59 +122,29 @@ impl Studio {
         egui::Panel::top("menu").show(ui, |ui| panels::menu_bar(ui, self));
         egui::Panel::top("toolbar").show(ui, |ui| panels::toolbar(ui, self));
         egui::Panel::bottom("status").show(ui, |ui| panels::status_bar(ui, self));
-        if self.ui.panels.table && self.ui.view != View::Sheets {
-            egui::Panel::bottom("table")
-                .resizable(true)
-                .default_size(230.0)
-                .min_size(120.0)
-                .show(ui, |ui| table::show(ui, self));
-        }
-        let sheets = self.ui.view == View::Sheets;
-        if sheets {
-            egui::Panel::left("left").resizable(true).default_size(270.0).min_size(220.0).show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| crate::sheets::list_panel(ui, self));
-            });
-        } else if self.ui.panels.layers || self.ui.panels.tags || self.ui.panels.library {
-            egui::Panel::left("left").resizable(true).default_size(270.0).min_size(220.0).show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if self.ui.panels.layers {
-                        panels::layers(ui, self);
-                        ui.add_space(10.0);
-                    }
-                    if self.ui.panels.tags {
-                        panels::tags(ui, self);
-                        ui.add_space(10.0);
-                    }
-                    if self.ui.panels.library {
-                        crate::library::show(ui, self);
-                    }
-                });
-            });
-        }
-        if self.ui.panels.inspector {
-            egui::Panel::right("inspector").resizable(true).default_size(280.0).min_size(240.0).show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if sheets { crate::sheets::inspector(ui, self) } else { crate::inspector::show(ui, self) }
-                });
-            });
-        }
-        egui::CentralPanel::no_frame().show(ui, |ui| match self.ui.view {
-            View::Plan => canvas::show(ui, self),
-            View::ThreeD => view3d::show(ui, self),
-            View::Sheets => crate::sheets::show(ui, self),
-            View::Split => {
-                let (left, right) = ui.max_rect().split_left_right_at_fraction(0.5);
-                ui.scope_builder(egui::UiBuilder::new().max_rect(left.shrink2(egui::vec2(0.5, 0.0))), |ui| {
-                    canvas::show(ui, self)
-                });
-                ui.scope_builder(egui::UiBuilder::new().max_rect(right.shrink2(egui::vec2(0.5, 0.0))), |ui| {
-                    view3d::show(ui, self)
-                });
-                let x = left.right();
-                ui.painter().vline(x, left.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
-            }
-        });
+        egui::CentralPanel::no_frame().show(ui, |ui| crate::dock::show(ui, self));
         palette::show(ui.ctx(), self);
+        self.keep_prefs(ui.ctx());
+    }
+
+    /// Hand layout and theme changes to the settings store, which saves them shortly after.
+    fn keep_prefs(&mut self, ctx: &egui::Context) {
+        let (layout, theme) = (&self.ui.layout, self.ui.theme);
+        let p = self.prefs.get();
+        if p.layout.workspace.as_ref() != Some(layout) || p.appearance.theme != theme {
+            let layout = layout.clone();
+            self.prefs.update(|p| {
+                p.layout.workspace = Some(layout);
+                p.appearance.theme = theme;
+            });
+        }
+        let tick = self.prefs.tick(std::time::Instant::now());
+        if let craft_settings::SaveStatus::Failed(e) = &tick.status {
+            self.ui.error(format!("settings: {e}"));
+        }
+        if let Some(deadline) = tick.next_deadline {
+            ctx.request_repaint_after(deadline.saturating_duration_since(std::time::Instant::now()));
+        }
     }
 }
 
@@ -333,6 +316,12 @@ impl eframe::App for StageApp {
             self.title = title;
         }
     }
+
+    fn on_exit(&mut self) {
+        if let Err(e) = self.studio.prefs.flush() {
+            eprintln!("stagecraft: could not save settings: {e}");
+        }
+    }
 }
 
 fn now() -> u64 {
@@ -382,7 +371,11 @@ pub fn run(engine: Engine) -> Result<(), String> {
                     (None, None)
                 }
             };
-            let mut studio = Studio::new(engine);
+            let (prefs, report) = craft_settings::SettingsStore::open(craft_settings::Location::Auto);
+            if report.has_problems() {
+                eprintln!("stagecraft: settings: {report:?}");
+            }
+            let mut studio = Studio::with_prefs(engine, prefs);
             studio.ui.native_dialogs = true;
             let wake = ctx.clone();
             studio.dialogs = craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint()));

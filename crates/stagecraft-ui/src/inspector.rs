@@ -52,8 +52,6 @@ fn step(command: &str, args: Value) -> Value {
 }
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
-    ui.heading(t("panel.inspector"));
-    ui.add_space(4.0);
     let sel: Vec<Id> = s.engine.selection().to_vec();
     let doc = s.engine.doc().clone();
     let objs: Vec<&Object> = sel.iter().filter_map(|id| doc.objects.get(id)).collect();

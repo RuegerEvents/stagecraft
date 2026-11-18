@@ -590,7 +590,6 @@ fn finish_drag(s: &mut Studio, page: &Page, d: SheetDrag, to: P2) {
 
 pub fn list_panel(ui: &mut Ui, s: &mut Studio) {
     ui.horizontal(|ui| {
-        ui.heading(t("panel.sheets"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if icon_button(ui, Icon::Plus, "New sheet").on_hover_text(t("sheets.new")).clicked() {
                 new_sheet(s);
@@ -673,8 +672,6 @@ fn new_sheet(s: &mut Studio) {
 /// The inspector in Sheets mode: the selected viewport, else the sheet with its title
 /// block fields; label templates below.
 pub fn inspector(ui: &mut Ui, s: &mut Studio) {
-    ui.heading(t("panel.inspector"));
-    ui.add_space(4.0);
     let doc = s.engine.doc().clone();
     let Some(cur) = current(&doc, &s.ui.sheets) else {
         ui.label(RichText::new(t("sheets.none")).weak());
