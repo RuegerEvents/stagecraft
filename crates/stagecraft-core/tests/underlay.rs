@@ -134,8 +134,25 @@ fn dxf_png_and_pdf_underlays() {
     let err =
         e.execute("underlay.import", json!({ "data_base64": b64(&pdf), "file_name": "p.pdf", "page": 3 })).unwrap_err();
     assert!(err.message.contains("page 3"), "{err}");
-    let err = e.execute("underlay.import", json!({ "data_base64": "AAAA", "file_name": "x.dwg" })).unwrap_err();
+    let err = e.execute("underlay.import", json!({ "data_base64": "AAAA", "file_name": "x.dwf" })).unwrap_err();
     assert!(err.message.contains(".dxf"), "{err}");
+    let err = e.execute("underlay.import", json!({ "data_base64": "AAAA", "file_name": "x.dwg" })).unwrap_err();
+    assert!(err.message.contains("DWG"), "{err}");
+}
+
+#[test]
+fn dwg_underlay_reads_as_linework() {
+    // A DWG made from the synthetic DXF by craft-dwg itself; trusted, so it may convert here.
+    let dwg = craft_dwg::dxf_to_dwg_as(&dxf(), "AC1032").unwrap();
+    craft_dwg::allow_in_process();
+    let mut e = Engine::new();
+    let out = run(&mut e, "underlay.import", json!({ "data_base64": b64(&dwg), "file_name": "plan.dwg" }));
+    let o = &e.doc().objects[&id(&out)];
+    let ObjectKind::Underlay { format, linework: Some(l), extent, .. } = &o.kind else { panic!() };
+    assert_eq!(*format, stagecraft_core::model::UnderlayFormat::Dwg);
+    assert_eq!(extent[1][0], 10000.0);
+    let lines = stagecraft_underlay::Linework::from_json(e.doc().assets[l].data.as_slice()).unwrap();
+    assert_eq!(lines.texts[0].text, "Buehne");
 }
 
 /// A valid one-page PDF, 200 × 100 pt, with one stroked line.

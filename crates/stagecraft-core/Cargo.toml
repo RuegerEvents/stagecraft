@@ -23,6 +23,7 @@ zip.workspace = true
 craft-zip.workspace = true
 
 [dev-dependencies]
+craft-dwg.workspace = true
 tempfile.workspace = true
 zip.workspace = true
 glam.workspace = true

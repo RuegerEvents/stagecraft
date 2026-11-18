@@ -496,6 +496,8 @@ pub enum UnderlayFormat {
     Pdf,
     Svg,
     Dxf,
+    /// Read as DXF linework (desktop only).
+    Dwg,
 }
 
 /// One mesh file of a model object.

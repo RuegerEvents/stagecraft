@@ -161,4 +161,4 @@ impl Studio {
 pub const MODEL_EXTENSIONS: &[&str] = &["glb", "gltf", "obj", "3ds"];
 
 /// What File > Import underlay offers.
-pub const UNDERLAY_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "pdf", "svg", "dxf"];
+pub const UNDERLAY_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "pdf", "svg", "dxf", "dwg"];

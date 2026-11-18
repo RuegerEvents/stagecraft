@@ -3,8 +3,10 @@
 //! - PNG and JPEG are shown as they are; only their pixel size is read.
 //! - SVG is rendered with resvg (embedded Roboto stands in for every font).
 //! - PDF pages are rendered with hayro (pure Rust).
-//! - DXF is read with the `dxf` crate into plain [`Linework`]: polylines (arcs, circles,
+//! - DXF is read with `craft-dxf` into plain [`Linework`]: polylines (arcs, circles,
 //!   ellipses and bulges flattened), texts, block inserts expanded.
+//! - DWG (native builds only) is converted to DXF by `craft-dwg` (in a worker process once the
+//!   app called `craft_dwg::use_own_worker`), then read as DXF.
 //!
 //! Everything is in **source units with y up**: pixels for rasters (origin at the lower
 //! left corner of the image), points for PDF pages, SVG user units, DXF drawing units.
@@ -28,6 +30,8 @@ pub enum Format {
     Pdf,
     Svg,
     Dxf,
+    /// Read through DXF; native builds only.
+    Dwg,
 }
 
 impl Format {
@@ -38,6 +42,7 @@ impl Format {
             "pdf" => Format::Pdf,
             "svg" => Format::Svg,
             "dxf" => Format::Dxf,
+            "dwg" => Format::Dwg,
             _ => return None,
         })
     }
@@ -55,6 +60,8 @@ pub enum Error {
     NoPage { page: u32, pages: u32 },
     #[error("not a readable DXF: {0}")]
     Dxf(String),
+    #[error("not a readable DWG: {0}")]
+    Dwg(String),
     #[error("the drawing is empty")]
     Empty,
 }
@@ -132,6 +139,8 @@ pub struct Converted {
     pub unit_mm: f64,
     /// Pages in a PDF, else 1.
     pub pages: u32,
+    /// What the reader left out or repaired (a damaged DXF, DWG objects without a DXF form).
+    pub notes: Vec<String>,
 }
 
 /// Longest side of a rendered SVG or PDF page, pixels.
@@ -153,22 +162,64 @@ pub fn convert(format: Format, bytes: &[u8], page: u32) -> Result<Converted, Err
                 extent: [[0.0, 0.0], [w as f64, h as f64]],
                 unit_mm: PX_MM,
                 pages: 1,
+                notes: Vec::new(),
             })
         }
         Format::Svg => {
             let (raster, size) = render_svg(bytes)?;
-            Ok(Converted { raster: Some(raster), linework: None, extent: [[0.0, 0.0], size], unit_mm: PX_MM, pages: 1 })
+            Ok(Converted {
+                raster: Some(raster),
+                linework: None,
+                extent: [[0.0, 0.0], size],
+                unit_mm: PX_MM,
+                pages: 1,
+                notes: Vec::new(),
+            })
         }
         Format::Pdf => {
             let (raster, size, pages) = render_pdf(bytes, page)?;
-            Ok(Converted { raster: Some(raster), linework: None, extent: [[0.0, 0.0], size], unit_mm: PT_MM, pages })
+            Ok(Converted {
+                raster: Some(raster),
+                linework: None,
+                extent: [[0.0, 0.0], size],
+                unit_mm: PT_MM,
+                pages,
+                notes: Vec::new(),
+            })
         }
-        Format::Dxf => {
-            let (lines, unit_mm) = read_dxf(bytes)?;
-            let extent = lines.extent().ok_or(Error::Empty)?;
-            Ok(Converted { raster: None, linework: Some(lines), extent, unit_mm, pages: 1 })
+        Format::Dxf => linework(read_dxf(bytes)?, Vec::new()),
+        Format::Dwg => {
+            let (dxf, notes) = dwg_to_dxf(bytes)?;
+            linework(read_dxf(&dxf)?, notes)
         }
     }
+}
+
+fn linework((lines, unit_mm, more): (Linework, f64, Vec<String>), mut notes: Vec<String>) -> Result<Converted, Error> {
+    notes.extend(more);
+    let extent = lines.extent().ok_or(Error::Empty)?;
+    Ok(Converted { raster: None, linework: Some(lines), extent, unit_mm, pages: 1, notes })
+}
+
+/// Largest DWG read; its DXF rendition may be six times as large.
+pub const MAX_DWG: usize = 256 << 20;
+
+/// A DWG as DXF bytes, with notes on what the conversion left out. Runs in craft-dwg's worker
+/// process when the app set one up, so a hostile file cannot take the app down; without one it
+/// is refused unless the caller allowed in-process conversion (tests, trusted input).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn dwg_to_dxf(bytes: &[u8]) -> Result<(Vec<u8>, Vec<String>), Error> {
+    if !craft_dwg::is_dwg(bytes) {
+        return Err(Error::Dwg("no DWG signature".into()));
+    }
+    let limits = craft_dwg::Limits { max_dwg_bytes: MAX_DWG, max_dxf_bytes: 6 * MAX_DWG };
+    craft_dwg::decode(bytes, limits).map_err(Error::Dwg)
+}
+
+/// No DWG reader in the browser build.
+#[cfg(target_arch = "wasm32")]
+pub fn dwg_to_dxf(_bytes: &[u8]) -> Result<(Vec<u8>, Vec<String>), Error> {
+    Err(Error::Dwg("DWG needs the desktop app; save the drawing as DXF".into()))
 }
 
 /// Pixel size of a PNG or JPEG.
@@ -343,7 +394,25 @@ mod tests {
         assert_eq!(Format::from_ext("PNG"), Some(Format::Image));
         assert_eq!(Format::from_ext("jpeg"), Some(Format::Image));
         assert_eq!(Format::from_ext("pdf"), Some(Format::Pdf));
-        assert_eq!(Format::from_ext("dwg"), None);
+        assert_eq!(Format::from_ext("DWG"), Some(Format::Dwg));
+        assert_eq!(Format::from_ext("dwf"), None);
+    }
+
+    /// A DWG made from the synthetic DXF by craft-dwg itself (no outside file), read back.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn dwg_reads_through_dxf() {
+        let dwg = craft_dwg::dxf_to_dwg_as(&dxf_lines::tests::sample(), "AC1032").unwrap();
+        assert!(craft_dwg::is_dwg(&dwg));
+        // Without a worker or permission the conversion is refused, never run here.
+        assert!(matches!(convert(Format::Dwg, &dwg, 1), Err(Error::Dwg(_))));
+        craft_dwg::allow_in_process();
+        let c = convert(Format::Dwg, &dwg, 1).unwrap();
+        let lw = c.linework.unwrap();
+        assert_eq!(c.unit_mm, 1000.0);
+        assert!(lw.paths.iter().any(|p| p.points == [[0.0, 0.0], [10.0, 0.0]]), "{:?}", lw.paths);
+        assert!(lw.texts.iter().any(|t| t.text == "Stage"));
+        assert!(matches!(convert(Format::Dwg, b"not a dwg", 1), Err(Error::Dwg(_))));
     }
 
     #[test]

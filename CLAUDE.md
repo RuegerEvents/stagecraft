@@ -222,7 +222,9 @@ harness there uses 1/60 s steps so double clicks register), screens `30-35-sketc
 ## Underlays and notes
 
 `stagecraft-underlay` (no StageCraft deps, wasm; README there) turns PNG/JPEG, PDF
-(hayro), SVG (resvg, draw.io CSS fixed up) and DXF (flattened `Linework`) into what
+(hayro), SVG (resvg, draw.io CSS fixed up), DXF (craft-dxf, flattened `Linework`) and,
+native only, DWG (craft-dwg → DXF in a worker copy of the binary: `main` calls
+`craft_dwg::serve_if_asked`/`use_own_worker`; tests call `allow_in_process`) into what
 the plan shows. Core `commands/annotate.rs`: `underlay.import/calibrate/align/update`,
 `note.create/update`; kinds `underlay` (assets: source + PNG or JSON linework) and
 `note`. Plan prim `Image`; sheets draw underlays only with viewport `underlays: true`.

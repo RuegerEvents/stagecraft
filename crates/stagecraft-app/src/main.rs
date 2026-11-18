@@ -67,6 +67,12 @@ fn load_user_catalogues() {
 }
 
 fn main() -> Result<()> {
+    // DWG underlays are converted in a copy of this binary (craft-dwg's worker), so a damaged
+    // or hostile file can end that copy, never the app. The copy is started with `--dwg-worker`.
+    if let Some(code) = craft_dwg::serve_if_asked() {
+        std::process::exit(code);
+    }
+    craft_dwg::use_own_worker();
     let cli = Cli::parse();
     load_user_catalogues();
     stagecraft_sheet::install();

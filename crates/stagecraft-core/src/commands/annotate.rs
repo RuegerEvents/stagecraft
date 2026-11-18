@@ -66,12 +66,13 @@ fn format_of(f: stagecraft_underlay::Format) -> UnderlayFormat {
         stagecraft_underlay::Format::Pdf => UnderlayFormat::Pdf,
         stagecraft_underlay::Format::Svg => UnderlayFormat::Svg,
         stagecraft_underlay::Format::Dxf => UnderlayFormat::Dxf,
+        stagecraft_underlay::Format::Dwg => UnderlayFormat::Dwg,
     }
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct ImportArgs {
-    /// Path to a `.png`, `.jpg`, `.pdf`, `.svg` or `.dxf` file.
+    /// Path to a `.png`, `.jpg`, `.pdf`, `.svg`, `.dxf` or `.dwg` file (DWG: desktop only).
     path: Option<PathBuf>,
     /// The file's bytes, base64, instead of `path` (needs `file_name`).
     data_base64: Option<String>,
@@ -128,7 +129,7 @@ fn import(ctx: &mut Ctx, a: ImportArgs) -> CmdResult {
         None => (name.clone(), String::new()),
     };
     let format = stagecraft_underlay::Format::from_ext(&ext)
-        .ok_or_else(|| CmdError::invalid_args(format!("`{name}`: use a .png, .jpg, .pdf, .svg or .dxf file")))?;
+        .ok_or_else(|| CmdError::invalid_args(format!("`{name}`: use a .png, .jpg, .pdf, .svg, .dxf or .dwg file")))?;
     if !(0.0..=1.0).contains(&a.opacity) {
         return Err(CmdError::invalid_args("opacity is between 0 and 1"));
     }
@@ -140,7 +141,7 @@ fn import(ctx: &mut Ctx, a: ImportArgs) -> CmdResult {
     let conv = stagecraft_underlay::convert(format, &bytes, a.page)
         .map_err(|e| CmdError::invalid_args(format!("`{name}`: {e}")))?;
     let scale = match format {
-        stagecraft_underlay::Format::Dxf => a.scale.unwrap_or(conv.unit_mm),
+        stagecraft_underlay::Format::Dxf | stagecraft_underlay::Format::Dwg => a.scale.unwrap_or(conv.unit_mm),
         _ => conv.unit_mm * a.scale.unwrap_or(100.0),
     };
     let source = Asset::new(&name, &ext, bytes);
@@ -185,6 +186,9 @@ fn import(ctx: &mut Ctx, a: ImportArgs) -> CmdResult {
     out["scale"] = json!(scale);
     out["size"] = json!([(hi[0] - lo[0]) * scale, (hi[1] - lo[1]) * scale]);
     out["pages"] = json!(conv.pages);
+    if !conv.notes.is_empty() {
+        out["notes"] = json!(conv.notes);
+    }
     Ok(out)
 }
 

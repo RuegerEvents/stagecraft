@@ -1,11 +1,10 @@
-//! DXF to plain linework: everything flattened to polylines and texts in drawing units.
+//! DXF to plain linework: everything flattened to polylines and texts in drawing units. The file
+//! is read with craft-dxf (ASCII and binary, bounded, damaged files read up to the damage).
 
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
-use dxf::entities::{Entity, EntityType};
-use dxf::enums::Units;
-use dxf::{Block, Drawing};
+use craft_dxf::model::{Document, Entity, EntityKind, Point};
 
 use crate::{Error, Linework, Path, Text};
 
@@ -13,6 +12,8 @@ use crate::{Error, Linework, Path, Text};
 const ARC_STEPS: f64 = 72.0;
 /// Inserts nested deeper than this are ignored (guards against recursive blocks).
 const MAX_DEPTH: usize = 8;
+/// Most columns and rows of one array insert.
+const MAX_ARRAY: i64 = 1000;
 
 /// A 2D affine map: `[a, b, c, d, e, f]` → `(a x + c y + e, b x + d y + f)`.
 #[derive(Clone, Copy)]
@@ -58,29 +59,67 @@ impl Xf {
 }
 
 /// mm per drawing unit for `$INSUNITS`; unitless drawings are taken as mm.
-fn unit_mm(u: Units) -> f64 {
-    match u {
-        Units::Inches => 25.4,
-        Units::Feet => 304.8,
-        Units::Millimeters => 1.0,
-        Units::Centimeters => 10.0,
-        Units::Meters => 1000.0,
-        Units::Decimeters => 100.0,
-        Units::Yards => 914.4,
-        Units::Microns => 0.001,
+fn unit_mm(insunits: i64) -> f64 {
+    match insunits {
+        1 => 25.4,
+        2 => 304.8,
+        4 => 1.0,
+        5 => 10.0,
+        6 => 1000.0,
+        7 => 1_000_000.0,
+        10 => 914.4,
+        13 => 0.001,
+        14 => 100.0,
         _ => 1.0,
     }
 }
 
-/// Read a DXF into linework (model space only) and the mm per drawing unit.
-pub fn read_dxf(bytes: &[u8]) -> Result<(Linework, f64), Error> {
-    let d = Drawing::load(&mut std::io::Cursor::new(bytes)).map_err(|e| Error::Dxf(e.to_string()))?;
-    let blocks: HashMap<&str, &Block> = d.blocks().map(|b| (b.name.as_str(), b)).collect();
-    let mut out = Linework::default();
-    for e in d.entities().filter(|e| !e.common.is_in_paper_space) {
-        entity(e, &Xf::ID, &blocks, 0, &mut out);
+/// The drawing's entities and blocks, typed once.
+struct Drawing {
+    entities: Vec<Entity>,
+    blocks: HashMap<String, ([f64; 2], Vec<Entity>)>,
+}
+
+/// Read a DXF into linework (model space only), the mm per drawing unit and notes on what was
+/// left out (a file that stops early).
+pub fn read_dxf(bytes: &[u8]) -> Result<(Linework, f64, Vec<String>), Error> {
+    let (tags, stopped) = craft_dxf::parse_recovering(bytes).map_err(|e| Error::Dxf(e.to_string()))?;
+    let doc = Document::read(&tags);
+    if doc.sections == 0 {
+        return Err(Error::Dxf("no sections".into()));
     }
-    Ok((out, unit_mm(d.header.default_drawing_units)))
+    let mut notes = Vec::new();
+    if let Some(line) = stopped {
+        notes.push(format!("the DXF is damaged at line {line}; read what came before"));
+    }
+    let d = Drawing {
+        entities: doc.entities.iter().filter(|e| !e.paper_space()).map(Entity::read).collect(),
+        blocks: doc
+            .blocks
+            .iter()
+            .map(|b| {
+                let base = b.base();
+                (b.name.to_ascii_uppercase(), ([base[0], base[1]], b.entities.iter().map(Entity::read).collect()))
+            })
+            .collect(),
+    };
+    let mut out = Linework::default();
+    for e in &d.entities {
+        entity(e, &Xf::ID, &d, 0, &mut out);
+    }
+    Ok((out, unit_mm(doc.header.insunits()), notes))
+}
+
+/// The object coordinate system of a planar entity as a 2D map into the world's x/y (the
+/// identity for the usual +Z extrusion; mirrored blocks have −Z).
+fn ocs(extrusion: Point) -> Xf {
+    let n = extrusion;
+    if n[0].abs() < 1e-12 && n[1].abs() < 1e-12 && n[2] > 0.0 {
+        return Xf::ID;
+    }
+    let x = craft_dxf::model::ocs_to_wcs(n, [1.0, 0.0, 0.0]);
+    let y = craft_dxf::model::ocs_to_wcs(n, [0.0, 1.0, 0.0]);
+    Xf([x[0], x[1], y[0], y[1], 0.0, 0.0])
 }
 
 fn arc_points(c: [f64; 2], r: f64, start: f64, sweep: f64) -> Vec<[f64; 2]> {
@@ -164,28 +203,30 @@ fn plain_mtext(s: &str) -> String {
     out.trim().to_owned()
 }
 
-fn entity(e: &Entity, xf: &Xf, blocks: &HashMap<&str, &Block>, depth: usize, out: &mut Linework) {
-    let p2 = |p: &dxf::Point| [p.x, p.y];
-    match &e.specific {
-        EntityType::Line(l) => push_path(out, xf, vec![p2(&l.p1), p2(&l.p2)], false),
-        EntityType::Circle(c) => {
-            let mut pts = arc_points(p2(&c.center), c.radius, 0.0, 2.0 * PI);
+fn entity(e: &Entity, xf: &Xf, d: &Drawing, depth: usize, out: &mut Linework) {
+    let p2 = |p: &Point| [p[0], p[1]];
+    // Planar entities are in their object coordinate system.
+    let planar = xf.then(&ocs(e.common.extrusion));
+    match &e.kind {
+        EntityKind::Line { start, end } => push_path(out, xf, vec![p2(start), p2(end)], false),
+        EntityKind::Circle { center, radius } => {
+            let mut pts = arc_points(p2(center), *radius, 0.0, 2.0 * PI);
             pts.pop();
-            push_path(out, xf, pts, true)
+            push_path(out, &planar, pts, true)
         }
-        EntityType::Arc(a) => {
-            let s = a.start_angle.to_radians();
-            let mut sweep = a.end_angle.to_radians() - s;
+        EntityKind::Arc { center, radius, start_angle, end_angle } => {
+            let s = start_angle.to_radians();
+            let mut sweep = end_angle.to_radians() - s;
             if sweep <= 0.0 {
                 sweep += 2.0 * PI;
             }
-            push_path(out, xf, arc_points(p2(&a.center), a.radius, s, sweep), false)
+            push_path(out, &planar, arc_points(p2(center), *radius, s, sweep), false)
         }
-        EntityType::Ellipse(el) => {
-            let c = p2(&el.center);
-            let maj = [el.major_axis.x, el.major_axis.y];
-            let min = [-maj[1] * el.minor_axis_ratio, maj[0] * el.minor_axis_ratio];
-            let (t0, mut t1) = (el.start_parameter, el.end_parameter);
+        EntityKind::Ellipse { center, major, ratio, start, end } => {
+            let c = p2(center);
+            let maj = [major[0], major[1]];
+            let min = [-maj[1] * ratio, maj[0] * ratio];
+            let (t0, mut t1) = (*start, *end);
             if t1 <= t0 {
                 t1 += 2.0 * PI;
             }
@@ -198,53 +239,55 @@ fn entity(e: &Entity, xf: &Xf, blocks: &HashMap<&str, &Block>, depth: usize, out
                 .collect();
             push_path(out, xf, pts, false)
         }
-        EntityType::LwPolyline(p) => {
-            let closed = p.flags & 1 != 0;
+        EntityKind::LwPolyline(p) => {
             let v: Vec<([f64; 2], f64)> = p.vertices.iter().map(|v| ([v.x, v.y], v.bulge)).collect();
-            push_path(out, xf, bulged(&v, closed), closed && v.iter().all(|x| x.1 == 0.0))
+            push_path(out, &planar, bulged(&v, p.closed), p.closed && v.iter().all(|x| x.1 == 0.0))
         }
-        EntityType::Polyline(p) => {
-            let closed = p.flags & 1 != 0;
-            let v: Vec<([f64; 2], f64)> = p.vertices().map(|v| (p2(&v.location), v.bulge)).collect();
-            push_path(out, xf, bulged(&v, closed), closed && v.iter().all(|x| x.1 == 0.0))
+        EntityKind::Polyline(p) if !p.is_mesh() && !p.is_polyface() => {
+            let closed = p.closed();
+            let v: Vec<([f64; 2], f64)> =
+                p.vertices.iter().filter(|v| !v.is_spline_frame()).map(|v| (p2(&v.location), v.bulge)).collect();
+            let m = if p.is_3d() { *xf } else { planar };
+            push_path(out, &m, bulged(&v, closed), closed && v.iter().all(|x| x.1 == 0.0))
         }
-        EntityType::Spline(s) => {
+        EntityKind::Spline(s) => {
             // Fit points if present, else the control polygon: close enough for an underlay.
-            let pts: Vec<[f64; 2]> = if s.fit_points.len() >= 2 {
-                s.fit_points.iter().map(p2).collect()
-            } else {
-                s.control_points.iter().map(p2).collect()
-            };
+            let pts: Vec<[f64; 2]> =
+                if s.fit.len() >= 2 { s.fit.iter().map(p2).collect() } else { s.control.iter().map(p2).collect() };
             push_path(out, xf, pts, false)
         }
-        EntityType::Text(t) if !t.value.trim().is_empty() => out.texts.push(Text {
-            pos: xf.apply(p2(&t.location)),
+        EntityKind::Text(t) if !t.value.trim().is_empty() => out.texts.push(Text {
+            pos: planar.apply(p2(&t.insert)),
             text: t.value.clone(),
-            height: t.text_height * xf.scale(),
-            rotation: t.rotation + xf.angle(),
+            height: t.height * planar.scale(),
+            rotation: t.rotation + planar.angle(),
         }),
-        EntityType::MText(t) => {
-            let text = plain_mtext(&format!("{}{}", t.extended_text.join(""), t.text));
+        EntityKind::MText(t) => {
+            let text = plain_mtext(&craft_dxf::mtext::unescape_codes(&t.contents));
             if !text.is_empty() {
+                let rotation = match t.direction {
+                    Some(dir) if dir[0] != 0.0 || dir[1] != 0.0 => dir[1].atan2(dir[0]).to_degrees(),
+                    _ => t.rotation,
+                };
                 out.texts.push(Text {
-                    pos: xf.apply(p2(&t.insertion_point)),
+                    pos: xf.apply(p2(&t.insert)),
                     text,
-                    height: t.initial_text_height * xf.scale(),
-                    rotation: t.rotation_angle + xf.angle(),
+                    height: t.height * xf.scale(),
+                    rotation: rotation + xf.angle(),
                 });
             }
         }
-        EntityType::Insert(i) if depth < MAX_DEPTH => {
-            let Some(b) = blocks.get(i.name.as_str()) else { return };
-            let local = Xf::insert(p2(&i.location), i.x_scale_factor, i.y_scale_factor, i.rotation, p2(&b.base_point));
-            let cols = i.column_count.max(1);
-            let rows = i.row_count.max(1);
+        EntityKind::Insert(i) if depth < MAX_DEPTH => {
+            let Some((base, entities)) = d.blocks.get(&i.block.to_ascii_uppercase()) else { return };
+            let local = Xf::insert(p2(&i.insert), i.scale[0], i.scale[1], i.rotation, *base);
+            let cols = i.columns.clamp(1, MAX_ARRAY);
+            let rows = i.rows.clamp(1, MAX_ARRAY);
             for r in 0..rows {
                 for c in 0..cols {
                     let off = Xf([1.0, 0.0, 0.0, 1.0, c as f64 * i.column_spacing, r as f64 * i.row_spacing]);
-                    let m = xf.then(&off).then(&local);
-                    for be in &b.entities {
-                        entity(be, &m, blocks, depth + 1, out);
+                    let m = planar.then(&off).then(&local);
+                    for be in entities {
+                        entity(be, &m, d, depth + 1, out);
                     }
                 }
             }
@@ -254,52 +297,36 @@ fn entity(e: &Entity, xf: &Xf, blocks: &HashMap<&str, &Block>, depth: usize, out
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn sample() -> Vec<u8> {
-        let mut d = Drawing::new();
-        d.header.version = dxf::enums::AcadVersion::R2000;
-        d.header.default_drawing_units = Units::Meters;
-        d.add_entity(Entity::new(EntityType::Line(dxf::entities::Line::new(
-            dxf::Point::new(0.0, 0.0, 0.0),
-            dxf::Point::new(10.0, 0.0, 0.0),
-        ))));
-        d.add_entity(Entity::new(EntityType::Circle(dxf::entities::Circle::new(dxf::Point::new(5.0, 5.0, 0.0), 2.0))));
-        let t = dxf::entities::Text {
-            location: dxf::Point::new(1.0, 8.0, 0.0),
-            value: "Stage".into(),
-            text_height: 0.5,
-            ..Default::default()
-        };
-        d.add_entity(Entity::new(EntityType::Text(t)));
-        let mut b = Block { name: "SQ".into(), ..Default::default() };
-        b.entities.push(Entity::new(EntityType::Line(dxf::entities::Line::new(
-            dxf::Point::new(0.0, 0.0, 0.0),
-            dxf::Point::new(1.0, 0.0, 0.0),
-        ))));
-        d.add_block(b);
-        let ins = dxf::entities::Insert {
-            name: "SQ".into(),
-            location: dxf::Point::new(20.0, 0.0, 0.0),
-            rotation: 90.0,
-            x_scale_factor: 2.0,
-            y_scale_factor: 2.0,
-            ..Default::default()
-        };
-        d.add_entity(Entity::new(EntityType::Insert(ins)));
-        let mut lw = dxf::entities::LwPolyline::default();
-        lw.vertices.push(dxf::LwPolylineVertex { x: 0.0, y: -2.0, bulge: 1.0, ..Default::default() });
-        lw.vertices.push(dxf::LwPolylineVertex { x: 2.0, y: -2.0, ..Default::default() });
-        d.add_entity(Entity::new(EntityType::LwPolyline(lw)));
-        let mut out = Vec::new();
-        d.save(&mut out).unwrap();
-        out
+    /// An R12 DXF in metres: a line, a circle, a text, a block inserted turned and doubled, an
+    /// LWPOLYLINE with a bulge, and a circle mirrored by a −Z extrusion.
+    pub(crate) fn sample() -> Vec<u8> {
+        #[rustfmt::skip]
+        let groups: &[(i32, &str)] = &[
+            (0, "SECTION"), (2, "HEADER"), (9, "$INSUNITS"), (70, "6"), (0, "ENDSEC"),
+            (0, "SECTION"), (2, "BLOCKS"),
+            (0, "BLOCK"), (8, "0"), (2, "SQ"), (70, "0"), (10, "0"), (20, "0"), (30, "0"),
+            (0, "LINE"), (8, "0"), (10, "0"), (20, "0"), (30, "0"), (11, "1"), (21, "0"), (31, "0"),
+            (0, "ENDBLK"), (8, "0"),
+            (0, "ENDSEC"),
+            (0, "SECTION"), (2, "ENTITIES"),
+            (0, "LINE"), (8, "0"), (10, "0"), (20, "0"), (30, "0"), (11, "10"), (21, "0"), (31, "0"),
+            (0, "CIRCLE"), (8, "0"), (10, "5"), (20, "5"), (30, "0"), (40, "2"),
+            (0, "TEXT"), (8, "0"), (10, "1"), (20, "8"), (30, "0"), (40, "0.5"), (1, "Stage"),
+            (0, "INSERT"), (8, "0"), (2, "SQ"), (10, "20"), (20, "0"), (30, "0"), (41, "2"), (42, "2"), (50, "90"),
+            (0, "LWPOLYLINE"), (8, "0"), (90, "2"), (70, "0"), (10, "0"), (20, "-2"), (42, "1"), (10, "2"), (20, "-2"),
+            (0, "CIRCLE"), (8, "0"), (10, "30"), (20, "0"), (30, "0"), (40, "1"), (210, "0"), (220, "0"), (230, "-1"),
+            (0, "ENDSEC"), (0, "EOF"),
+        ];
+        groups.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect::<String>().into_bytes()
     }
 
     #[test]
     fn dxf_lines_circles_texts_inserts() {
-        let (lw, unit) = read_dxf(&sample()).unwrap();
+        let (lw, unit, notes) = read_dxf(&sample()).unwrap();
+        assert!(notes.is_empty(), "{notes:?}");
         assert_eq!(unit, 1000.0);
         assert_eq!(lw.paths[0].points, vec![[0.0, 0.0], [10.0, 0.0]]);
         assert!(lw.paths[1].closed);
@@ -313,8 +340,23 @@ mod tests {
         let semi = &lw.paths[3].points;
         assert!(semi.iter().all(|p| ((p[0] - 1.0).hypot(p[1] + 2.0) - 1.0).abs() < 1e-9), "{semi:?}");
         assert!(semi.iter().any(|p| (p[1] + 3.0).abs() < 1e-6), "{semi:?}");
+        // the −Z circle at OCS x = 30 lies at world x = −30
+        let mirrored = &lw.paths[4].points;
+        assert!(mirrored.iter().all(|p| ((p[0] + 30.0).hypot(p[1]) - 1.0).abs() < 1e-9), "{mirrored:?}");
         let e = lw.extent().unwrap();
         assert_eq!(e[1][0], 20.0);
+    }
+
+    #[test]
+    fn a_damaged_dxf_is_read_up_to_the_damage() {
+        let mut bytes = sample();
+        let cut = String::from_utf8_lossy(&bytes).find("LWPOLYLINE").unwrap();
+        bytes.truncate(cut - 3);
+        bytes.extend_from_slice(b"\nnot a group code\n");
+        let (lw, _, notes) = read_dxf(&bytes).unwrap();
+        assert!(lw.paths.len() >= 3);
+        assert!(notes.iter().any(|n| n.contains("damaged")), "{notes:?}");
+        assert!(read_dxf(b"hello").is_err());
     }
 
     #[test]
