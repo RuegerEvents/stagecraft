@@ -131,6 +131,12 @@ struct ProsceniumArgs {
     /// y of the iron (fire curtain) line from the downstage face, mm. Given = shown.
     /// Default: no iron line.
     iron: Option<f64>,
+    /// Cut the opening's upper corners at 45° by this much, mm. Default 0 (square).
+    #[serde(default)]
+    chamfer: f64,
+    /// Cut the frame's outer upper corners at 45° by this much, mm. Default 0.
+    #[serde(default)]
+    outer_chamfer: f64,
 }
 
 fn d10000() -> f64 {
@@ -150,6 +156,8 @@ fn proscenium(ctx: &mut Ctx, a: ProsceniumArgs) -> CmdResult {
     for (w, v) in [("width", a.width), ("height", a.height), ("depth", a.depth), ("frame", a.frame)] {
         positive(w, v)?;
     }
+    non_negative("chamfer", a.chamfer)?;
+    non_negative("outer_chamfer", a.outer_chamfer)?;
     let p = Placement { position: a.position, rotation: [0.0, 0.0, a.rotation] };
     let kind = ObjectKind::Proscenium {
         width: a.width,
@@ -158,6 +166,8 @@ fn proscenium(ctx: &mut Ctx, a: ProsceniumArgs) -> CmdResult {
         frame: a.frame,
         iron: a.iron.unwrap_or(a.depth + 150.0),
         show_iron: a.iron.is_some(),
+        chamfer: a.chamfer,
+        outer_chamfer: a.outer_chamfer,
     };
     insert(ctx, a.common, "Proscenium", p, kind)
 }
@@ -177,12 +187,26 @@ struct ProsceniumUpdateArgs {
     iron: Option<f64>,
     /// Show or hide the iron line.
     show_iron: Option<bool>,
+    /// 45° cut of the opening's upper corners, mm (0 = square).
+    chamfer: Option<f64>,
+    /// 45° cut of the frame's outer upper corners, mm (0 = square).
+    outer_chamfer: Option<f64>,
 }
 
 fn proscenium_update(ctx: &mut Ctx, a: ProsceniumUpdateArgs) -> CmdResult {
     opt_positive(&[("width", a.width), ("height", a.height), ("depth", a.depth), ("frame", a.frame)])?;
+    for (what, v) in [("chamfer", a.chamfer), ("outer_chamfer", a.outer_chamfer)] {
+        if let Some(v) = v {
+            non_negative(what, v)?;
+        }
+    }
     let o = kind_mut(ctx, a.id, "proscenium")?;
-    let ObjectKind::Proscenium { width, height, depth, frame, iron, show_iron } = &mut o.kind else { unreachable!() };
+    let ObjectKind::Proscenium { width, height, depth, frame, iron, show_iron, chamfer, outer_chamfer } = &mut o.kind
+    else {
+        unreachable!()
+    };
+    set(chamfer, a.chamfer);
+    set(outer_chamfer, a.outer_chamfer);
     set(width, a.width);
     set(height, a.height);
     set(depth, a.depth);

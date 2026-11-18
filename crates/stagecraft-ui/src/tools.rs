@@ -823,6 +823,8 @@ fn stage_ghost(tool: Tool, o: &crate::state::ToolOptions, c: P2) -> Vec<(ObjectK
             frame: 1000.0,
             iron: 0.0,
             show_iron: false,
+            chamfer: 0.0,
+            outer_chamfer: 0.0,
         },
         Tool::Platform => {
             let [w, d] = parse_preset(&o.platform_preset).unwrap_or([2000.0, 1000.0]);

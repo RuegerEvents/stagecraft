@@ -210,6 +210,8 @@
   "inspector.width": "Width",
   "inspector.depth": "Depth",
   "inspector.frame": "Frame",
+  "inspector.chamfer": "Corner chamfer",
+  "inspector.outer_chamfer": "Outer chamfer",
   "inspector.show_iron": "Iron line",
   "inspector.iron": "Iron at y",
   "inspector.fullness": "Fullness (%)",

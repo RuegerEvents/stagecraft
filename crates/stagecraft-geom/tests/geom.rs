@@ -352,6 +352,7 @@ fn every_stage_mesh_is_closed_at_every_detail_level() {
     let mut e = Engine::new();
     let ids = [
         run(&mut e, "proscenium.create", json!({ "iron": 800 })),
+        run(&mut e, "proscenium.create", json!({ "chamfer": 1200, "outer_chamfer": 1500 })),
         run(&mut e, "curtain.create", json!({ "width": 10000, "height": 6000 })),
         run(&mut e, "curtain.create", json!({ "opening": 60 })),
         run(&mut e, "curtain.create", json!({ "state": "gathered", "split": false })),
@@ -401,6 +402,23 @@ fn proscenium_has_two_pillars_a_header_and_the_iron_line() {
     assert!(near(points[0], [-6000.0, 800.0]) && near(points[1], [6000.0, 800.0]));
     let m = mesh_of(&e, p, Lod::Full);
     assert!(within(&m, [-6000.0, 0.0, 0.0], [6000.0, 600.0, 7000.0], 0.0));
+}
+
+#[test]
+fn proscenium_chamfers_fill_the_opening_corners_and_cut_the_outer_ones() {
+    let mut e = Engine::new();
+    let base = json!({ "width": 10000, "height": 6000, "depth": 600, "frame": 1000 });
+    let square = id(&run(&mut e, "proscenium.create", base.clone()));
+    let mut args = base;
+    args["chamfer"] = json!(1200);
+    args["outer_chamfer"] = json!(800);
+    let cut = id(&run(&mut e, "proscenium.create", args));
+    let (a, b) = (mesh_of(&e, square, Lod::Full), mesh_of(&e, cut, Lod::Full));
+    assert!(b.is_watertight());
+    // + two 1.2 m triangles in the opening, − two 0.8 m triangles outside, × depth
+    let expected = a.volume() + 600.0 * (1200.0f64.powi(2) - 800.0f64.powi(2));
+    assert!((b.volume() - expected).abs() < 1.0, "{} vs {expected}", b.volume());
+    assert!(within(&b, [-6000.0, 0.0, 0.0], [6000.0, 600.0, 7000.0], 0.0));
 }
 
 #[test]
@@ -487,4 +505,15 @@ fn levels_carry_their_sign() {
     assert_eq!(level_text(1400.0), "+1.40");
     assert_eq!(level_text(-750.0), "-0.75");
     assert_eq!(level_text(0.4), "±0.00");
+}
+
+#[test]
+fn the_plan_draws_lower_floors_first() {
+    let mut e = Engine::new();
+    let sq = |s: f64| json!([[0, 0], [s, 0], [s, s], [0, s]]);
+    let step = id(&run(&mut e, "floor.create", json!({ "outline": sq(1000.0), "z": 750 })));
+    let hall = id(&run(&mut e, "floor.create", json!({ "outline": sq(5000.0), "z": 0 })));
+    let fixture = id(&run(&mut e, "fixture.create", json!({ "position": [500, 500, 3000] })));
+    let order = stagecraft_geom::pick::back_to_front(e.doc(), e.doc().objects.values());
+    assert_eq!(order, vec![hall, step, fixture]);
 }

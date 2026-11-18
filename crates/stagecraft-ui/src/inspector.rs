@@ -564,6 +564,28 @@ pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Objec
                 c,
                 "frame",
             );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.chamfer",
+                "pr_c",
+                f!(ObjectKind::Proscenium { chamfer, .. } => *chamfer),
+                c,
+                "chamfer",
+            );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.outer_chamfer",
+                "pr_oc",
+                f!(ObjectKind::Proscenium { outer_chamfer, .. } => *outer_chamfer),
+                c,
+                "outer_chamfer",
+            );
             let show = all_bool(&f!(ObjectKind::Proscenium { show_iron, .. } => *show_iron));
             flag(ui, s, sel, "inspector.show_iron", show, c, "show_iron");
             num(

@@ -357,6 +357,12 @@ pub enum ObjectKind {
         /// y of the iron (fire curtain) line, local mm.
         iron: f64,
         show_iron: bool,
+        /// The opening's upper corners cut at 45° by this much, mm (0 = square).
+        #[serde(default)]
+        chamfer: f64,
+        /// The frame's outer upper corners cut at 45° by this much, mm (0 = square).
+        #[serde(default)]
+        outer_chamfer: f64,
     },
     /// A curtain hanging from its top edge. Origin: centre of the top edge; the fabric
     /// runs along local x and hangs down (-z).

@@ -22,6 +22,21 @@ pub fn objects_bounds(doc: &Document, ids: impl IntoIterator<Item = Id>, style: 
         .fold(Bounds::EMPTY, |b, o| b.union(&object_bounds(doc, o, style)))
 }
 
+/// The plan's drawing order, back to front: by [`rank`] (floors before platforms
+/// before fixtures), then lower objects before higher ones, so a step or a gallery
+/// drawn over another floor stays visible, then by id.
+pub fn back_to_front<'a>(doc: &Document, objs: impl IntoIterator<Item = &'a Object>) -> Vec<Id> {
+    let mut v: Vec<(u8, f64, Id)> = objs
+        .into_iter()
+        .map(|o| {
+            let z = stagecraft_core::geom::world(doc, o.id).map_or(0.0, |w| w.translation.z);
+            (rank(&o.kind), z, o.id)
+        })
+        .collect();
+    v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+    v.into_iter().map(|x| x.2).collect()
+}
+
 /// Which object wins when several are under the pointer: small things on top.
 /// Platforms sit on floors; ceilings come last. The canvas draws in the reverse order.
 pub fn rank(kind: &ObjectKind) -> u8 {

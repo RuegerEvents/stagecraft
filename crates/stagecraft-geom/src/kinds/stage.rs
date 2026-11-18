@@ -67,13 +67,55 @@ pub fn proscenium_plan(w: &DAffine3, obj: &Object, _style: &PlanStyle) -> Vec<Pl
 }
 
 pub fn proscenium_mesh(obj: &Object) -> Mesh {
-    let ObjectKind::Proscenium { width, height, depth, frame, .. } = obj.kind else { return Mesh::empty() };
+    let ObjectKind::Proscenium { width, height, depth, frame, chamfer, outer_chamfer, .. } = obj.kind else {
+        return Mesh::empty();
+    };
     let (hw, f) = (width / 2.0, frame);
     let mut m = Mesh::empty();
     m.set_material(MaterialClass::Wall);
-    m.cuboid(DVec3::new(-hw - f, 0.0, 0.0), DVec3::new(-hw, depth, height + f));
-    m.cuboid(DVec3::new(hw, 0.0, 0.0), DVec3::new(hw + f, depth, height + f));
-    m.cuboid(DVec3::new(-hw, 0.0, height), DVec3::new(hw, depth, height + f));
+    if chamfer <= 0.0 && outer_chamfer <= 0.0 {
+        m.cuboid(DVec3::new(-hw - f, 0.0, 0.0), DVec3::new(-hw, depth, height + f));
+        m.cuboid(DVec3::new(hw, 0.0, 0.0), DVec3::new(hw + f, depth, height + f));
+        m.cuboid(DVec3::new(-hw, 0.0, height), DVec3::new(hw, depth, height + f));
+        return m;
+    }
+    // Pieces in the front face (u = x, v = z), extruded upstage: the left pillar with
+    // both chamfers, the header between the inner chamfers, the mirrored right pillar.
+    let c = chamfer.clamp(0.0, (hw * 0.9).min(height));
+    let co = outer_chamfer.clamp(0.0, (f + c).min(height + f));
+    let (ho, top) = (hw + f, height + f);
+    let left = [
+        [-ho, 0.0],
+        [-hw, 0.0],
+        [-hw, height - c],
+        [-hw + c, height],
+        [-hw + c, top],
+        [-ho + co, top],
+        [-ho, top - co],
+    ];
+    // (u, v, w) → (u, −w, v): a rotation, so the extrusion's winding stays outward.
+    let to_face = DAffine3::from_cols(DVec3::X, DVec3::Z, DVec3::NEG_Y, DVec3::ZERO);
+    let mut add = |outline: &[[f64; 2]]| {
+        let mut pts: Vec<[f64; 2]> = Vec::new();
+        for p in outline {
+            if pts.last().is_none_or(|q: &[f64; 2]| (q[0] - p[0]).hypot(q[1] - p[1]) > 1e-6) {
+                pts.push(*p);
+            }
+        }
+        while pts.len() > 1 && (pts[0][0] - pts[pts.len() - 1][0]).hypot(pts[0][1] - pts[pts.len() - 1][1]) < 1e-6 {
+            pts.pop();
+        }
+        let mut piece = Mesh::empty();
+        piece.set_material(MaterialClass::Wall);
+        piece.extrude(&pts, -depth, 0.0);
+        m.append(&piece.transformed(&to_face));
+    };
+    add(&left);
+    let right: Vec<[f64; 2]> = left.iter().rev().map(|p| [-p[0], p[1]]).collect();
+    add(&right);
+    if hw - c > 1e-6 {
+        add(&[[-hw + c, height], [hw - c, height], [hw - c, top], [-hw + c, top]]);
+    }
     m
 }
 

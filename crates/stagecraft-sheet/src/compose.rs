@@ -107,17 +107,14 @@ fn fill_for(f: FillClass) -> Rgb {
 
 /// Objects a viewport shows: visible layer, not hidden by the viewport, back to front.
 pub fn shown_ids(doc: &Document, vp: &Viewport) -> Vec<Id> {
-    let mut v: Vec<(u8, Id)> = doc
+    let shown = doc
         .objects
         .values()
         .filter(|o| doc.layers.get(&o.layer).is_none_or(|l| l.visible))
         .filter(|o| !vp.hidden_layers.contains(&o.layer))
         .filter(|o| !o.tags.iter().any(|t| vp.hidden_tags.contains(t)))
-        .filter(|o| vp.underlays || !matches!(o.kind, ObjectKind::Underlay { .. }))
-        .map(|o| (stagecraft_geom::pick::rank(&o.kind), o.id))
-        .collect();
-    v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    v.into_iter().map(|x| x.1).collect()
+        .filter(|o| vp.underlays || !matches!(o.kind, ObjectKind::Underlay { .. }));
+    stagecraft_geom::pick::back_to_front(doc, shown)
 }
 
 /// The plan style a viewport draws with.

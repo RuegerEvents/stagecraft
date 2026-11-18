@@ -14,16 +14,13 @@ use crate::theme::{self, Palette};
 
 /// Objects drawn in the plan: on a visible layer and carrying no hidden tag.
 pub fn visible_ids(doc: &Document, ui: &UiState) -> Vec<Id> {
-    let mut v: Vec<(u8, Id)> = doc
+    let shown = doc
         .objects
         .values()
         .filter(|o| doc.layers.get(&o.layer).is_none_or(|l| l.visible))
-        .filter(|o| !o.tags.iter().any(|t| ui.hidden_tags.contains(t)))
-        .map(|o| (stagecraft_geom::pick::rank(&o.kind), o.id))
-        .collect();
-    // Back to front: floors first, fixtures last.
-    v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    v.into_iter().map(|x| x.1).collect()
+        .filter(|o| !o.tags.iter().any(|t| ui.hidden_tags.contains(t)));
+    // Back to front: floors first (lower ones first), fixtures last.
+    stagecraft_geom::pick::back_to_front(doc, shown)
 }
 
 /// Detail and labels by zoom: truss outlines only when a 290 mm profile is a few
