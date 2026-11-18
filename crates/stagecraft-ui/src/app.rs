@@ -433,8 +433,8 @@ pub fn run(engine: Engine) -> Result<(), String> {
         .with_title(title.clone())
         .with_inner_size([1440.0, 900.0])
         .with_min_inner_size([900.0, 560.0]);
-    // macOS: the toolbar is the title bar (full-size content view, window buttons over its
-    // left end), as craft-window decides for every Craft app. Elsewhere the desktop draws the
+    // macOS: a full-size content view whose top 28 pt are the title row (`chrome::title_row`,
+    // AppKit centres the window buttons in it), as craft-window decides for every Craft app. Elsewhere the desktop draws the
     // frame: StageCraft has no caption buttons of its own. `STAGECRAFT_TITLEBAR=system` or
     // `CRAFT_TITLEBAR=system` keeps the macOS title bar too.
     use craft_window::policy::{Backend, Frame, TitleBarPref, apply, decide_for};

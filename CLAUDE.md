@@ -102,27 +102,41 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
 - egui 0.37 comes from storytold's fork (root `[patch.crates-io]`, same revision as
   craft-libs); widgets name themselves with `egui::Role` (kittest fails on unnamed inputs
   and on missing glyphs, so give every combo box and checkbox a name).
-- Theme (Style A · Studio): `theme.rs` holds the canvas `Palette` and the chrome tokens
-  (`theme::chrome(dark)`) for both themes, one accent `theme::ACCENT`; System/Light/Dark
-  via `ui.set_theme`. Roboto is vendored plus a DejaVu cut for arrows and ⌘ ⇧ ⌥; for
-  small glyph buttons use `widgets::icon_button`.
-- Window layout: menu row (not on macOS, where `menu.rs` is the native menu bar through
-  craft-menu), tool bar (`panels::toolbar`: grouped icon buttons, » overflow, segmented
-  view switch; the title bar on macOS via craft-window), options row, then the dock area
-  (`dock.rs`, craft-ui docking: `PanelKind` panels around the protected `canvas`; layout
-  and theme saved per user by craft-settings, memory-only in tests), status bar.
-  `ui.toggle_panel`, `ui.layout`, `ui.float_panel`, `ui.reset_layout` drive the docks.
-  Menu items run registry commands or `app.*` actions (`menu::run`); ⌘ keys from the
-  native menu come back as key presses into `app.rs`'s `shortcuts`.
-- Toolbar icons in `assets/icons/` (Lucide, ISC; own stage icons in the same grid),
-  rasterised by `icons.rs`; `STAGECRAFT_ICONS=<dir> cargo test -p stagecraft-ui --lib
+- Look (Craft suite, like CADCraft): `theme.rs` holds `Tokens::DARK` / `Tokens::LIGHT`
+  (chrome, `plan` canvas palette, `scene` 3D palette, axis colours); every widget reads
+  them (`theme::of(ui)`, `theme::tokens(dark)`), no colours elsewhere. Inter 11.5 pt
+  (`theme::BODY`) plus a DejaVu cut for arrows and ⌘ ⇧ ⌥; 19 pt rows. System/Light/Dark via
+  `ui.set_theme`. Sheets stay white paper. Property lists: `widgets::prop_label` (right-
+  aligned label column), full-width fields, `widgets::combo_w` (chevron), `widgets::section`.
+- Window layout (`chrome.rs`): on macOS the 28 pt title row (`chrome::title_row`, the band
+  AppKit centres the traffic lights in, centred title "StageCraft — file •"); then the tool
+  bar (file/edit/import/export commands as icons, ⋯ overflow, Plan/3D/Split/Sheets switch,
+  palette search), the options row (active tool + its options), the dock area (`dock.rs`,
+  craft-ui docking) and the status bar (Model and sheet tabs, coordinates, status message,
+  grid/object/truss snap, sketch, constraint colours and theme toggles). No menu row on
+  macOS (`menu.rs` is the native menu bar through craft-menu). Default docks: the tool
+  palette (`PanelKind::Tools`, `toolsets.rs`) left; right the browsers Layers, Tags,
+  Sheets, Library, GDTF Share as icon tabs (`dock::icon`, painted by `tab_icons`, with a
+  title row and ≡ panel menu in the body) above the Inspector; the tutorial opens above
+  them; the table under the canvas. Layout and theme are saved per user by craft-settings
+  (memory-only in tests). `ui.toggle_panel`, `ui.layout`, `ui.float_panel`,
+  `ui.reset_layout` drive the docks. ⌘ keys from the native menu come back as key presses
+  into `app.rs`'s `shortcuts`.
+- The command line (`cmdline.rs`) floats at the bottom of the canvas: the line above it is
+  the active tool's prompt (`panels::hint`), it completes tool names and every command of
+  both registries, runs `name {json}` or `name key=value`, opens the palette form for
+  commands that need arguments.
+- Icons in `assets/icons/` (Lucide, ISC; own stage and constraint icons in the same
+  grid), rasterised by `icons.rs`; `STAGECRAFT_ICONS=<dir> cargo test -p stagecraft-ui --lib
   icon_sheet` writes them as PNGs.
 - Give clickable things an accessible name (`widgets::name`); tests find them so.
-  Table cells are named `"<Column> <row>"`, e.g. `FID 1`.
-- Tools sit in `panels::tool_groups`; tool options (`ToolOptions`,
-  `ui.set_tool_options`, saved per user in `dock::Prefs.tools`) show on the options row
-  below the tool bar, with `panels::hint` (what the gesture expects next: first corner,
-  next corner, "close the floor"). After a tool creates something the status bar says
+  Table cells are named `"<Column> <row>"`, e.g. `FID 1`; tool buttons `Tool Wall`, tool
+  bar buttons `Toolbar Save`, palette sections `Section Stage`, status toggles `Toggle grid
+  snap`, sheet tabs `Model tab` / `Sheet tab L-101`, panel menus `Panel menu Layers`.
+- Tools sit in `panels::tool_groups` (palette sections); tool options (`ToolOptions`,
+  `ui.set_tool_options`, saved per user in `dock::Prefs.tools`) show on the options row;
+  `panels::hint` (what the gesture expects next: first corner,
+  next corner, "close the floor") is the command line's prompt. After a tool creates something the status bar says
   what to do next (`next.<tool>` catalog keys, `tools::created_message`). Heights the
   user types (tool options, Inspector) are above the object's layer elevation; floors
   show "Top height", walls "Base height", ceilings "Underside height". One-click
@@ -149,7 +163,9 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   on by itself; after Back or Skip a done step waits for Next) and `targets`
   (accessible names or panel tabs). `widgets::name` and the tool buttons call
   `tutorial::mark`, so the first target on screen gets a pulsing accent outline
-  (`tutorial::paint`, after the frame). `tests/tutorial.rs` walks all steps through
+  (`tutorial::paint`, after the frame); a target scrolled out of its panel scrolls in
+  (`tutorial::reveal`) and entering a step brings its panels to the front of their tab
+  group (the Library shares one with Layers). `tests/tutorial.rs` walks all steps through
   the GUI (screens `60-67-tutorial-*` with `STAGECRAFT_SCREENSHOTS`); floors in the
   GUI are tested in `tests/floor.rs`.
 
@@ -224,7 +240,9 @@ curtains, wings, truss, platforms) in light and dark to PNG, with the macOS chro
 menu row, window buttons painted in), including 3D iso,
 front, sections, a truss close-up, the stage from the house, the fly bar list and
 split, a rearranged dock layout with a floating panel (`40-dock-float-*`), the
-tutorial panel (`41-43-tutorial-*`). The overview shots hide the `ceiling` tag, which would cover the house. With
+tutorial panel (`41-43-tutorial-*`), and `50-55-craft-*` at 1200 × 750, the size of the
+Craft suite's reference screenshots. kittest's 8 pt margin is cut off and the traffic
+lights are painted where AppKit puts them (`chrome::traffic_light_centres`). The overview shots hide the `ceiling` tag, which would cover the house. With
 `testdata/private/vectorworks/sample_show.mvr` present it also renders that
 import in plan and 3D (`26-mvr-*`, `27-mvr-*`).
 

@@ -11,8 +11,8 @@ use crate::sketch_ui::Relation;
 use crate::state::View;
 use crate::theme;
 
-const BUTTON: f32 = 32.0;
-const ICON: f32 = 18.0;
+const BUTTON: f32 = 30.0;
+const ICON: f32 = 17.0;
 
 fn relation_icon(r: Relation) -> &'static str {
     match r {
@@ -61,14 +61,20 @@ fn rule(ui: &mut Ui) {
     ui.painter().hline(r.x_range().shrink(6.0), r.center().y, Stroke::new(1.0, c.separator));
 }
 
-fn grid(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
-        ui.add_space(6.0);
-        ui.set_max_width(ui.available_width() - 4.0);
-        add(ui);
-    });
-    ui.add_space(6.0);
+/// Icon buttons in rows as wide as the palette.
+fn grid<T: Copy>(ui: &mut Ui, items: &[T], mut add: impl FnMut(&mut Ui, T)) {
+    let per_row = (((ui.available_width() - 8.0) / (BUTTON + 2.0)).floor() as usize).max(1);
+    for row in items.chunks(per_row) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
+            ui.add_space(6.0);
+            for item in row {
+                add(ui, *item);
+            }
+        });
+        ui.add_space(2.0);
+    }
+    ui.add_space(4.0);
 }
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
@@ -77,23 +83,21 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         let sheets = s.ui.view == View::Sheets;
         for (key, tools) in crate::panels::tool_groups(s) {
             if header(ui, s, key) {
-                grid(ui, |ui| {
+                grid(ui, &tools, |ui, tool| {
                     ui.add_enabled_ui(!sheets, |ui| {
-                        for tool in tools {
-                            let label = t(tool.key());
-                            let a11y = crate::i18n::tf("a11y.tool", &[("tool", &label)]);
-                            let r = crate::chrome::icon(
-                                ui,
-                                &a11y,
-                                crate::icons::tool_icon(tool),
-                                BUTTON,
-                                ICON,
-                                s.ui.tool == tool,
-                                &crate::panels::tool_tip(tool),
-                            );
-                            if r.clicked() {
-                                let _ = s.run("ui.set_tool", json!({ "tool": tool }));
-                            }
+                        let label = t(tool.key());
+                        let a11y = crate::i18n::tf("a11y.tool", &[("tool", &label)]);
+                        let r = crate::chrome::icon(
+                            ui,
+                            &a11y,
+                            crate::icons::tool_icon(tool),
+                            BUTTON,
+                            ICON,
+                            s.ui.tool == tool,
+                            &crate::panels::tool_tip(tool),
+                        );
+                        if r.clicked() {
+                            let _ = s.run("ui.set_tool", json!({ "tool": tool }));
                         }
                     });
                 });
@@ -101,27 +105,25 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             rule(ui);
         }
         if header(ui, s, "palette.constraints") {
-            grid(ui, |ui| {
-                for r in Relation::ALL {
-                    let label = t(r.key());
-                    let ok = !sheets && crate::sketch_ui::relation_available(s, r);
-                    let resp = ui
-                        .add_enabled_ui(ok, |ui| {
-                            let tip = format!("{label}\n{}", t("palette.constraints_tip"));
-                            crate::chrome::icon(
-                                ui,
-                                &format!("Constraint {label}"),
-                                relation_icon(r),
-                                BUTTON,
-                                ICON,
-                                false,
-                                &tip,
-                            )
-                        })
-                        .inner;
-                    if resp.clicked() {
-                        crate::sketch_ui::apply_relation(s, r);
-                    }
+            grid(ui, &Relation::ALL, |ui, r| {
+                let label = t(r.key());
+                let ok = !sheets && crate::sketch_ui::relation_available(s, r);
+                let resp = ui
+                    .add_enabled_ui(ok, |ui| {
+                        let tip = format!("{label}\n{}", t("palette.constraints_tip"));
+                        crate::chrome::icon(
+                            ui,
+                            &format!("Constraint {label}"),
+                            relation_icon(r),
+                            BUTTON,
+                            ICON,
+                            false,
+                            &tip,
+                        )
+                    })
+                    .inner;
+                if resp.clicked() {
+                    crate::sketch_ui::apply_relation(s, r);
                 }
             });
         }

@@ -430,8 +430,8 @@ pub struct UiState {
     pub native_dialogs: bool,
     /// The menus are the macOS menu bar, so the window draws no menu row.
     pub native_menu: bool,
-    /// macOS full-size content view: the toolbar is the title bar and leaves room for the
-    /// window buttons at its left.
+    /// macOS full-size content view: the window draws the 28 pt title row the window
+    /// buttons sit in (`chrome::title_row`).
     pub inset_title_bar: bool,
     /// The user agreed to quit without saving.
     pub quit_confirmed: bool,

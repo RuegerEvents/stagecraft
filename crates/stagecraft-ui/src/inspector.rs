@@ -289,8 +289,12 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             }
             if let Some(p) = profile.as_deref().and_then(stagecraft_geom::truss_profile) {
                 crate::widgets::prop_label(ui, "");
-                ui.label(
-                    RichText::new(format!("{} · {}×{} mm · {} kg/m", p.maker, p.width, p.height, p.kg_per_m)).weak(),
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("{} · {}×{} mm · {} kg/m", p.maker, p.width, p.height, p.kg_per_m))
+                            .weak(),
+                    )
+                    .wrap(),
                 );
                 ui.end_row();
             }
@@ -912,7 +916,7 @@ pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Objec
                     _ => tf("inspector.set_info", &[("n", &s.engine.doc().children(o.id).len())]),
                 };
                 crate::widgets::prop_label(ui, "");
-                ui.label(RichText::new(info).weak());
+                ui.add(egui::Label::new(RichText::new(info).weak()).wrap());
                 ui.end_row();
                 if o.kind.is_group() {
                     crate::widgets::prop_label(ui, "");

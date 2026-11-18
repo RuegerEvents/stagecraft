@@ -38,7 +38,8 @@ pub fn edit_field_hint(
     } else {
         current.to_owned()
     };
-    let width = width.min(ui.available_width());
+    // The frame's margins come on top of the text width.
+    let width = width.min(ui.available_width() - 8.0).max(24.0);
     let r = ui.add(TextEdit::singleline(&mut buf).id(id).desired_width(width).hint_text(hint));
     name(&r, Role::TextInput, accessible);
     let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));

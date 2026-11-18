@@ -35,7 +35,7 @@ pub const PANELS: [PanelKind; 10] = [
     PanelKind::Tutorial,
 ];
 
-const LEFT_WIDTH: f32 = 190.0;
+const LEFT_WIDTH: f32 = 204.0;
 const RIGHT_WIDTH: f32 = 300.0;
 const TABLE_HEIGHT: f32 = 210.0;
 

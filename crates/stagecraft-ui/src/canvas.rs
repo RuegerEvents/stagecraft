@@ -117,7 +117,10 @@ fn corner_marks(p: &Painter, rect: Rect, c: &theme::Tokens, cam: &Camera) {
     let n = 1.0 / (cam.scale * 25.4 / 72.0);
     let scale = if n >= 10.0 { format!("1:{}", (n / 5.0).round() * 5.0) } else { format!("1:{n:.1}") };
     let label = format!("{}  |  {}  |  {scale}", t("view3d.top"), t("view.plan"));
-    p.text(rect.left_top() + vec2(10.0, 9.0), Align2::LEFT_TOP, label, theme::small(), ink);
+    let g = p.layout_no_wrap(label, theme::small(), ink);
+    let at = rect.left_top() + vec2(10.0, 9.0);
+    p.rect_filled(Rect::from_min_size(at - vec2(5.0, 3.0), g.size() + vec2(10.0, 6.0)), 3.0, c.cmd_history);
+    p.galley(at, g, ink);
     let o = Pos2::new(rect.left() + 22.0, rect.bottom() - 22.0);
     let st = Stroke::new(1.0, ink);
     let len = 34.0;
