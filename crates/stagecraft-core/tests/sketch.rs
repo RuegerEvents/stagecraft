@@ -291,3 +291,85 @@ fn the_first_point_of_a_sketch_is_locked() {
     let n = s["sketch"]["constraints"].as_array().unwrap().iter().filter(|c| c["kind"]["type"] == "fixed").count();
     assert_eq!(n, 1);
 }
+
+#[test]
+fn portal_batten_curtain_and_truss_follow_sketch_lines() {
+    let mut e = Engine::new();
+    // a portal line with a driving width, symmetric about a fixed centre line
+    let o = run(&mut e, "sketch.add_point", json!({ "at": [0, 0] }))["id"].as_u64().unwrap();
+    let axis = run(&mut e, "sketch.add_line", json!({ "from": o, "to": [0, 5000], "construction": true }));
+    let top = axis["points"][1].as_u64().unwrap();
+    run(&mut e, "sketch.add_constraint", json!({ "constraint": { "type": "vertical", "a": o, "b": top } }));
+    let portal = run(&mut e, "sketch.add_line", json!({ "from": [-5000, 0], "to": [5000, 0] }));
+    let (pl, pr) = (portal["points"][0].as_u64().unwrap(), portal["points"][1].as_u64().unwrap());
+    let ax = axis["id"].as_u64().unwrap();
+    run(
+        &mut e,
+        "sketch.add_constraint",
+        json!({ "constraint": { "type": "symmetric", "a": pl, "b": pr, "axis": ax } }),
+    );
+    run(&mut e, "sketch.add_constraint", json!({ "constraint": { "type": "horizontal", "a": o, "b": pl } }));
+    let w = run(
+        &mut e,
+        "dimension.add",
+        json!({ "measure": { "type": "horizontal_distance", "a": pl, "b": pr }, "name": "portal width" }),
+    );
+    assert!(w["id"].is_number(), "{w}");
+    // a batten line 1 m wider each side, 2 m upstage
+    let bat =
+        run(&mut e, "sketch.add_line", json!({ "from": [-6000, 2000], "to": [6000, 2000], "construction": true }));
+    let (bl, br) = (bat["points"][0].as_u64().unwrap(), bat["points"][1].as_u64().unwrap());
+    for c in [
+        json!({ "type": "symmetric", "a": bl, "b": br, "axis": ax }),
+        json!({ "type": "horizontal", "a": bl, "b": br }),
+    ] {
+        run(&mut e, "sketch.add_constraint", json!({ "constraint": c }));
+    }
+    run(
+        &mut e,
+        "dimension.add",
+        json!({ "measure": { "type": "horizontal_distance", "a": bl, "b": pl }, "value": 1000 }),
+    );
+    run(
+        &mut e,
+        "dimension.add",
+        json!({ "measure": { "type": "vertical_distance", "a": pl, "b": bl }, "value": 2000 }),
+    );
+
+    let pro = id(&run(&mut e, "proscenium.create", json!({ "width": 3000, "height": 6000 })));
+    let batten = id(&run(&mut e, "batten.create", json!({ "y": 9999, "trim": 7500 })));
+    let curtain = id(&run(&mut e, "curtain.create", json!({ "position": [0, 0, 6500] })));
+    let truss = id(&run(&mut e, "truss.create", json!({ "start": [0, 0, 5000], "end": [1000, 0, 5000] })));
+    let pe = portal["id"].as_u64().unwrap();
+    run(&mut e, "sketch.link", json!({ "ids": [pro, curtain], "edge": pe }));
+    run(&mut e, "sketch.link", json!({ "ids": [batten, truss], "edge": bat["id"] }));
+    let check = |e: &Engine, width: f64| {
+        let ObjectKind::Proscenium { width: pw, .. } = kind(e, pro) else { panic!() };
+        assert!((pw - width).abs() < 1e-6, "portal {pw}");
+        let ObjectKind::Curtain { width: cw, .. } = kind(e, curtain) else { panic!() };
+        assert!((cw - width).abs() < 1e-6);
+        let ObjectKind::Batten { length, .. } = kind(e, batten) else { panic!() };
+        assert!((length - width - 2000.0).abs() < 1e-6, "batten {length}");
+        let p = e.doc().objects[&batten].placement;
+        assert!(
+            p.position[0].abs() < 1e-6 && (p.position[1] - 2000.0).abs() < 1e-6 && p.position[2] == 7500.0,
+            "{p:?}"
+        );
+        let t = e.doc().objects[&truss].placement;
+        assert!((t.position[0] + width / 2.0 + 1000.0).abs() < 1e-6 && t.position[2] == 5000.0, "{t:?}");
+        assert_eq!(e.doc().objects[&curtain].placement.position[2], 6500.0);
+    };
+    check(&e, 10000.0);
+    run(&mut e, "dimension.set_value", json!({ "id": "portal width", "value": 13000 }));
+    check(&e, 13000.0);
+    // a width typed on the portal itself does not stick: the line wins
+    run(&mut e, "proscenium.update", json!({ "id": pro, "width": 4000, "height": 5000 }));
+    let ObjectKind::Proscenium { width, height, .. } = kind(&e, pro) else { panic!() };
+    assert_eq!((width, height), (13000.0, 5000.0));
+    // only lines; only these kinds
+    let wall = id(&run(&mut e, "wall.create", json!({ "path": [[0, 0], [1, 0]] })));
+    assert!(e.execute("sketch.link", json!({ "ids": [wall], "edge": pe })).is_err());
+    run(&mut e, "history.undo", Value::Null);
+    run(&mut e, "history.undo", Value::Null);
+    check(&e, 13000.0);
+}

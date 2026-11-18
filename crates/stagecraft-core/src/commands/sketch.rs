@@ -66,6 +66,12 @@ pub(super) fn register(r: &mut Registry) {
     r.add("sketch.make_floor", Kind::Edit, "Make a floor that follows a closed loop of sketch edges", make_floor);
     r.add("sketch.adopt", Kind::Edit, "Turn free walls and floors into sketch geometry they then follow", adopt);
     r.add(
+        "sketch.link",
+        Kind::Edit,
+        "Make a portal, batten, curtain or truss piece follow a sketch line (its width/length, position and turn)",
+        link,
+    );
+    r.add(
         "sketch.unlink",
         Kind::Edit,
         "Detach walls and floors from the sketch; they keep their current geometry",
@@ -688,6 +694,52 @@ fn adopt(ctx: &mut Ctx, a: AdoptArgs) -> CmdResult {
 #[derive(Deserialize, JsonSchema)]
 struct IdsArgs {
     ids: Vec<Id>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct LinkArgs {
+    /// Portals (proscenium), battens, curtains or truss pieces: roots on the layer.
+    ids: Vec<Id>,
+    /// The sketch line they follow. Portal, batten and curtain are centred on it and as
+    /// wide/long as it; a truss piece runs from its first point to its second. They
+    /// turn with it; their height (placement z) stays theirs.
+    edge: u32,
+    /// Layer id or name. Default: the first layer.
+    layer: Option<String>,
+}
+
+fn link(ctx: &mut Ctx, a: LinkArgs) -> CmdResult {
+    let l = layer(ctx.doc(), a.layer.as_deref())?;
+    let doc = ctx.doc();
+    let s = current(doc, l);
+    let edge = EdgeId(a.edge);
+    match s.edge(edge).map(|e| e.geom) {
+        Some(sketch::EdgeGeom::Line { .. }) => {}
+        Some(_) => return Err(CmdError::invalid(format!("edge {edge} is an arc; objects follow lines"))),
+        None => return Err(CmdError::not_found("sketch edge", edge)),
+    }
+    for id in &a.ids {
+        let o = object(doc, *id)?;
+        if !sketch::follows_line(&o.kind) {
+            return Err(CmdError::invalid(format!(
+                "{} is a {}; only portals, battens, curtains and truss pieces follow a line (walls and floors: sketch.make_wall / make_floor)",
+                o.name,
+                o.kind.type_name()
+            )));
+        }
+        if o.layer != l {
+            return Err(CmdError::invalid(format!("{} is on another layer than the sketch", o.name)));
+        }
+        if o.parent.is_some() {
+            return Err(CmdError::invalid(format!("{} is attached to another object; detach it first", o.name)));
+        }
+    }
+    let doc = ctx.doc_mut();
+    for id in &a.ids {
+        doc.objects.get_mut(id).expect("checked").sketch = Some(SketchLink { edges: vec![edge] });
+    }
+    sketch::sync_objects(doc, &a.ids);
+    Ok(json!({ "linked": a.ids }))
 }
 
 fn unlink(ctx: &mut Ctx, a: IdsArgs) -> CmdResult {

@@ -265,7 +265,10 @@ fn truss_update(ctx: &mut Ctx, a: TrussUpdateArgs) -> CmdResult {
     if let Some(v) = a.profile {
         *profile = v;
     }
-    Ok(json!(o.kind))
+    // A portal, batten, curtain or truss piece that follows a sketch line keeps the
+    // line's length and position.
+    crate::sketch::sync_objects(ctx.doc_mut(), &[a.id]);
+    Ok(json!(ctx.doc().objects[&a.id].kind))
 }
 
 /// The object, mutable, after checking it is of type `ty`.

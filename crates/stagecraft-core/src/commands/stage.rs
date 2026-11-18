@@ -192,7 +192,10 @@ fn proscenium_update(ctx: &mut Ctx, a: ProsceniumUpdateArgs) -> CmdResult {
         *show_iron = true;
     }
     set(show_iron, a.show_iron);
-    Ok(json!(o.kind))
+    // A portal, batten, curtain or truss piece that follows a sketch line keeps the
+    // line's length and position.
+    crate::sketch::sync_objects(ctx.doc_mut(), &[a.id]);
+    Ok(json!(ctx.doc().objects[&a.id].kind))
 }
 
 // ---------------------------------------------------------------- curtains
@@ -334,7 +337,10 @@ fn curtain_update(ctx: &mut Ctx, a: CurtainUpdateArgs) -> CmdResult {
     set(height, a.height);
     set(split, a.split);
     set(color, new_color);
-    Ok(json!(o.kind))
+    // A portal, batten, curtain or truss piece that follows a sketch line keeps the
+    // line's length and position.
+    crate::sketch::sync_objects(ctx.doc_mut(), &[a.id]);
+    Ok(json!(ctx.doc().objects[&a.id].kind))
 }
 
 // ---------------------------------------------------------------- wing sets
@@ -630,6 +636,10 @@ fn batten_update(ctx: &mut Ctx, a: BattenUpdateArgs) -> CmdResult {
     set(length, a.length);
     set(max_load, a.max_load);
     set(kg_per_m, a.kg_per_m);
+    // A portal, batten, curtain or truss piece that follows a sketch line keeps the
+    // line's length and position.
+    crate::sketch::sync_objects(ctx.doc_mut(), &[a.id]);
+    let o = &ctx.doc().objects[&a.id];
     Ok(json!({ "kind": o.kind, "placement": o.placement }))
 }
 

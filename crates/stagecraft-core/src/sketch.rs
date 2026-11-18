@@ -260,6 +260,55 @@ pub fn sync_layer(doc: &mut Document, layer: Id) {
     sync_objects(doc, &ids);
 }
 
+/// Kinds that can follow one sketch line (`sketch.link`): their width or length is the
+/// line's length, their x/y and turn come from it, z stays theirs.
+pub fn follows_line(kind: &ObjectKind) -> bool {
+    matches!(
+        kind,
+        ObjectKind::Proscenium { .. }
+            | ObjectKind::Batten { .. }
+            | ObjectKind::Curtain { .. }
+            | ObjectKind::Truss { .. }
+    )
+}
+
+/// A line follower's kind and placement for a line from `a` to `b` (plan mm). The
+/// portal, batten and curtain are centred on the line, a truss piece starts at `a`.
+fn line_follow(o: &crate::model::Object, a: P2, b: P2) -> (ObjectKind, crate::model::Placement) {
+    let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+    let angle = clean((b[1] - a[1]).atan2(b[0] - a[0]).to_degrees());
+    let mid = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+    let mut kind = o.kind.clone();
+    let origin = match &mut kind {
+        ObjectKind::Proscenium { width, .. } => {
+            *width = len;
+            mid
+        }
+        ObjectKind::Batten { length, .. } => {
+            *length = len;
+            mid
+        }
+        ObjectKind::Curtain { width, .. } => {
+            *width = len;
+            mid
+        }
+        ObjectKind::Truss { length, .. } => {
+            *length = len;
+            a
+        }
+        _ => mid,
+    };
+    let z = o.placement.position[2];
+    (kind, crate::model::Placement { position: [clean(origin[0]), clean(origin[1]), z], rotation: [0.0, 0.0, angle] })
+}
+
+/// Float noise below a micrometre (or micro-degree) dropped, so unchanged geometry
+/// compares equal after a solve.
+fn clean(x: f64) -> f64 {
+    let r = (x * 1e6).round() / 1e6;
+    if r == 0.0 { 0.0 } else { r }
+}
+
 pub fn sync_objects(doc: &mut Document, ids: &[Id]) {
     for &id in ids {
         let Some(o) = doc.objects.get(&id) else { continue };
@@ -270,6 +319,27 @@ pub fn sync_objects(doc: &mut Document, ids: &[Id]) {
         };
         if link.edges.iter().any(|e| s.edge(*e).is_none()) {
             doc.objects.get_mut(&id).expect("exists").sketch = None;
+            continue;
+        }
+        if follows_line(&o.kind) {
+            let ends = match link.edges.as_slice() {
+                [e] => s.edge(*e).and_then(|e| match e.geom {
+                    stagecraft_sketch::EdgeGeom::Line { a, b } => Some((p2(s.pos(a)), p2(s.pos(b)))),
+                    _ => None,
+                }),
+                _ => None,
+            };
+            let Some((a, b)) = ends else {
+                doc.objects.get_mut(&id).expect("exists").sketch = None;
+                continue;
+            };
+            let (kind, placement) = line_follow(o, a, b);
+            if kind != o.kind || placement != o.placement || o.parent.is_some() {
+                let o = doc.objects.get_mut(&id).expect("exists");
+                o.kind = kind;
+                o.placement = placement;
+                o.parent = None;
+            }
             continue;
         }
         let new_kind = match &o.kind {
