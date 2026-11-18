@@ -1,5 +1,6 @@
-//! Vector views from 3D (elevations, sections) behind a hook, so the hidden-line
-//! library (`stagecraft-hlr`, built in parallel) can replace the fallback here.
+//! Vector views from 3D (elevations, sections, plan from 3D) behind a hook.
+//! [`crate::hlr::HlrSource`] (hidden lines removed, `stagecraft-hlr`) is the default;
+//! [`FallbackSource`] stays for comparison and tests.
 //!
 //! [`VectorViewSource`] turns objects and a [`ViewSpec`] into 2D lines and filled cut
 //! regions in view mm (x right on the sheet, y up, 1:1). The conventions match
@@ -12,11 +13,12 @@
 //! plane. Objects behind others still show through.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use glam::{DAffine3, DVec3, Vec3};
 use stagecraft_core::{Document, Id, ObjectKind};
 use stagecraft_geom::section::{self, Plane};
-use stagecraft_geom::{Lod, Mesh};
+use stagecraft_geom::{Lod, MaterialClass, Mesh};
 
 use crate::prim::P2;
 
@@ -58,6 +60,8 @@ pub enum EdgeClass {
     Hidden,
     /// Where a section plane cuts (thick).
     Cut,
+    /// A centre line (dash-dot).
+    Centre,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -71,6 +75,8 @@ pub struct ViewLine {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CutRegion {
     pub object: Id,
+    /// What was cut; picks the hatch.
+    pub material: MaterialClass,
     pub rings: Vec<Vec<P2>>,
 }
 
@@ -97,9 +103,16 @@ impl VectorView {
     }
 }
 
+/// What a vector view draws besides visible edges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ViewOptions {
+    /// Emit dashed hidden lines.
+    pub hidden_lines: bool,
+}
+
 /// Where elevation and section linework comes from.
 pub trait VectorViewSource: Send + Sync {
-    fn view(&self, doc: &Document, ids: &[Id], spec: &ViewSpec) -> VectorView;
+    fn view(&self, doc: &Document, ids: &[Id], spec: &ViewSpec, opts: ViewOptions) -> Arc<VectorView>;
 }
 
 /// Outline edges without hidden-line removal; see the module docs.
@@ -108,11 +121,16 @@ pub struct FallbackSource;
 /// Faces meeting at more than this are drawn as an edge.
 const CREASE_DEG: f64 = 25.0;
 
-fn lod_for(doc: &Document, id: Id, scale: f64) -> Lod {
+/// The level of detail a sheet at 1:`scale` draws an object with.
+pub fn lod_for(doc: &Document, id: Id, scale: f64) -> Lod {
     let Some(o) = doc.objects.get(&id) else { return Lod::Box };
     // Pleats as outlines are a wall of lines; draw cloth flat unless close up.
     if matches!(o.kind, ObjectKind::Curtain { .. } | ObjectKind::Masking { .. }) && scale > 25.0 {
         return Lod::Box;
+    }
+    // A truss on a drawing shows its lattice at every scale.
+    if matches!(o.kind, ObjectKind::Truss { .. } | ObjectKind::TrussNode { .. }) {
+        return Lod::Full;
     }
     match stagecraft_geom::kinds::detail_size(o) {
         Some(d) if d / scale < 0.4 => Lod::Box,
@@ -122,7 +140,7 @@ fn lod_for(doc: &Document, id: Id, scale: f64) -> Lod {
 }
 
 impl VectorViewSource for FallbackSource {
-    fn view(&self, doc: &Document, ids: &[Id], spec: &ViewSpec) -> VectorView {
+    fn view(&self, doc: &Document, ids: &[Id], spec: &ViewSpec, _: ViewOptions) -> Arc<VectorView> {
         let mut out = VectorView::default();
         let toward_viewer = -spec.dir.normalize_or(DVec3::NEG_Y);
         for &id in ids {
@@ -146,6 +164,7 @@ impl VectorViewSource for FallbackSource {
                 }
             }
             if let Some(plane) = &spec.section {
+                let material = mesh.groups.first().map_or(MaterialClass::Generic, |g| g.material);
                 for poly in section::cut(&mesh, &w, plane) {
                     let to_view = |q: &[f64; 2]| spec.project(plane.to_world(*q));
                     let mut rings = vec![poly.outer.iter().map(to_view).collect::<Vec<_>>()];
@@ -155,11 +174,11 @@ impl VectorViewSource for FallbackSource {
                         pts.push(r[0]);
                         out.lines.push(ViewLine { object: id, points: pts, class: EdgeClass::Cut });
                     }
-                    out.cuts.push(CutRegion { object: id, rings });
+                    out.cuts.push(CutRegion { object: id, material, rings });
                 }
             }
         }
-        out
+        Arc::new(out)
     }
 }
 
@@ -255,7 +274,7 @@ mod tests {
     fn front_elevation_of_a_platform_spans_its_width_and_height() {
         let (e, id) = platform();
         let spec = ViewSpec { dir: DVec3::Y, up: DVec3::Z, section: None, scale: 50.0 };
-        let v = FallbackSource.view(e.doc(), &[id], &spec);
+        let v = FallbackSource.view(e.doc(), &[id], &spec, ViewOptions::default());
         let b = v.bounds().expect("lines");
         assert!((b[0][0] + 1000.0).abs() < 1.0 && (b[1][0] - 1000.0).abs() < 1.0, "{b:?}");
         assert!(b[0][1].abs() < 1.0 && (b[1][1] - 400.0).abs() < 1.0, "{b:?}");
@@ -267,7 +286,7 @@ mod tests {
         let (e, id) = platform();
         let plane = Plane::new([0.0, 2000.0, 0.0], [0.0, -1.0, 0.0]);
         let spec = ViewSpec { dir: DVec3::Y, up: DVec3::Z, section: Some(plane), scale: 50.0 };
-        let v = FallbackSource.view(e.doc(), &[id], &spec);
+        let v = FallbackSource.view(e.doc(), &[id], &spec, ViewOptions::default());
         assert!(!v.cuts.is_empty(), "the deck is cut");
         assert!(v.lines.iter().any(|l| l.class == EdgeClass::Cut));
         // Cut faces are in the same view coordinates as the lines (x across, z up).

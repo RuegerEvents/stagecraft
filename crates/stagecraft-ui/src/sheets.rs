@@ -94,7 +94,11 @@ pub struct SheetsState {
     /// The label template open in the template editor.
     pub template: Option<Id>,
     cache: Option<((usize, Id), Page)>,
+    /// A page being composed on a worker thread (hidden lines can take a moment).
+    pending: Option<((usize, Id), PageRx)>,
 }
+
+type PageRx = std::sync::mpsc::Receiver<Option<Page>>;
 
 impl Default for SheetsState {
     fn default() -> Self {
@@ -107,6 +111,7 @@ impl Default for SheetsState {
             editor: false,
             template: None,
             cache: None,
+            pending: None,
         }
     }
 }
@@ -117,17 +122,49 @@ pub fn current(doc: &Document, st: &SheetsState) -> Option<Id> {
 }
 
 /// The composed page of the current sheet, recomposed when the document changed.
+///
+/// Composing runs on a worker thread with a snapshot of the document. While it runs
+/// the previous page stays on screen (`busy` is set so the caller keeps repainting);
+/// only the very first page of a session, or of another sheet, is waited for.
 pub fn page(s: &mut Studio) -> Option<Page> {
-    let id = current(s.engine.doc(), &s.ui.sheets)?;
+    page_busy(s).0
+}
+
+fn page_busy(s: &mut Studio) -> (Option<Page>, bool) {
+    let Some(id) = current(s.engine.doc(), &s.ui.sheets) else { return (None, false) };
     let key = (s.engine.journal().len(), id);
     if let Some((k, p)) = &s.ui.sheets.cache
         && *k == key
     {
-        return Some(p.clone());
+        return (Some(p.clone()), false);
     }
-    let p = stagecraft_sheet::pages(s.engine.doc(), &[id]).into_iter().next()?;
-    s.ui.sheets.cache = Some((key, p.clone()));
-    Some(p)
+    if s.ui.sheets.pending.as_ref().is_none_or(|(k, _)| *k != key) {
+        let doc = s.engine.doc().clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(stagecraft_sheet::pages(&doc, &[id]).into_iter().next());
+        });
+        s.ui.sheets.pending = Some((key, rx));
+    }
+    let stale = s.ui.sheets.cache.as_ref().filter(|(k, _)| k.1 == id).map(|(_, p)| p.clone());
+    let (_, rx) = s.ui.sheets.pending.as_ref().expect("set above");
+    let wait = if stale.is_some() { std::time::Duration::from_millis(30) } else { std::time::Duration::from_secs(600) };
+    let got = match rx.recv_timeout(wait) {
+        Ok(p) => Some(p),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+        // The worker died (a bug); keep the old page rather than spin.
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Some(None),
+    };
+    match got {
+        Some(p) => {
+            s.ui.sheets.pending = None;
+            if let Some(p) = &p {
+                s.ui.sheets.cache = Some((key, p.clone()));
+            }
+            (p.or(stale), false)
+        }
+        None => (stale, true),
+    }
 }
 
 fn colour(c: Rgb) -> Color32 {
@@ -297,7 +334,11 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, if dark { Color32::from_gray(0x2a) } else { Color32::from_gray(0xd9) });
     s.ui.sheets.cam.rect = rect;
-    let Some(page) = page(s) else {
+    let (page, busy) = page_busy(s);
+    if busy {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
+    }
+    let Some(page) = page else {
         painter.text(rect.center(), Align2::CENTER_CENTER, t("sheets.none"), theme::proportional(15.0), Color32::GRAY);
         return;
     };
@@ -511,6 +552,7 @@ pub fn list_panel(ui: &mut Ui, s: &mut Studio) {
     ui.horizontal_wrapped(|ui| {
         for (key, view) in [
             ("sheets.view.plan", "plan"),
+            ("sheets.view.plan_3d", "plan_3d"),
             ("sheets.view.front", "front"),
             ("sheets.view.side", "left"),
             ("sheets.view.section", "section_y"),
@@ -519,11 +561,10 @@ pub fn list_panel(ui: &mut Ui, s: &mut Studio) {
         ] {
             if button(ui, t(key), &format!("Add viewport {view}")).clicked() {
                 let [w, h] = doc.sheets[&cur].size();
-                let scale =
-                    if view == "plan" || view == "front" || view == "left" || view == "section_y" { 100 } else { 50 };
+                let scale = if matches!(view, "plan" | "plan_3d" | "front" | "left" | "section_y") { 100 } else { 50 };
                 let label = doc.label_templates.values().next().map(|t| t.id);
                 let mut args = json!({ "sheet": cur, "view": view, "scale": scale, "position": [w * 0.4, h * 0.55] });
-                if view == "plan"
+                if matches!(view, "plan" | "plan_3d")
                     && let Some(l) = label
                 {
                     args["label_template"] = json!(l);
@@ -612,6 +653,53 @@ fn viewport_window(ctx: &egui::Context, s: &mut Studio) {
 const SCALES: [f64; 12] = [10.0, 20.0, 25.0, 50.0, 75.0, 100.0, 125.0, 150.0, 200.0, 250.0, 500.0, 1000.0];
 const PENS: [f64; 7] = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0];
 
+/// Per tag: line class and pen of its objects in this viewport (`viewport.update
+/// {tag_lines}`).
+fn tag_line_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, salt: &str) {
+    let set = |s: &mut Studio, tag: Id, f: &dyn Fn(&mut stagecraft_core::sheet::TagLines)| {
+        let mut m: std::collections::BTreeMap<String, stagecraft_core::sheet::TagLines> =
+            vp.tag_lines.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+        let e = m.entry(tag.to_string()).or_default();
+        f(e);
+        if e.class.is_none() && e.weight.is_none() {
+            m.remove(&tag.to_string());
+        }
+        let _ = s.run("viewport.update", json!({ "viewport": vp.id, "tag_lines": m }));
+    };
+    egui::Grid::new(("vp_tags", salt)).num_columns(3).show(ui, |ui| {
+        for tag in doc.tags.values() {
+            let cur = vp.tag_lines.get(&tag.id).cloned().unwrap_or_default();
+            ui.label(&tag.name);
+            let text = cur
+                .class
+                .as_deref()
+                .map_or_else(|| t("sheets.tag_default").to_owned(), |c| t(&format!("sheets.class.{c}")).to_owned());
+            egui::ComboBox::from_id_salt(("tag_class", salt, tag.id)).selected_text(text).show_ui(ui, |ui| {
+                if ui.selectable_label(cur.class.is_none(), t("sheets.tag_default")).clicked() {
+                    set(s, tag.id, &|e| e.class = None);
+                }
+                for c in ["thin", "medium", "thick", "hidden", "centre"] {
+                    if ui.selectable_label(cur.class.as_deref() == Some(c), t(&format!("sheets.class.{c}"))).clicked() {
+                        set(s, tag.id, &|e| e.class = Some(c.to_owned()));
+                    }
+                }
+            });
+            let text = cur.weight.map_or_else(|| t("sheets.tag_default").to_owned(), |w| format!("{w} mm"));
+            egui::ComboBox::from_id_salt(("tag_pen", salt, tag.id)).selected_text(text).show_ui(ui, |ui| {
+                if ui.selectable_label(cur.weight.is_none(), t("sheets.tag_default")).clicked() {
+                    set(s, tag.id, &|e| e.weight = None);
+                }
+                for p in PENS {
+                    if ui.selectable_label(cur.weight == Some(p), format!("{p} mm")).clicked() {
+                        set(s, tag.id, &|e| e.weight = Some(p));
+                    }
+                }
+            });
+            ui.end_row();
+        }
+    });
+}
+
 fn view_label(v: &ViewKind) -> String {
     match v {
         ViewKind::Plan => t("sheets.view.plan").into(),
@@ -622,6 +710,7 @@ fn view_label(v: &ViewKind) -> String {
             Side::Right => t("sheets.view.side_right").into(),
         },
         ViewKind::Section { .. } => t("sheets.view.section").into(),
+        ViewKind::PlanFrom3d { .. } => t("sheets.view.plan_3d").into(),
         ViewKind::Rendered { .. } => t("sheets.view.rendered").into(),
         ViewKind::FixtureList => t("sheets.view.list").into(),
     }
@@ -642,9 +731,20 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
 
         ui.label(t("sheets.view"));
         egui::ComboBox::from_id_salt(("vp_view", salt)).selected_text(view_label(&vp.view)).show_ui(ui, |ui| {
-            for name in ["plan", "front", "back", "left", "right", "section_y", "section_x", "rendered", "fixture_list"]
-            {
+            for name in [
+                "plan",
+                "plan_3d",
+                "front",
+                "back",
+                "left",
+                "right",
+                "section_y",
+                "section_x",
+                "rendered",
+                "fixture_list",
+            ] {
                 let label = match name {
+                    "plan_3d" => t("sheets.view.plan_3d").to_owned(),
                     "section_y" => t("sheets.view.section_across").to_owned(),
                     "section_x" => t("sheets.view.section_along").to_owned(),
                     "right" => t("sheets.view.side_right").to_owned(),
@@ -780,7 +880,29 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
             }
         });
     }
-    if matches!(vp.view, ViewKind::Plan | ViewKind::Elevation { .. } | ViewKind::Section { .. }) {
+    if stagecraft_sheet::compose::is_vector_3d(&vp.view) {
+        let mut hidden = vp.hidden_lines;
+        let r = ui.checkbox(&mut hidden, t("sheets.hidden_lines"));
+        widgets::name(&r, egui::WidgetType::Checkbox, "Hidden lines");
+        if r.changed() {
+            up(s, json!({ "hidden_lines": hidden }));
+        }
+        if let ViewKind::PlanFrom3d { cut } = vp.view {
+            ui.horizontal(|ui| {
+                ui.label(t("sheets.cut_height"));
+                let text = cut.map(fmt_mm).unwrap_or_default();
+                if let Some(v) = edit_field(ui, egui::Id::new(("vp_cut_z", salt, vp.id)), &text, 90.0, "Cut height") {
+                    let cut = if v.trim().is_empty() { None } else { parse_mm(&v) };
+                    if cut.is_none() && !v.trim().is_empty() {
+                        s.ui.error(tf("status.bad_number", &[("text", &v)]));
+                    } else {
+                        up(s, json!({ "view": { "type": "plan_3d", "cut": cut } }));
+                    }
+                }
+            });
+        }
+    }
+    if vp.view == ViewKind::Plan || stagecraft_sheet::compose::is_vector_3d(&vp.view) {
         ui.collapsing(t("sheets.line_weights"), |ui| {
             egui::Grid::new(("vp_pens", salt)).num_columns(2).show(ui, |ui| {
                 for class in ["thin", "medium", "thick", "hidden", "centre", "cut"] {
@@ -802,6 +924,9 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 }
             });
         });
+    }
+    if (vp.view == ViewKind::Plan || stagecraft_sheet::compose::is_vector_3d(&vp.view)) && !doc.tags.is_empty() {
+        ui.collapsing(t("sheets.tag_lines"), |ui| tag_line_fields(ui, s, doc, vp, salt));
     }
     ui.horizontal(|ui| {
         if !vp.label_offsets.is_empty() && button(ui, t("sheets.reset_labels"), "Reset labels").clicked() {

@@ -134,6 +134,16 @@ pub enum ViewKind {
         /// Towards the viewer (and the hidden side).
         normal: P3,
     },
+    /// A top view computed from the 3D model with hidden lines removed, optionally cut
+    /// at a height like an architectural plan. View coordinates are world x/y, so crops
+    /// and labels work as in `plan`. Vector.
+    #[serde(rename = "plan_3d")]
+    PlanFrom3d {
+        /// Cut height, world mm: everything above is removed and cut faces are
+        /// hatched. `None` = no cut.
+        #[serde(default)]
+        cut: Option<f64>,
+    },
     /// A raster image of the 3D view (the GUI renders it; headless export draws a
     /// placeholder box).
     Rendered {
@@ -154,6 +164,7 @@ impl ViewKind {
             ViewKind::Plan => "plan",
             ViewKind::Elevation { .. } => "elevation",
             ViewKind::Section { .. } => "section",
+            ViewKind::PlanFrom3d { .. } => "plan_3d",
             ViewKind::Rendered { .. } => "rendered",
             ViewKind::FixtureList => "fixture_list",
         }
@@ -184,6 +195,14 @@ pub struct Viewport {
     /// in mm. Missing classes use the defaults (0.18, 0.35, 0.5, 0.25, 0.18, 0.7).
     #[serde(default)]
     pub line_weights: BTreeMap<String, f64>,
+    /// Elevations, sections and plans from 3D: also draw hidden edges, dashed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden_lines: bool,
+    /// Per tag: draw the lines of objects carrying it in another class and/or pen
+    /// width. The first matching tag in the map's order wins. Applies to plan,
+    /// elevations, sections and plan-from-3D.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tag_lines: BTreeMap<Id, TagLines>,
     /// Label template for fixtures (plan viewports). `None` = no labels.
     #[serde(default)]
     pub label_template: Option<Id>,
@@ -196,6 +215,19 @@ pub struct Viewport {
     pub show_title: bool,
     #[serde(default = "yes")]
     pub scale_bar: bool,
+}
+
+/// How a viewport draws the lines of objects with one tag.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct TagLines {
+    /// Line class for the object's visible lines: `thin`, `medium`, `thick`,
+    /// `hidden`, `centre`. Hidden (dashed) and cut lines keep their class. `None` =
+    /// unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+    /// Pen width for the object's visible lines, mm, over the class's width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<f64>,
 }
 
 /// How a label behaves on a rotated fixture.

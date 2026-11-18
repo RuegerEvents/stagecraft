@@ -4249,6 +4249,7 @@ name = "stagecraft-sheet"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "imbl",
  "krilla",
  "lopdf",
  "png",
@@ -4256,6 +4257,7 @@ dependencies = [
  "serde_json",
  "stagecraft-core",
  "stagecraft-geom",
+ "stagecraft-hlr",
  "ttf-parser",
  "uuid",
 ]

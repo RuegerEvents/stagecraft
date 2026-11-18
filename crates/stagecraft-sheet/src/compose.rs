@@ -7,16 +7,16 @@ use std::collections::{BTreeMap, HashMap};
 use glam::DVec3;
 use stagecraft_core::model::{Document, Object, ObjectKind};
 use stagecraft_core::sheet::{
-    LabelTemplate, Sheet, Side, TextAlign, TitleBlock, TitleItem, ViewKind, Viewport, base64_decode,
+    LabelTemplate, Sheet, Side, TagLines, TextAlign, TitleBlock, TitleItem, ViewKind, Viewport, base64_decode,
 };
 use stagecraft_core::{Id, geom};
 use stagecraft_geom::section::Plane;
-use stagecraft_geom::{Detail, FillClass, LineClass, PlanPrim, PlanStyle, TextAnchor, math};
+use stagecraft_geom::{Detail, FillClass, LineClass, MaterialClass, PlanPrim, PlanStyle, TextAnchor, math};
 
 use crate::fonts::text_width;
 use crate::labels::{self, Label};
 use crate::prim::{HAlign, ImageData, LabelHit, P2, Page, Pen, Prim, Rgb, VAlign, ViewportHit, hatch};
-use crate::view::{EdgeClass, VectorViewSource, ViewSpec};
+use crate::view::{EdgeClass, VectorViewSource, ViewOptions, ViewSpec};
 
 /// Distance of the frame from the paper edge, mm.
 pub const MARGIN: f64 = 10.0;
@@ -54,6 +54,27 @@ fn class_name(c: LineClass) -> &'static str {
         LineClass::Hidden => "hidden",
         LineClass::Centre => "centre",
     }
+}
+
+/// The tag line style that applies to an object in a viewport: the first of the
+/// viewport's tag entries the object carries.
+pub fn tag_lines<'a>(doc: &Document, vp: &'a Viewport, object: Id) -> Option<&'a TagLines> {
+    if vp.tag_lines.is_empty() {
+        return None;
+    }
+    let o = doc.objects.get(&object)?;
+    vp.tag_lines.iter().find(|(t, _)| o.tags.contains(t)).map(|x| x.1)
+}
+
+/// The pen for a line of class `c`, with a tag override for visible lines.
+fn pen_with(vp: &Viewport, c: LineClass, over: Option<&TagLines>) -> Pen {
+    let Some(t) = over.filter(|_| c != LineClass::Hidden) else { return pen_for(vp, c) };
+    let c = t.class.as_deref().and_then(stagecraft_geom::kinds::line_class).unwrap_or(c);
+    let mut p = pen_for(vp, c);
+    if let Some(w) = t.weight {
+        p.width = w;
+    }
+    p
 }
 
 fn pen_for(vp: &Viewport, c: LineClass) -> Pen {
@@ -115,10 +136,33 @@ pub fn view_spec(vp: &Viewport) -> Option<ViewSpec> {
             let p = Plane::new(origin, normal);
             (-p.n(), Some(p))
         }
+        ViewKind::PlanFrom3d { cut } => (-DVec3::Z, cut.map(|z| Plane::new([0.0, 0.0, z], [0.0, 0.0, 1.0]))),
         _ => return None,
     };
     let up = if dir.z.abs() > 0.99 { DVec3::Y } else { DVec3::Z };
     Some(ViewSpec { dir, up, section, scale: vp.scale })
+}
+
+/// What a vector viewport asks its source for.
+pub fn view_options(vp: &Viewport) -> ViewOptions {
+    ViewOptions { hidden_lines: vp.hidden_lines }
+}
+
+/// Elevations, sections and plans from 3D: drawn from meshes by a [`VectorViewSource`].
+pub fn is_vector_3d(v: &ViewKind) -> bool {
+    matches!(v, ViewKind::Elevation { .. } | ViewKind::Section { .. } | ViewKind::PlanFrom3d { .. })
+}
+
+/// Fill and hatch of a cut face by material: (fill, hatch angle, spacing; 0 = none).
+fn cut_style(m: MaterialClass) -> (Rgb, f64, f64) {
+    match m {
+        MaterialClass::Metal => (Rgb(40, 40, 40), 0.0, 0.0),
+        MaterialClass::Fixture | MaterialClass::Lens => (Rgb(170, 170, 170), 0.0, 0.0),
+        MaterialClass::Curtain | MaterialClass::Masking => (Rgb(95, 95, 95), 0.0, 0.0),
+        MaterialClass::Deck => (Rgb::WHITE, 135.0, 1.6),
+        MaterialClass::Floor => (Rgb::WHITE, 45.0, 2.0),
+        MaterialClass::Wall | MaterialClass::Generic => (Rgb::WHITE, 45.0, 1.2),
+    }
 }
 
 /// Maps view mm to paper mm for a viewport whose crop is `crop`.
@@ -156,7 +200,8 @@ fn plan_prims(doc: &Document, vp: &Viewport, ids: &[Id]) -> Vec<(Id, Vec<PlanPri
     ids.iter().filter_map(|id| doc.objects.get(id)).map(|o| (o.id, stagecraft_geom::plan(doc, o, &style))).collect()
 }
 
-fn plan_to_prims(vp: &Viewport, m: &Mapping, prims: &[PlanPrim], out: &mut Vec<Prim>) {
+fn plan_to_prims(vp: &Viewport, m: &Mapping, prims: &[PlanPrim], over: Option<&TagLines>, out: &mut Vec<Prim>) {
+    let pen_for = |vp: &Viewport, c: LineClass| pen_with(vp, c, over);
     let tp = |v: &[P2]| v.iter().map(|p| m.to_paper(*p)).collect::<Vec<_>>();
     for p in prims {
         match p {
@@ -280,9 +325,9 @@ pub fn effective_crop(doc: &Document, vp: &Viewport, source: &dyn VectorViewSour
             let b = stagecraft_geom::pick::bounds(&prims);
             (!b.is_empty()).then(|| grow([b.min, b.max], 0.02))
         }
-        ViewKind::Elevation { .. } | ViewKind::Section { .. } => {
+        ViewKind::Elevation { .. } | ViewKind::Section { .. } | ViewKind::PlanFrom3d { .. } => {
             let spec = view_spec(vp)?;
-            source.view(doc, &ids, &spec).bounds().map(|b| grow(b, 0.02))
+            source.view(doc, &ids, &spec, view_options(vp)).bounds().map(|b| grow(b, 0.02))
         }
         ViewKind::Rendered { .. } => {
             let [w, h] = RENDERED_SIZE;
@@ -312,28 +357,18 @@ fn compose_viewport(doc: &Document, vp: &Viewport, inputs: &Inputs) -> Option<Co
     let mut hits = Vec::new();
     match vp.view {
         ViewKind::Plan => {
-            for (_, prims) in plan_prims(doc, vp, &ids) {
-                plan_to_prims(vp, &m, &prims, &mut inner);
-            }
-            if let Some(t) = vp.label_template.and_then(|t| doc.label_templates.get(&t)) {
-                let placed = plan_labels(doc, vp, t, &ids, &m);
-                label_prims(&placed, &mut inner);
-                hits = placed
-                    .iter()
-                    .map(|l| {
-                        let b = l.bounds();
-                        LabelHit { viewport: vp.id, fixture: l.fixture, min: b[0], max: b[1] }
-                    })
-                    .collect();
+            for (id, prims) in plan_prims(doc, vp, &ids) {
+                plan_to_prims(vp, &m, &prims, tag_lines(doc, vp, id), &mut inner);
             }
         }
-        ViewKind::Elevation { .. } | ViewKind::Section { .. } => {
+        ViewKind::Elevation { .. } | ViewKind::Section { .. } | ViewKind::PlanFrom3d { .. } => {
             let spec = view_spec(vp)?;
-            let v = inputs.source.view(doc, &ids, &spec);
+            let v = inputs.source.view(doc, &ids, &spec, view_options(vp));
             for c in &v.cuts {
                 let rings: Vec<Vec<P2>> = c.rings.iter().map(|r| r.iter().map(|p| m.to_paper(*p)).collect()).collect();
-                inner.push(Prim::Path { rings: rings.clone(), closed: true, pen: None, fill: Some(Rgb::WHITE) });
-                let lines = hatch(&rings, 45.0, 1.2);
+                let (fill, angle, spacing) = cut_style(c.material);
+                inner.push(Prim::Path { rings: rings.clone(), closed: true, pen: None, fill: Some(fill) });
+                let lines = if spacing > 0.0 { hatch(&rings, angle, spacing) } else { Vec::new() };
                 if !lines.is_empty() {
                     inner.push(Prim::Path {
                         rings: lines.into_iter().map(|l| l.to_vec()).collect(),
@@ -343,22 +378,25 @@ fn compose_viewport(doc: &Document, vp: &Viewport, inputs: &Inputs) -> Option<Co
                     });
                 }
             }
-            // One path per class keeps the PDF small.
-            let mut by_class: BTreeMap<u8, Vec<Vec<P2>>> = BTreeMap::new();
+            // One path per pen keeps the PDF small; hidden lines first, cuts on top.
+            type PenKey = (u8, u64, u8);
+            let mut by_pen: BTreeMap<PenKey, (Pen, Vec<Vec<P2>>)> = BTreeMap::new();
             for l in &v.lines {
-                let k = match l.class {
-                    EdgeClass::Hidden => 0,
-                    EdgeClass::Visible => 1,
-                    EdgeClass::Cut => 2,
+                let over = tag_lines(doc, vp, l.object);
+                let (order, pen) = match l.class {
+                    EdgeClass::Hidden => (0, pen_for(vp, LineClass::Hidden)),
+                    EdgeClass::Visible => (1, pen_with(vp, LineClass::Thin, over)),
+                    EdgeClass::Centre => (2, pen_for(vp, LineClass::Centre)),
+                    EdgeClass::Cut => (3, Pen::solid(weight(vp, "cut"))),
                 };
-                by_class.entry(k).or_default().push(l.points.iter().map(|p| m.to_paper(*p)).collect());
+                let dash = pen.dash.as_ref().map_or(0, |d| d.len() as u8);
+                by_pen
+                    .entry((order, pen.width.to_bits(), dash))
+                    .or_insert_with(|| (pen, Vec::new()))
+                    .1
+                    .push(l.points.iter().map(|p| m.to_paper(*p)).collect());
             }
-            for (k, rings) in by_class {
-                let pen = match k {
-                    0 => pen_for(vp, LineClass::Hidden),
-                    1 => Pen::solid(weight(vp, "thin")),
-                    _ => Pen::solid(weight(vp, "cut")),
-                };
+            for (_, (pen, rings)) in by_pen {
                 inner.push(Prim::Path { rings, closed: false, pen: Some(pen), fill: None });
             }
         }
@@ -383,6 +421,20 @@ fn compose_viewport(doc: &Document, vp: &Viewport, inputs: &Inputs) -> Option<Co
             }
         },
         ViewKind::FixtureList => unreachable!(),
+    }
+    // Plans from 3D share world x/y with the plan, so labels go on top the same way.
+    if matches!(vp.view, ViewKind::Plan | ViewKind::PlanFrom3d { .. })
+        && let Some(t) = vp.label_template.and_then(|t| doc.label_templates.get(&t))
+    {
+        let placed = plan_labels(doc, vp, t, &ids, &m);
+        label_prims(&placed, &mut inner);
+        hits = placed
+            .iter()
+            .map(|l| {
+                let b = l.bounds();
+                LabelHit { viewport: vp.id, fixture: l.fixture, min: b[0], max: b[1] }
+            })
+            .collect();
     }
     Some(Composed { prims: vec![Prim::Clip { min: rect[0], max: rect[1], prims: inner }], rect, labels: hits })
 }
@@ -519,7 +571,7 @@ pub fn placeholders(doc: &Document, sheet: &Sheet) -> Vec<(&'static str, String)
     let m = &doc.meta;
     let mut scales: Vec<String> = Vec::new();
     for v in &sheet.viewports {
-        if matches!(v.view, ViewKind::Plan | ViewKind::Elevation { .. } | ViewKind::Section { .. }) {
+        if v.view == ViewKind::Plan || is_vector_3d(&v.view) {
             let s = format!("1:{}", v.scale);
             if !scales.contains(&s) {
                 scales.push(s);
@@ -620,7 +672,7 @@ fn legend(doc: &Document, sheet: &Sheet, right: f64, bottom: f64, width: f64, ou
     // Type name → (count, a fixture of that type for its symbol, footprint if all agree).
     let mut counts: BTreeMap<String, (usize, Id, Option<String>)> = BTreeMap::new();
     let mut seen: Vec<Id> = Vec::new();
-    for vp in sheet.viewports.iter().filter(|v| v.view == ViewKind::Plan) {
+    for vp in sheet.viewports.iter().filter(|v| matches!(v.view, ViewKind::Plan | ViewKind::PlanFrom3d { .. })) {
         for o in fixtures_of(doc, vp) {
             if !seen.contains(&o.id) {
                 seen.push(o.id);

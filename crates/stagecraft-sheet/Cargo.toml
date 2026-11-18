@@ -10,6 +10,8 @@ license.workspace = true
 [dependencies]
 stagecraft-core.workspace = true
 stagecraft-geom.workspace = true
+stagecraft-hlr.workspace = true
+imbl.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -17,6 +19,10 @@ uuid.workspace = true
 krilla = { version = "0.8.2", default-features = false, features = ["simple-text", "raster-images"] }
 ttf-parser = "0.25"
 png = "0.18"
+
+# Native builds run HLR on all cores; wasm stays single-threaded.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+stagecraft-hlr = { workspace = true, features = ["parallel"] }
 
 [dev-dependencies]
 lopdf = "0.39"

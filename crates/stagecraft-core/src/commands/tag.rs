@@ -102,7 +102,10 @@ fn delete(ctx: &mut Ctx, a: DeleteArgs) -> CmdResult {
         doc.objects.get_mut(oid).expect("listed").tags.retain(|t| *t != id);
         n += 1;
     }
-    doc.edit_viewports(|v| v.hidden_tags.retain(|t| *t != id));
+    doc.edit_viewports(|v| {
+        v.hidden_tags.retain(|t| *t != id);
+        v.tag_lines.remove(&id);
+    });
     Ok(json!({ "untagged": n }))
 }
 

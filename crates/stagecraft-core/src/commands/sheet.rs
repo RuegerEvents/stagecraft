@@ -13,8 +13,8 @@ use crate::command::{CmdError, CmdResult, Kind, Registry};
 use crate::engine::Ctx;
 use crate::model::{Document, Id, P2};
 use crate::sheet::{
-    LabelField, LabelRotation, LabelTemplate, Orientation, Paper, Sheet, Side, TitleBlock, TitleItem, ViewKind,
-    Viewport, default_label_fields, exporter,
+    LabelField, LabelRotation, LabelTemplate, Orientation, Paper, Sheet, Side, TagLines, TitleBlock, TitleItem,
+    ViewKind, Viewport, default_label_fields, exporter,
 };
 
 pub(super) fn register(r: &mut Registry) {
@@ -342,8 +342,8 @@ fn export_svg(ctx: &mut Ctx, a: ExportSvgArgs) -> CmdResult {
 #[derive(Deserialize, JsonSchema)]
 #[serde(untagged)]
 enum ViewArg {
-    /// `plan`, `front`, `back`, `left`, `right` (elevations), `rendered`,
-    /// `fixture_list`, or `section_x` / `section_y` (cuts through the origin: x hides
+    /// `plan`, `front`, `back`, `left`, `right` (elevations), `plan_3d` (top view from
+    /// the 3D model, hidden lines removed), `rendered`, `fixture_list`, or `section_x` / `section_y` (cuts through the origin: x hides
     /// stage left of 0 and looks from there, y hides downstage and looks upstage).
     Name(String),
     Full(ViewKind),
@@ -361,6 +361,7 @@ impl ViewArg {
             "back" => ViewKind::Elevation { side: Side::Back },
             "left" => ViewKind::Elevation { side: Side::Left },
             "right" => ViewKind::Elevation { side: Side::Right },
+            "plan_3d" => ViewKind::PlanFrom3d { cut: None },
             "rendered" | "3d" => ViewKind::Rendered { eye: None, target: None },
             "fixture_list" => ViewKind::FixtureList,
             "section_x" => ViewKind::Section { origin: [0.0; 3], normal: [1.0, 0.0, 0.0] },
@@ -409,13 +410,36 @@ fn check_weights(w: &BTreeMap<String, f64>) -> Result<(), CmdError> {
     Ok(())
 }
 
+fn tag_lines(doc: &Document, m: &BTreeMap<String, TagLines>) -> Result<BTreeMap<Id, TagLines>, CmdError> {
+    let mut out = BTreeMap::new();
+    for (k, v) in m {
+        let id = resolve_tag(doc, k).ok_or_else(|| CmdError::not_found("tag", k))?;
+        if let Some(c) = &v.class
+            && !LINE_CLASSES[..5].contains(&c.as_str())
+        {
+            return Err(CmdError::invalid_args(format!(
+                "unknown line class `{c}`; use {}",
+                LINE_CLASSES[..5].join(", ")
+            )));
+        }
+        if let Some(w) = v.weight
+            && !(0.01..=5.0).contains(&w)
+        {
+            return Err(CmdError::invalid_args("tag line weight must be 0.01–5 mm"));
+        }
+        out.insert(id, v.clone());
+    }
+    Ok(out)
+}
+
 #[derive(Deserialize, JsonSchema)]
 struct VpCreateArgs {
     /// Sheet id, number or name.
     sheet: String,
     /// What it shows: `plan`, `front`, `back`, `left`, `right`, `section_x`, `section_y`,
-    /// `rendered`, `fixture_list`, or a full view object such as
-    /// `{"type":"section","origin":[0,4000,0],"normal":[0,-1,0]}`.
+    /// `plan_3d`, `rendered`, `fixture_list`, or a full view object such as
+    /// `{"type":"section","origin":[0,4000,0],"normal":[0,-1,0]}` or
+    /// `{"type":"plan_3d","cut":1500}`.
     view: ViewArg,
     /// Scale denominator: 50 = 1:50. Default 50 (fixture lists ignore it).
     #[serde(default = "d50")]
@@ -439,6 +463,13 @@ struct VpCreateArgs {
     /// Line class → pen width mm, e.g. `{"thick": 0.7}`.
     #[serde(default)]
     line_weights: BTreeMap<String, f64>,
+    /// Tag id or name → how its objects' lines are drawn, e.g.
+    /// `{"rigging": {"class": "thick"}, "light": {"weight": 0.5}}`.
+    #[serde(default)]
+    tag_lines: BTreeMap<String, TagLines>,
+    /// Elevations, sections, plan_3d: draw hidden edges dashed. Default false.
+    #[serde(default)]
+    hidden_lines: bool,
 }
 
 fn d50() -> f64 {
@@ -455,6 +486,7 @@ fn default_name(v: &ViewKind) -> String {
             Side::Right => "Right elevation".into(),
         },
         ViewKind::Section { .. } => "Section".into(),
+        ViewKind::PlanFrom3d { .. } => "Plan from 3D".into(),
         ViewKind::Rendered { .. } => "3D view".into(),
         ViewKind::FixtureList => "Fixture list".into(),
     }
@@ -466,6 +498,7 @@ fn vp_create(ctx: &mut Ctx, a: VpCreateArgs) -> CmdResult {
     let view = a.view.resolve()?;
     check_scale(a.scale)?;
     check_weights(&a.line_weights)?;
+    let tag_lines = tag_lines(doc, &a.tag_lines)?;
     let crop = a.crop.as_ref().map(check_crop).transpose()?;
     let hidden_tags = tag_ids(doc, &a.hidden_tags)?;
     let hidden_layers = layer_ids(doc, &a.hidden_layers)?;
@@ -483,6 +516,8 @@ fn vp_create(ctx: &mut Ctx, a: VpCreateArgs) -> CmdResult {
         hidden_tags,
         hidden_layers,
         line_weights: a.line_weights,
+        hidden_lines: a.hidden_lines,
+        tag_lines,
         label_template,
         label_offsets: BTreeMap::new(),
         show_title: true,
@@ -516,6 +551,10 @@ struct VpUpdateArgs {
     label_template: Option<String>,
     /// Line class → pen width mm; replaces the map (empty map = defaults).
     line_weights: Option<BTreeMap<String, f64>>,
+    /// Tag id or name → `{class?, weight?}`; replaces the map (empty = none).
+    tag_lines: Option<BTreeMap<String, TagLines>>,
+    /// Draw hidden edges dashed (elevations, sections, plan_3d).
+    hidden_lines: Option<bool>,
     show_title: Option<bool>,
     scale_bar: Option<bool>,
     /// Forget all hand-dragged label positions of this viewport.
@@ -536,6 +575,7 @@ fn vp_update(ctx: &mut Ctx, a: VpUpdateArgs) -> CmdResult {
     if let Some(w) = &a.line_weights {
         check_weights(w)?;
     }
+    let tag_lines = a.tag_lines.as_ref().map(|t| tag_lines(doc, t)).transpose()?;
     let crop = a.crop.as_ref().map(check_crop).transpose()?;
     let tags = a.hidden_tags.as_deref().map(|t| tag_ids(doc, t)).transpose()?;
     let layers = a.hidden_layers.as_deref().map(|t| layer_ids(doc, t)).transpose()?;
@@ -584,6 +624,12 @@ fn vp_update(ctx: &mut Ctx, a: VpUpdateArgs) -> CmdResult {
     }
     if let Some(w) = a.line_weights {
         v.line_weights = w;
+    }
+    if let Some(t) = tag_lines {
+        v.tag_lines = t;
+    }
+    if let Some(b) = a.hidden_lines {
+        v.hidden_lines = b;
     }
     if let Some(b) = a.show_title {
         v.show_title = b;

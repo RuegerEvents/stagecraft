@@ -57,6 +57,6 @@ ureq = { version = "3", features = ["cookies"] }
 security-framework = "3"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
-# HLR tests are heavy on geometry; keep them fast in debug test builds.
-[profile.test.package.stagecraft-hlr]
+# Hidden-line removal runs on every sheet change; keep it fast in debug builds too.
+[profile.dev.package.stagecraft-hlr]
 opt-level = 2

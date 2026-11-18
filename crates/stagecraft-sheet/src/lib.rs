@@ -3,8 +3,9 @@
 //!
 //! - [`labels`]: fixture label layout in the three rotation modes and collision
 //!   avoidance (pure; the plan canvas uses it too).
-//! - [`view`]: the [`view::VectorViewSource`] hook for elevations and sections, with a
-//!   mesh-outline fallback until `stagecraft-hlr` replaces it.
+//! - [`view`]: the [`view::VectorViewSource`] hook for elevations, sections and plans
+//!   from 3D; [`hlr::HlrSource`] (hidden lines removed, cached) is the default, a
+//!   mesh-outline [`FallbackSource`] stays for comparison.
 //! - [`install`] gives `stagecraft-core` the exporter behind `sheet.export_pdf` and
 //!   `sheet.export_svg`; the app and the GUI call it at start.
 //!
@@ -12,6 +13,7 @@
 
 pub mod compose;
 pub mod fonts;
+pub mod hlr;
 pub mod labels;
 pub mod prim;
 pub mod render;
@@ -23,6 +25,7 @@ use std::sync::Mutex;
 use stagecraft_core::{Document, Id};
 
 pub use compose::{Inputs, compose};
+pub use hlr::HlrSource;
 pub use prim::{ImageData, Page, Prim};
 pub use view::{FallbackSource, VectorViewSource};
 
@@ -38,9 +41,17 @@ pub fn rasters() -> HashMap<Id, ImageData> {
     RASTERS.lock().expect("rasters").clone().unwrap_or_default()
 }
 
-/// The vector view source used for exports (the fallback until HLR lands).
+static HLR: std::sync::LazyLock<HlrSource> = std::sync::LazyLock::new(HlrSource::new);
+
+/// The shared hidden-line source used for exports and the GUI. Its cache is shared
+/// too, so a sheet composed in the GUI exports without recomputing.
+pub fn hlr_source() -> &'static HlrSource {
+    &HLR
+}
+
+/// The vector view source used for exports: [`hlr_source`].
 pub fn default_source() -> &'static dyn VectorViewSource {
-    &FallbackSource
+    &*HLR
 }
 
 /// Compose sheets with the default source and the raster cache.
