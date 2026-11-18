@@ -371,13 +371,14 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         );
         if active {
             egui::Grid::new(("library_type", &ft.key)).num_columns(2).show(ui, |ui| {
-                ui.label(t("inspector.mode"));
+                crate::widgets::prop_label(ui, t("inspector.mode"));
                 let cur = ft.mode_or_first(
                     (!s.ui.options.fixture_mode.is_empty()).then_some(s.ui.options.fixture_mode.as_str()),
                 );
                 let shown = cur.map(|m| format!("{} · {} ch", m.name, m.footprint_text())).unwrap_or_default();
-                let r =
-                    egui::ComboBox::from_id_salt(("library_mode", &ft.key)).selected_text(shown).show_ui(ui, |ui| {
+                let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("library_mode", &ft.key))
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
                         for m in &ft.modes {
                             let label = format!("{} · {} ch", m.name, m.footprint_text());
                             if ui.selectable_label(cur.is_some_and(|c| c.name == m.name), label).clicked() {
@@ -387,11 +388,12 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                     });
                 widgets::name(&r.response, egui::Role::ComboBox, format!("Mode {}", ft.key));
                 ui.end_row();
-                ui.label(t("library.symbol"));
+                crate::widgets::prop_label(ui, t("library.symbol"));
                 let auto = if ft.has_plan_svg { t("library.symbol_gdtf") } else { t("library.symbol_silhouette") };
                 let shown = ft.symbol.clone().map_or_else(|| auto.to_owned(), |n| t(&format!("symbol.{n}")).to_owned());
-                let r =
-                    egui::ComboBox::from_id_salt(("library_symbol", &ft.key)).selected_text(shown).show_ui(ui, |ui| {
+                let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("library_symbol", &ft.key))
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
                         if ui.selectable_label(ft.symbol.is_none(), auto).clicked() {
                             let _ = s.run("symbol.assign", json!({ "gdtf_type": ft.key, "symbol": "" }));
                         }
@@ -451,7 +453,7 @@ pub fn share_panel(ui: &mut Ui, s: &mut Studio) {
     if let Some((m, err)) = &lib.message {
         let mut text = RichText::new(m).small();
         if *err {
-            text = text.color(crate::theme::WARNING);
+            text = text.color(crate::theme::of(ui).warning);
         }
         ui.label(text);
     }

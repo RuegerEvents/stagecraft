@@ -78,7 +78,7 @@ pub fn schema_of(name: &str) -> Value {
 }
 
 /// Start the form for a command, or run it right away if it takes nothing.
-fn choose(s: &mut Studio, name: &str) {
+pub fn choose(s: &mut Studio, name: &str) {
     let specs = fields(&schema_of(name));
     if specs.is_empty() {
         run(s, name, Value::Object(Default::default()));

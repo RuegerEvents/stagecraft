@@ -1014,9 +1014,9 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
         let at = cam.to_screen(pts[0]);
         let on = g.cursor.is_some_and(|c| math::dist(c.point, pts[0]) <= tolerance(cam));
         if on {
-            p.circle_filled(at, 7.0, crate::theme::ACCENT.gamma_multiply(0.35));
+            p.circle_filled(at, 7.0, pal.selected.gamma_multiply(0.35));
         }
-        p.circle_stroke(at, 7.0, Stroke::new(1.5, crate::theme::ACCENT));
+        p.circle_stroke(at, 7.0, Stroke::new(1.5, pal.selected));
     }
     if let Some(c) = g.cursor
         && s.ui.tool != Tool::Select
@@ -1087,7 +1087,7 @@ fn dim_box(ui: &Ui, at: Pos2, dim: &DimInput, angle_only: bool) {
                     // The field that takes keys is strong; Tab switches.
                     let field = |ui: &mut Ui, on: bool, text: String| {
                         let rt = egui::RichText::new(text);
-                        ui.label(if on { rt.strong().color(crate::theme::ACCENT) } else { rt.weak() });
+                        ui.label(if on { rt.strong().color(crate::theme::of(ui).accent) } else { rt.weak() });
                     };
                     field(ui, !dim.on_angle, format!("{}: {} m", t("dim.length"), dim.length));
                     ui.separator();

@@ -76,15 +76,15 @@ impl Col {
 
     fn width(self) -> f32 {
         match self {
-            Col::Name => 170.0,
-            Col::Tags => 170.0,
-            Col::FixtureType => 190.0,
-            Col::Conflict => 150.0,
-            Col::Address => 110.0,
+            Col::Name => 140.0,
+            Col::Tags => 140.0,
+            Col::FixtureType => 180.0,
+            Col::Conflict => 130.0,
+            Col::Address => 90.0,
             Col::Layer | Col::Mode => 110.0,
-            Col::Footprint => 70.0,
-            Col::Number => 50.0,
-            _ => 80.0,
+            Col::Footprint => 64.0,
+            Col::Number => 44.0,
+            _ => 70.0,
         }
     }
 }
@@ -568,7 +568,7 @@ fn select_rows_in_plan(s: &mut Studio, rows: &[Id]) {
     }
 }
 
-const ROW_H: f32 = 22.0;
+const ROW_H: f32 = 20.0;
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
     let doc = s.engine.doc().clone();
@@ -596,7 +596,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                 .tag
                 .and_then(|t| doc.tags.get(&t))
                 .map_or_else(|| t("table.any_tag").to_owned(), |t| t.name.clone());
-        let r = egui::ComboBox::from_id_salt("table_tag").selected_text(tag_name).show_ui(ui, |ui| {
+        let r = crate::widgets::combo_w(150.0, "table_tag").selected_text(tag_name).show_ui(ui, |ui| {
             if ui.selectable_label(s.ui.table.tag.is_none(), t("table.any_tag")).clicked() {
                 s.ui.table.tag = None;
             }
@@ -620,18 +620,24 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let sel_range = range(&rows, &s.ui.table);
     keys(ui, s, &rows, &cols);
 
-    // Header.
+    // Header: a strip in the inset colour, hairlines between the columns.
+    let tk = crate::theme::of(ui);
+    ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
+        let strip = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), ROW_H));
+        ui.painter().rect_filled(strip, 0.0, tk.panel_dark);
+        ui.painter().hline(strip.x_range(), strip.bottom() - 0.5, egui::Stroke::new(1.0, tk.separator));
         ui.add_space(36.0);
         for c in &cols {
             let (r, p) = ui.allocate_painter(vec2(c.width(), ROW_H), Sense::hover());
+            p.vline(r.rect.left().round() + 0.5, r.rect.y_range().shrink(3.0), egui::Stroke::new(1.0, tk.separator));
             p.text(
                 r.rect.left_center() + vec2(6.0, 0.0),
                 Align2::LEFT_CENTER,
                 t(c.key()),
-                egui::TextStyle::Small.resolve(ui.style()),
-                ui.visuals().weak_text_color(),
+                crate::theme::medium(crate::theme::SMALL),
+                tk.text2,
             );
         }
     });
@@ -644,7 +650,9 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let mut picked: Option<String> = None;
     let mut clicked: Option<(Id, usize, Modifiers)> = None;
     let mut double: Option<(Id, usize)> = None;
+    ui.spacing_mut().item_spacing.y = 0.0;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, ROW_H, rows.len(), |ui, visible| {
+        ui.spacing_mut().item_spacing.y = 0.0;
         for ri in visible {
             let id = rows[ri];
             let o = &doc.objects[&id];
@@ -682,7 +690,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                         painter.rect_stroke(
                             rect.shrink(1.0),
                             0.0,
-                            egui::Stroke::new(1.5, crate::theme::ACCENT),
+                            egui::Stroke::new(1.5, crate::theme::of(ui).accent),
                             egui::StrokeKind::Inside,
                         );
                     }
@@ -745,7 +753,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                         }
                     } else {
                         let warn = matches!(c, Col::Address | Col::Conflict) && conflicting.contains(&id);
-                        let colour = if warn { crate::theme::WARNING } else { ui.visuals().text_color() };
+                        let colour = if warn { crate::theme::of(ui).warning } else { ui.visuals().text_color() };
                         ui.painter().with_clip_rect(rect.shrink(2.0)).text(
                             rect.left_center() + vec2(6.0, 0.0),
                             Align2::LEFT_CENTER,

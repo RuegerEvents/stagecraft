@@ -1,7 +1,9 @@
 //! The plan canvas: camera, grid, objects, overlays. Interaction is in [`crate::tools`].
 
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
-use egui::{Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, Sense, Shape, Stroke, Ui};
+use egui::{
+    Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, Sense, Shape, Stroke, Ui, vec2,
+};
 use stagecraft_core::{Document, Id};
 use stagecraft_geom::{Detail, LineClass, PlanPrim, PlanStyle, math};
 
@@ -94,7 +96,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         draw_prims(&painter, &s.ui.camera, &pal, &prims, colour, 1.0);
     }
 
-    draw_conflicts(&painter, &s.ui.camera, doc, &ids);
+    draw_conflicts(&painter, &s.ui.camera, &pal, doc, &ids);
     crate::sketch_ui::draw(&painter, &s.ui.camera, &pal, doc, &mut s.ui.sketch);
 
     if let Some(t) = &template {
@@ -104,11 +106,31 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     crate::tools::interact(ui, &resp, s, &ids, &style);
     crate::tools::draw_overlay(ui, &painter, s, &pal, &style);
     crate::sketch_ui::editor(ui, s);
+    corner_marks(&painter, rect, &theme::of(ui), &s.ui.camera);
+}
+
+/// The view's name in the top left corner and the axis icon in the bottom left, as a CAD
+/// model space shows them.
+fn corner_marks(p: &Painter, rect: Rect, c: &theme::Tokens, cam: &Camera) {
+    let ink = c.plan.ink;
+    // The plan at 1:n on screen (a point is 0.3528 mm).
+    let n = 1.0 / (cam.scale * 25.4 / 72.0);
+    let scale = if n >= 10.0 { format!("1:{}", (n / 5.0).round() * 5.0) } else { format!("1:{n:.1}") };
+    let label = format!("{}  |  {}  |  {scale}", t("view3d.top"), t("view.plan"));
+    p.text(rect.left_top() + vec2(10.0, 9.0), Align2::LEFT_TOP, label, theme::small(), ink);
+    let o = Pos2::new(rect.left() + 22.0, rect.bottom() - 22.0);
+    let st = Stroke::new(1.0, ink);
+    let len = 34.0;
+    p.line_segment([o, o + vec2(len, 0.0)], st);
+    p.line_segment([o, o - vec2(0.0, len)], st);
+    p.rect_stroke(Rect::from_min_size(o - vec2(0.0, 6.0), vec2(6.0, 6.0)), 0.0, st, egui::StrokeKind::Middle);
+    p.text(o + vec2(len + 8.0, 0.0), Align2::LEFT_CENTER, "X", theme::proportional(10.5), c.axes[0]);
+    p.text(o - vec2(0.0, len + 8.0), Align2::CENTER_BOTTOM, "Y", theme::proportional(10.5), c.axes[1]);
 }
 
 /// A warning ring around every fixture whose patch overlaps another or runs past
 /// its universe.
-fn draw_conflicts(painter: &Painter, cam: &Camera, doc: &Document, ids: &[Id]) {
+fn draw_conflicts(painter: &Painter, cam: &Camera, pal: &Palette, doc: &Document, ids: &[Id]) {
     let bad = stagecraft_core::patch::conflicting(doc);
     if bad.is_empty() {
         return;
@@ -121,8 +143,8 @@ fn draw_conflicts(painter: &Painter, cam: &Camera, doc: &Document, ids: &[Id]) {
         let c = frame([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0]);
         let r = ((hi[0] - lo[0]).hypot(hi[1] - lo[1]) / 2.0 * cam.scale) as f32 + 4.0;
         let p = cam.to_screen(c);
-        painter.circle_stroke(p, r.max(6.0), Stroke::new(2.0, theme::WARNING));
-        painter.circle_stroke(p, r.max(6.0) + 3.0, Stroke::new(1.0, theme::WARNING.gamma_multiply(0.5)));
+        painter.circle_stroke(p, r.max(6.0), Stroke::new(2.0, pal.conflict));
+        painter.circle_stroke(p, r.max(6.0) + 3.0, Stroke::new(1.0, pal.conflict.gamma_multiply(0.5)));
     }
 }
 
@@ -240,14 +262,14 @@ fn draw_grid(p: &Painter, cam: &Camera, pal: &Palette) {
             y += step;
         }
     }
-    // Origin cross: centre line of the stage and the setting line.
+    // Origin cross: the centre line of the stage (y axis, green) and the setting line
+    // (x axis, red), faint like a CAD model space.
     let o = cam.to_screen([0.0, 0.0]);
-    let st = Stroke::new(1.0, pal.axis);
     if r.x_range().contains(o.x) {
-        p.add(Shape::dashed_line(&[Pos2::new(o.x, r.top()), Pos2::new(o.x, r.bottom())], st, 10.0, 4.0));
+        p.line_segment([Pos2::new(o.x, r.top()), Pos2::new(o.x, r.bottom())], Stroke::new(1.0, pal.axis_y));
     }
     if r.y_range().contains(o.y) {
-        p.add(Shape::dashed_line(&[Pos2::new(r.left(), o.y), Pos2::new(r.right(), o.y)], st, 10.0, 4.0));
+        p.line_segment([Pos2::new(r.left(), o.y), Pos2::new(r.right(), o.y)], Stroke::new(1.0, pal.axis_x));
     }
 }
 

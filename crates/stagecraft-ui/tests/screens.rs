@@ -25,6 +25,14 @@ fn harness(theme: ThemePref) -> Harness<'static, Studio> {
 }
 
 fn harness_with(theme: ThemePref, engine: stagecraft_core::Engine) -> Harness<'static, Studio> {
+    harness_sized(theme, engine, vec2(1440.0, 900.0))
+}
+
+/// kittest puts an 8 pt margin around the UI; the harness is that much larger and [`save`]
+/// cuts it off, so the screens are the window at `size`.
+const MARGIN: f32 = 8.0;
+
+fn harness_sized(theme: ThemePref, engine: stagecraft_core::Engine, size: egui::Vec2) -> Harness<'static, Studio> {
     let mut studio = Studio::new(engine);
     studio.ui.theme = theme;
     // As on macOS: the menus are the system's, the tool bar is the title bar.
@@ -36,7 +44,7 @@ fn harness_with(theme: ThemePref, engine: stagecraft_core::Engine) -> Harness<'s
         // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
         // asks for one more frame; closing a modal can take six.
         .with_max_steps(8)
-        .with_size(vec2(1440.0, 900.0))
+        .with_size(size + vec2(2.0 * MARGIN, 2.0 * MARGIN))
         .renderer(renderer)
         .build_ui_state(|ui, s: &mut Studio| s.show(ui), studio);
     h.run();
@@ -45,7 +53,9 @@ fn harness_with(theme: ThemePref, engine: stagecraft_core::Engine) -> Harness<'s
 
 fn save(h: &mut Harness<'static, Studio>, dir: &str, name: &str) {
     h.run();
-    let mut img = h.render().expect("render");
+    let full = h.render().expect("render");
+    let m = MARGIN as u32;
+    let mut img = image::imageops::crop_imm(&full, m, m, full.width() - 2 * m, full.height() - 2 * m).to_image();
     window_buttons(&mut img);
     img.save(format!("{dir}/{name}.png")).expect("save");
 }
@@ -53,9 +63,10 @@ fn save(h: &mut Harness<'static, Studio>, dir: &str, name: &str) {
 /// The macOS window buttons AppKit draws over the inset title bar, so the screens look like
 /// the window (they are not part of egui's frame).
 fn window_buttons(img: &mut image::RgbaImage) {
-    let ppp = img.width() as f32 / 1440.0;
+    let lights = stagecraft_ui::chrome::traffic_light_centres();
     for (i, rgb) in [[0xff, 0x5f, 0x57], [0xfe, 0xbc, 0x2e], [0x28, 0xc8, 0x40]].into_iter().enumerate() {
-        let (cx, cy, r) = ((20.0 + 20.0 * i as f32) * ppp, 20.0 * ppp, 6.0 * ppp);
+        let r = stagecraft_ui::chrome::MAC_LIGHT / 2.0;
+        let (cx, cy) = (lights[i].x, lights[i].y);
         for y in (cy - r - 1.0) as u32..=(cy + r + 1.0) as u32 {
             for x in (cx - r - 1.0) as u32..=(cx + r + 1.0) as u32 {
                 let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
@@ -68,6 +79,36 @@ fn window_buttons(img: &mut image::RgbaImage) {
                 }
             }
         }
+    }
+}
+
+/// The window at the size of the Craft suite's reference screenshots (1200 × 750).
+#[test]
+fn craft_size() {
+    let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") else { return };
+    std::fs::create_dir_all(&dir).expect("screenshot dir");
+    for (theme, tn) in [(ThemePref::Light, "light"), (ThemePref::Dark, "dark")] {
+        let mut h = harness_sized(theme, stagecraft_ui::demo::engine(), vec2(1200.0, 750.0));
+        save(&mut h, &dir, &format!("50-craft-plan-{tn}"));
+        let doc = h.state().engine.doc().clone();
+        let lx1 = doc.objects.values().find(|o| o.name == "LX1").unwrap().id;
+        h.state_mut().run("selection.set", json!({ "ids": doc.children(lx1) })).unwrap();
+        save(&mut h, &dir, &format!("51-craft-selection-{tn}"));
+        h.state_mut().run("selection.clear", json!(null)).unwrap();
+        h.state_mut().run("ui.set_tool", json!({ "tool": "wall" })).unwrap();
+        save(&mut h, &dir, &format!("52-craft-wall-tool-{tn}"));
+        h.state_mut().run("ui.set_tool", json!({ "tool": "select" })).unwrap();
+        h.state_mut().run("ui.set_view", json!({ "view": "3d" })).unwrap();
+        h.state_mut().run("ui.camera", json!({ "view": "iso" })).unwrap();
+        save(&mut h, &dir, &format!("53-craft-3d-{tn}"));
+        h.state_mut().run("ui.set_view", json!({ "view": "sheets" })).unwrap();
+        for _ in 0..30 {
+            h.step();
+        }
+        save(&mut h, &dir, &format!("54-craft-sheets-{tn}"));
+        h.state_mut().run("ui.set_view", json!({ "view": "plan" })).unwrap();
+        h.state_mut().run("ui.tutorial", json!({ "action": "start" })).unwrap();
+        save(&mut h, &dir, &format!("55-craft-tutorial-{tn}"));
     }
 }
 

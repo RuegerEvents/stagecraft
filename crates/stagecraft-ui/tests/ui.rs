@@ -709,24 +709,33 @@ fn the_in_window_menus_run_commands() {
 // ---- toolbar ---------------------------------------------------------------------
 
 #[test]
-fn toolbar_icons_have_names_and_tools_that_do_not_fit_go_into_a_menu() {
+fn tools_sit_in_the_palette_and_tool_bar_commands_that_do_not_fit_go_into_a_menu() {
     let mut h = harness(stagecraft_ui::demo::engine());
-    assert!(h.query_by_label("More tools").is_none());
+    assert!(h.query_by_label("More commands").is_none());
     h.get_by_label("Tool Ceiling").click();
     h.run();
     assert_eq!(h.state().ui.tool, stagecraft_ui::Tool::Ceiling);
-    // A narrow window: the last groups move into the » menu.
-    let mut h = Harness::builder()
-        .with_max_steps(8)
-        .with_size(vec2(760.0, 700.0))
-        .build_ui_state(|ui, s: &mut Studio| s.show(ui), Studio::new(stagecraft_ui::demo::engine()));
+    // A folded palette section hides its tools; unfolded they are back.
+    h.get_by_label("Section Stage").click();
     h.run();
     assert!(h.query_by_label("Tool Ceiling").is_none());
-    assert!(h.query_by_label("Tool Select").is_some());
-    h.get_by_label("More tools").click();
+    h.get_by_label("Section Stage").click();
     h.run();
-    h.get_by_label("Menu tool Ceiling").click();
+    assert!(h.query_by_label("Tool Ceiling").is_some());
+    // A narrow window: the tool bar's last groups move into the ⋯ menu; the palette stays
+    // in the layout (craft-ui may fold its column to an icon).
+    let mut h = Harness::builder()
+        .with_max_steps(8)
+        .with_size(vec2(600.0, 700.0))
+        .build_ui_state(|ui, s: &mut Studio| s.show(ui), Studio::new(stagecraft_ui::demo::engine()));
     h.run();
-    assert_eq!(h.state().ui.tool, stagecraft_ui::Tool::Ceiling);
+    assert!(h.query_by_label("Toolbar Tutorial").is_none());
+    assert!(h.query_by_label("Toolbar Save").is_some());
+    assert!(h.state().ui.layout.layout.contains(&stagecraft_ui::state::PanelKind::Tools));
+    h.get_by_label("More commands").click();
+    h.run();
+    h.get_by_label("Menu Tutorial").click();
+    h.run();
+    assert!(h.state().ui.tutorial.active);
     assert_eq!(stagecraft_ui::panels::tool_tip(stagecraft_ui::Tool::Wall), "Wall (W)");
 }

@@ -272,6 +272,21 @@ fn enter(s: &mut Studio, i: usize) {
     let i = i.min(STEPS.len());
     s.ui.tutorial.step = i;
     s.ui.tutorial.entered_done = STEPS.get(i).is_some_and(|st| (st.done)(s));
+    // Panels the step works in come to the front of their tab group (the Library shares
+    // one with Layers).
+    let panels: Vec<PanelKind> = STEPS
+        .get(i)
+        .map(|st| (st.targets)(s))
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|t| match t {
+            Target::Panel(p) if s.ui.layout.layout.contains(&p) => Some(p),
+            _ => None,
+        })
+        .collect();
+    for p in panels {
+        crate::dock::bring_forward(&mut s.ui.layout, p);
+    }
 }
 
 /// What `ui.tutorial` and the panel's buttons do.
@@ -339,11 +354,24 @@ fn marks_id() -> egui::Id {
     egui::Id::unique("stagecraft_tutorial_marks")
 }
 
-/// Note where a named widget is, if the tutorial points at it.
-pub fn mark(ctx: &egui::Context, name: &str, rect: Rect) {
+/// Note where a named widget is, if the tutorial points at it. True if it does.
+pub fn mark(ctx: &egui::Context, name: &str, rect: Rect) -> bool {
     let wanted = ctx.data(|d| d.get_temp::<Marks>(marks_id()).is_some_and(|m| m.wanted.iter().any(|x| x == name)));
     if wanted {
         ctx.data_mut(|d| d.get_temp_mut_or_default::<Marks>(marks_id()).found.push((name.to_owned(), rect)));
+    }
+    wanted
+}
+
+/// A target the tutorial points at that its panel has scrolled out of view scrolls in,
+/// once per target (the user may scroll away again).
+pub fn reveal(resp: &egui::Response, name: &str) {
+    let id = egui::Id::unique("stagecraft_tutorial_revealed");
+    let clipped = resp.interact_rect.height() < resp.rect.height() - 0.5;
+    let done = resp.ctx.data(|d| d.get_temp::<String>(id)).is_some_and(|n| n == name);
+    if clipped && !done {
+        resp.scroll_to_me(Some(egui::Align::Center));
+        resp.ctx.data_mut(|d| d.insert_temp(id, name.to_owned()));
     }
 }
 
@@ -383,7 +411,7 @@ pub fn paint(ctx: &egui::Context, s: &Studio) {
     let pulse = (0.5 + 0.5 * (time * 4.0).sin()) as f32;
     let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("tutorial_pulse"));
     let p = ctx.layer_painter(layer);
-    let accent = crate::theme::ACCENT;
+    let accent = crate::theme::tokens(ctx.theme() == egui::Theme::Dark).accent;
     p.rect_stroke(rect.expand(2.0 + 2.0 * pulse), 7.0, Stroke::new(2.0, accent), egui::StrokeKind::Outside);
     p.rect_stroke(
         rect.expand(6.0 + 3.0 * pulse),
@@ -395,7 +423,7 @@ pub fn paint(ctx: &egui::Context, s: &Studio) {
 }
 
 fn key_cap(ui: &mut Ui, key: &str) {
-    let c = crate::theme::chrome(ui.visuals().dark_mode);
+    let c = crate::theme::of(ui);
     egui::Frame::new()
         .fill(c.field)
         .stroke(Stroke::new(1.0, c.separator))
@@ -406,7 +434,7 @@ fn key_cap(ui: &mut Ui, key: &str) {
 
 /// The Tutorial panel.
 pub fn panel(ui: &mut Ui, s: &mut Studio) {
-    let c = crate::theme::chrome(ui.visuals().dark_mode);
+    let c = crate::theme::of(ui);
     ui.label(RichText::new(t("tutorial.title")).strong().size(14.0));
     ui.add_space(4.0);
     let tut = s.ui.tutorial.clone();
@@ -442,29 +470,10 @@ pub fn panel(ui: &mut Ui, s: &mut Studio) {
     let (bar, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 3.0), egui::Sense::hover());
     ui.painter().rect_filled(bar, 1.5, c.separator);
     let frac = (tut.step as f32 + 1.0) / STEPS.len() as f32;
-    ui.painter().rect_filled(
-        Rect::from_min_size(bar.min, egui::vec2(bar.width() * frac, bar.height())),
-        1.5,
-        crate::theme::ACCENT,
-    );
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(t(&format!("tutorial.{}.title", step.id))).strong().size(13.5));
-        if let Some(k) = step.key {
-            ui.add_space(4.0);
-            key_cap(ui, k);
-        }
-    });
-    ui.add_space(2.0);
-    ui.label(t(&format!("tutorial.{}.text", step.id)));
-    ui.add_space(6.0);
+    ui.painter().rect_filled(Rect::from_min_size(bar.min, egui::vec2(bar.width() * frac, bar.height())), 1.5, c.accent);
+    // The buttons stay on top, so a long step text never pushes them out of view.
     let done = (step.done)(s);
-    if done {
-        ui.label(RichText::new(t("tutorial.done_step")).color(crate::theme::ACCENT).strong());
-    } else if target_rect(ui.ctx(), s).is_none() && !(step.targets)(s).is_empty() {
-        ui.label(RichText::new(t("tutorial.look")).small().color(c.text2));
-    }
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.add_enabled_ui(tut.step > 0, |ui| {
             if widgets::button(ui, t("tutorial.back"), "Tutorial back").clicked() {
@@ -479,6 +488,22 @@ pub fn panel(ui: &mut Ui, s: &mut Studio) {
             let _ = s.run("ui.tutorial", json!({ "action": "stop" }));
         }
     });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(t(&format!("tutorial.{}.title", step.id))).strong().size(13.5));
+        if let Some(k) = step.key {
+            ui.add_space(4.0);
+            key_cap(ui, k);
+        }
+    });
+    ui.add_space(2.0);
+    ui.label(t(&format!("tutorial.{}.text", step.id)));
+    ui.add_space(6.0);
+    if done {
+        ui.label(RichText::new(t("tutorial.done_step")).color(c.accent).strong());
+    } else if target_rect(ui.ctx(), s).is_none() && !(step.targets)(s).is_empty() {
+        ui.label(RichText::new(t("tutorial.look")).small().color(c.text2));
+    }
 }
 
 #[cfg(test)]

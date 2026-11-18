@@ -24,12 +24,12 @@ pub fn common<T: PartialEq>(mut it: impl Iterator<Item = T>) -> Option<T> {
 
 /// A labelled field; `None` as current shows the "mixed" hint.
 fn field(ui: &mut Ui, key: &str, salt: &str, current: Option<String>) -> Option<String> {
-    ui.label(t(key));
+    crate::widgets::prop_label(ui, t(key));
     let id = egui::Id::unique(("inspector", salt));
     let mixed = current.is_none();
     let hint = if mixed { t("inspector.mixed") } else { "" };
-    let w = ui.available_width().clamp(90.0, 170.0);
-    let out = edit_field_hint(ui, id, &current.unwrap_or_default(), w, &format!("Inspector {}", t(key)), hint);
+    let out =
+        edit_field_hint(ui, id, &current.unwrap_or_default(), f32::INFINITY, &format!("Inspector {}", t(key)), hint);
     ui.end_row();
     out
 }
@@ -71,7 +71,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         (n, Some(ty)) => tf("inspector.n_of_type", &[("n", &n), ("type", &t(&format!("type.{ty}.plural")))]),
         (n, None) => tf("inspector.n_objects", &[("n", &n)]),
     };
-    ui.label(RichText::new(title).strong());
+    crate::widgets::section(ui, title);
     ui.add_space(4.0);
 
     // Roots and objects whose parent is not selected: absolute edits apply to them,
@@ -81,23 +81,26 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let worlds: Vec<(Id, stagecraft_core::Placement)> =
         tops.iter().filter_map(|id| stagecraft_core::geom::world_placement(&doc, *id).map(|w| (*id, w))).collect();
 
-    egui::Grid::new("inspector_common").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+    egui::Grid::new("inspector_common").num_columns(2).spacing([6.0, 3.0]).show(ui, |ui| {
         let name = common(objs.iter().map(|o| o.name.clone()));
         if let Some(v) = field(ui, "inspector.name", "name", name) {
             batch(s, sel.iter().map(|id| step("object.rename", json!({ "id": id, "name": v }))).collect());
         }
 
-        ui.label(t("inspector.layer"));
+        crate::widgets::prop_label(ui, t("inspector.layer"));
         let layer = common(objs.iter().map(|o| o.layer));
         let shown =
             layer.and_then(|l| doc.layers.get(&l)).map_or_else(|| t("inspector.mixed").to_owned(), |l| l.name.clone());
-        let r = egui::ComboBox::from_id_salt("inspector_layer").selected_text(shown).show_ui(ui, |ui| {
-            for l in doc.layers_sorted() {
-                if ui.selectable_label(layer == Some(l.id), &l.name).clicked() {
-                    let _ = s.run("object.set_layer", json!({ "ids": sel, "layer": l.id }));
+        let r = crate::widgets::combo_w(ui.available_width() - 12.0, "inspector_layer").selected_text(shown).show_ui(
+            ui,
+            |ui| {
+                for l in doc.layers_sorted() {
+                    if ui.selectable_label(layer == Some(l.id), &l.name).clicked() {
+                        let _ = s.run("object.set_layer", json!({ "ids": sel, "layer": l.id }));
+                    }
                 }
-            }
-        });
+            },
+        );
         widgets::name(&r.response, egui::Role::ComboBox, format!("Inspector {}", t("inspector.layer")));
         ui.end_row();
 
@@ -149,9 +152,8 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     });
 
     if let Some(ty) = ty {
-        ui.add_space(6.0);
-        ui.separator();
-        egui::Grid::new("inspector_kind").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+        crate::widgets::rule(ui);
+        egui::Grid::new("inspector_kind").num_columns(2).spacing([6.0, 3.0]).show(ui, |ui| {
             kind_fields(ui, s, ty, &objs, &sel);
         });
     }
@@ -160,8 +162,6 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         load_section(ui, &doc, o);
     }
 
-    ui.add_space(6.0);
-    ui.separator();
     tags_field(ui, s, &doc, &objs, &sel);
 
     let parents: Vec<Id> = objs.iter().filter_map(|o| o.parent).collect();
@@ -219,7 +219,7 @@ fn world_note(ui: &mut Ui, s: &Studio, objs: &[&Object]) {
     }
     let world = |o: &&Object| stagecraft_core::geom::world_placement(doc, o.id).map_or(0.0, |w| w.position[2]);
     let Some(z) = common(objs.iter().map(|o| fmt_mm(world(o)))) else { return };
-    ui.label("");
+    crate::widgets::prop_label(ui, "");
     let note = tf("inspector.world_height", &[("z", &z), ("layer", &layer.name), ("e", &fmt_mm(layer.elevation))]);
     ui.label(RichText::new(note).weak().small());
     ui.end_row();
@@ -265,15 +265,17 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
                 ObjectKind::Truss { profile, .. } => profile.clone(),
                 _ => String::new(),
             }));
-            ui.label(t("inspector.profile"));
+            crate::widgets::prop_label(ui, t("inspector.profile"));
             let shown = profile.clone().unwrap_or_else(|| t("inspector.mixed").to_owned());
-            let r = egui::ComboBox::from_id_salt("inspector_profile").selected_text(shown).show_ui(ui, |ui| {
-                for p in stagecraft_geom::truss_profiles() {
-                    if ui.selectable_label(profile.as_deref() == Some(&p.name), &p.name).clicked() {
-                        batch(s, each("truss.update", &|id| json!({ "id": id, "profile": p.name })));
+            let r = crate::widgets::combo_w(ui.available_width() - 12.0, "inspector_profile")
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    for p in stagecraft_geom::truss_profiles() {
+                        if ui.selectable_label(profile.as_deref() == Some(&p.name), &p.name).clicked() {
+                            batch(s, each("truss.update", &|id| json!({ "id": id, "profile": p.name })));
+                        }
                     }
-                }
-            });
+                });
             widgets::name(&r.response, egui::Role::ComboBox, format!("Inspector {}", t("inspector.profile")));
             ui.end_row();
             let len = common(objs.iter().map(|o| match &o.kind {
@@ -286,7 +288,7 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
                 batch(s, each("truss.update", &|id| json!({ "id": id, "length": mm })));
             }
             if let Some(p) = profile.as_deref().and_then(stagecraft_geom::truss_profile) {
-                ui.label("");
+                crate::widgets::prop_label(ui, "");
                 ui.label(
                     RichText::new(format!("{} · {}×{} mm · {} kg/m", p.maker, p.width, p.height, p.kg_per_m)).weak(),
                 );
@@ -353,13 +355,13 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
                 let o = &doc.objects[&sel[0]];
                 let fp = stagecraft_sheet::labels::footprint_text(&doc, o);
                 if !fp.is_empty() {
-                    ui.label(t("col.footprint"));
+                    crate::widgets::prop_label(ui, t("col.footprint"));
                     ui.label(fp);
                     ui.end_row();
                 }
                 if let Some(p) = stagecraft_core::patch::conflicts(&doc).remove(&sel[0]) {
-                    ui.label("");
-                    ui.label(RichText::new(crate::table::problem_text(&doc, &p)).color(crate::theme::WARNING));
+                    crate::widgets::prop_label(ui, "");
+                    ui.label(RichText::new(crate::table::problem_text(&doc, &p)).color(crate::theme::of(ui).warning));
                     ui.end_row();
                 }
             }
@@ -418,24 +420,26 @@ fn choice(
     cmd: &str,
     arg: &str,
 ) {
-    ui.label(t(key));
+    crate::widgets::prop_label(ui, t(key));
     let shown = current
         .as_ref()
         .and_then(|c| options.iter().find(|(v, _)| v == c).map(|o| o.1.clone()))
         .unwrap_or_else(|| t("inspector.mixed").to_owned());
-    let r = egui::ComboBox::from_id_salt(("inspector_choice", salt)).selected_text(shown).show_ui(ui, |ui| {
-        for (v, label) in options {
-            if ui.selectable_label(current.as_deref() == Some(v), label).clicked() {
-                batch(s, sel.iter().map(|id| step(cmd, json!({ "id": id, arg: v }))).collect());
+    let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("inspector_choice", salt))
+        .selected_text(shown)
+        .show_ui(ui, |ui| {
+            for (v, label) in options {
+                if ui.selectable_label(current.as_deref() == Some(v), label).clicked() {
+                    batch(s, sel.iter().map(|id| step(cmd, json!({ "id": id, arg: v }))).collect());
+                }
             }
-        }
-    });
+        });
     widgets::name(&r.response, egui::Role::ComboBox, format!("Inspector {}", t(key)));
     ui.end_row();
 }
 
 fn flag(ui: &mut Ui, s: &mut Studio, sel: &[Id], key: &str, current: Option<bool>, cmd: &str, arg: &str) {
-    ui.label(t(key));
+    crate::widgets::prop_label(ui, t(key));
     let mut on = current.unwrap_or(false);
     let r = ui.checkbox(&mut on, "");
     widgets::name(&r, egui::Role::CheckBox, format!("Inspector {}", t(key)));
@@ -446,7 +450,7 @@ fn flag(ui: &mut Ui, s: &mut Studio, sel: &[Id], key: &str, current: Option<bool
 }
 
 fn colour(ui: &mut Ui, s: &mut Studio, sel: &[Id], current: Option<String>, cmd: &str) {
-    ui.label(t("inspector.colour"));
+    crate::widgets::prop_label(ui, t("inspector.colour"));
     let mut rgb = current.as_deref().and_then(stagecraft_core::model::parse_color).unwrap_or([128, 128, 128]);
     let r = ui.color_edit_button_srgb(&mut rgb);
     widgets::name(&r, egui::Role::ColorWell, "Inspector colour");
@@ -852,11 +856,11 @@ pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Objec
             {
                 let size =
                     format!("{:.2} × {:.2} m", (hi[0] - lo[0]) * scale / 1000.0, (hi[1] - lo[1]) * scale / 1000.0);
-                ui.label(t("inspector.size"));
+                crate::widgets::prop_label(ui, t("inspector.size"));
                 ui.label(RichText::new(format!("{} · {size}", json_str(format))).weak());
                 ui.end_row();
             }
-            ui.label("");
+            crate::widgets::prop_label(ui, "");
             let unlocked = all_bool(&f!(ObjectKind::Underlay { locked, .. } => *locked)) != Some(true);
             if ui.add_enabled(unlocked, egui::Button::new(t("inspector.calibrate"))).clicked() {
                 s.ui.set_tool(crate::state::Tool::Calibrate);
@@ -907,11 +911,11 @@ pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Objec
                     }
                     _ => tf("inspector.set_info", &[("n", &s.engine.doc().children(o.id).len())]),
                 };
-                ui.label("");
+                crate::widgets::prop_label(ui, "");
                 ui.label(RichText::new(info).weak());
                 ui.end_row();
                 if o.kind.is_group() {
-                    ui.label("");
+                    crate::widgets::prop_label(ui, "");
                     if button(ui, t("inspector.select_members"), "Select members").clicked() {
                         let kids = s.engine.doc().children(o.id);
                         let _ = s.run("selection.set", json!({ "ids": kids }));
@@ -947,23 +951,21 @@ fn load_section(ui: &mut Ui, doc: &stagecraft_core::Document, o: &Object) {
             (l.own_kg, l.attached_kg, l.total_kg(), l.unknown, None, false)
         }
     };
-    ui.add_space(6.0);
-    ui.separator();
-    ui.label(RichText::new(t("inspector.load")).strong());
+    crate::widgets::section(ui, t("inspector.load"));
     let kg = |v: f64| format!("{v:.1} kg");
-    egui::Grid::new("inspector_load").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label(t("load.own"));
+    egui::Grid::new("inspector_load").num_columns(2).spacing([6.0, 3.0]).show(ui, |ui| {
+        crate::widgets::prop_label(ui, t("load.own"));
         ui.label(kg(own));
         ui.end_row();
-        ui.label(t("load.attached"));
+        crate::widgets::prop_label(ui, t("load.attached"));
         let text = RichText::new(kg(attached));
         ui.label(if over { text.color(ui.visuals().error_fg_color).strong() } else { text });
         ui.end_row();
-        ui.label(t("load.total"));
+        crate::widgets::prop_label(ui, t("load.total"));
         ui.label(RichText::new(kg(total)).strong());
         ui.end_row();
         if let Some(m) = limit {
-            ui.label(t("load.limit"));
+            crate::widgets::prop_label(ui, t("load.limit"));
             ui.label(kg(m));
             ui.end_row();
         }
@@ -985,7 +987,7 @@ fn mm_or_error(s: &mut Studio, v: &str) -> Option<f64> {
 }
 
 fn tags_field(ui: &mut Ui, s: &mut Studio, doc: &stagecraft_core::Document, objs: &[&Object], sel: &[Id]) {
-    ui.label(RichText::new(t("inspector.tags")).strong());
+    crate::widgets::section(ui, t("inspector.tags"));
     let mut all: Vec<Id> = objs.iter().flat_map(|o| o.tags.iter().copied()).collect();
     all.sort();
     all.dedup();
@@ -1009,7 +1011,7 @@ fn tags_field(ui: &mut Ui, s: &mut Studio, doc: &stagecraft_core::Document, objs
         }
     });
     let id = egui::Id::unique("inspector_add_tag");
-    if let Some(name) = edit_field_hint(ui, id, "", 140.0, "Add tag", t("inspector.add_tag"))
+    if let Some(name) = edit_field_hint(ui, id, "", f32::INFINITY, "Add tag", t("inspector.add_tag"))
         && !name.trim().is_empty()
     {
         let _ = s.run("object.tag", json!({ "ids": sel, "tags": [name.trim()] }));
@@ -1018,9 +1020,9 @@ fn tags_field(ui: &mut Ui, s: &mut Studio, doc: &stagecraft_core::Document, objs
 
 /// With nothing selected: the document's meta data.
 fn document_fields(ui: &mut Ui, s: &mut Studio) {
-    ui.label(RichText::new(t("inspector.document")).strong());
+    crate::widgets::section(ui, t("inspector.document"));
     let meta = s.engine.doc().meta.clone();
-    egui::Grid::new("inspector_doc").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+    egui::Grid::new("inspector_doc").num_columns(2).spacing([6.0, 3.0]).show(ui, |ui| {
         for (key, field_name, v) in crate::sheets::meta_texts(&meta) {
             if let Some(v) = field(ui, key, field_name, Some(v)) {
                 let _ = s.run("doc.set_meta", json!({ field_name: crate::sheets::meta_value(field_name, v) }));

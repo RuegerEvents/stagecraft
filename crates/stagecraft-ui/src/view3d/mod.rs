@@ -118,65 +118,11 @@ impl View3d {
     }
 }
 
-/// Colours of the 3D view, per theme.
-#[derive(Clone, Copy, Debug)]
-pub struct Palette3d {
-    pub background: Color32,
-    pub generic: Color32,
-    pub floor: Color32,
-    pub wall: Color32,
-    pub metal: Color32,
-    pub fixture: Color32,
-    pub lens: Color32,
-    pub curtain: Color32,
-    pub masking: Color32,
-    pub deck: Color32,
-    pub cut: Color32,
-    pub hatch: Color32,
-    pub grid_minor: Color32,
-    pub grid_major: Color32,
-    pub selected: Color32,
-}
+pub use crate::theme::Palette3d;
 
+/// Colours of the 3D view, per theme.
 pub fn palette(dark: bool) -> Palette3d {
-    let p = theme::palette(dark);
-    if dark {
-        Palette3d {
-            background: Color32::from_rgb(0x1b, 0x1c, 0x1f),
-            generic: Color32::from_rgb(0xa0, 0xa4, 0xab),
-            floor: Color32::from_rgb(0x6a, 0x63, 0x58),
-            wall: Color32::from_rgb(0x9a, 0x9c, 0xa2),
-            metal: Color32::from_rgb(0xc4, 0xc8, 0xce),
-            fixture: Color32::from_rgb(0x4a, 0x4d, 0x55),
-            lens: Color32::from_rgb(0xff, 0xe4, 0xa8),
-            curtain: Color32::from_rgb(0x8b, 0x1a, 0x1a),
-            masking: Color32::from_rgb(0x2a, 0x2a, 0x2c),
-            deck: Color32::from_rgb(0x3a, 0x38, 0x36),
-            cut: Color32::from_rgb(0xd2, 0x5a, 0x4a),
-            hatch: Color32::from_rgb(0x7a, 0x2c, 0x22),
-            grid_minor: Color32::from_rgba_unmultiplied(0x5a, 0x5e, 0x66, 50),
-            grid_major: Color32::from_rgba_unmultiplied(0x78, 0x7c, 0x86, 110),
-            selected: p.selected,
-        }
-    } else {
-        Palette3d {
-            background: Color32::from_rgb(0xf2, 0xf3, 0xf5),
-            generic: Color32::from_rgb(0xb4, 0xb8, 0xbf),
-            floor: Color32::from_rgb(0xc9, 0xbf, 0xae),
-            wall: Color32::from_rgb(0xe4, 0xe2, 0xdd),
-            metal: Color32::from_rgb(0x9c, 0xa2, 0xab),
-            fixture: Color32::from_rgb(0x3a, 0x3d, 0x44),
-            lens: Color32::from_rgb(0xff, 0xd8, 0x80),
-            curtain: Color32::from_rgb(0x8b, 0x1a, 0x1a),
-            masking: Color32::from_rgb(0x26, 0x26, 0x28),
-            deck: Color32::from_rgb(0x44, 0x41, 0x3e),
-            cut: Color32::from_rgb(0xc8, 0x4b, 0x3a),
-            hatch: Color32::from_rgb(0xf3, 0xc2, 0xb8),
-            grid_minor: Color32::from_rgba_unmultiplied(0xa8, 0xad, 0xb6, 55),
-            grid_major: Color32::from_rgba_unmultiplied(0x88, 0x8d, 0x96, 120),
-            selected: p.selected,
-        }
-    }
+    theme::tokens(dark).scene
 }
 
 fn lin(c: Color32) -> [f32; 4] {
@@ -369,42 +315,72 @@ fn navigate(ui: &Ui, resp: &egui::Response, cam: &mut Camera3d) {
     }
 }
 
-/// View buttons and the caption in the corner of the 3D view.
+/// The view strip in the top left corner (standard views, projection, section, fit), the
+/// caption beside it and the axis triad in the bottom left.
 fn overlay(ui: &mut Ui, s: &mut Studio, rect: egui::Rect) {
-    let bar = egui::Rect::from_min_size(rect.min + egui::vec2(8.0, 8.0), egui::vec2(rect.width() - 16.0, 60.0));
-    let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
+    let c = theme::of(ui);
+    let bar = egui::Rect::from_min_size(rect.min + egui::vec2(8.0, 8.0), egui::vec2(rect.width() - 16.0, 50.0));
+    let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true);
     let mut child = ui.new_child(UiBuilder::new().max_rect(bar).layout(layout));
-    for v in [StdView::Top, StdView::Front, StdView::Side, StdView::Iso] {
-        let label = t(v.key());
-        let r = child.small_button(label);
-        widgets::name(&r, Role::Button, tf("a11y.view3d", &[("view", &label)]));
-        if r.clicked() {
-            let _ = s.run("ui.camera", json!({ "view": v }));
-        }
+    child.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+    let cam = s.ui.view3d.camera;
+    let views = [StdView::Top, StdView::Front, StdView::Side, StdView::Iso];
+    let current = views.iter().position(|v| {
+        let (yaw, pitch) = v.angles();
+        (cam.yaw - yaw).rem_euclid(360.0).min((yaw - cam.yaw).rem_euclid(360.0)) < 0.5
+            && (cam.pitch - pitch).abs() < 0.5
+    });
+    let items: Vec<(String, String, bool)> = views
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let label = t(v.key()).to_owned();
+            (label.clone(), tf("a11y.view3d", &[("view", &label)]), current == Some(i))
+        })
+        .collect();
+    if let Some(i) = widgets::segmented(&mut child, &c, &items) {
+        let _ = s.run("ui.camera", json!({ "view": views[i] }));
     }
-    let ortho = s.ui.view3d.camera.projection == Projection::Orthographic;
-    let r = child.selectable_label(ortho, t("view3d.ortho_short"));
-    widgets::name(&r, Role::Button, t("view3d.orthographic"));
-    if r.clicked() {
+    let ortho = cam.projection == Projection::Orthographic;
+    let items = [
+        (t("view3d.perspective").to_owned(), t("view3d.perspective").to_owned(), !ortho),
+        (t("view3d.ortho_short").to_owned(), t("view3d.orthographic").to_owned(), ortho),
+    ];
+    if let Some(i) = widgets::segmented(&mut child, &c, &items)
+        && (i == 1) != ortho
+    {
         let p = if ortho { Projection::Perspective } else { Projection::Orthographic };
         let _ = s.run("ui.camera", json!({ "projection": p }));
     }
-    let r = child.small_button(t("view3d.fit"));
-    widgets::name(&r, Role::Button, t("menu.zoom_fit"));
+    section_controls(&mut child, s);
+    let r = crate::chrome::icon(&mut child, t("menu.zoom_fit"), "fit", 22.0, 14.0, false, t("menu.zoom_fit"));
     if r.clicked() {
         s.ui.view3d.fit(None);
         s.ui.view3d.follow = true;
     }
-    child.separator();
-    section_controls(&mut child, s);
-    let caption = s.ui.view3d.caption();
-    ui.painter().text(
-        rect.left_bottom() + egui::vec2(10.0, -10.0),
-        Align2::LEFT_BOTTOM,
-        caption,
-        theme::proportional(12.0),
-        ui.visuals().weak_text_color(),
-    );
+    triad(ui, &s.ui.view3d.camera, rect, &c);
+}
+
+/// x, y and z as the camera sees them, in the bottom left corner.
+fn triad(ui: &Ui, cam: &Camera3d, rect: egui::Rect, c: &theme::Tokens) {
+    let o = egui::pos2(rect.left() + 38.0, rect.bottom() - 38.0);
+    let (right, up) = cam.right_up();
+    let back = cam.back();
+    let p = ui.painter();
+    let mut axes: Vec<(f64, egui::Vec2, &str, egui::Color32)> = [DVec3::X, DVec3::Y, DVec3::Z]
+        .iter()
+        .zip(["X", "Y", "Z"])
+        .zip(c.axes)
+        .map(|((a, n), col)| (a.dot(back), egui::vec2(a.dot(right) as f32, -a.dot(up) as f32) * 24.0, n, col))
+        .collect();
+    // Far axes first, so the near ones are on top.
+    axes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    p.circle_filled(o, 2.5, c.plan.ink);
+    for (_, d, name, col) in axes {
+        p.line_segment([o, o + d], egui::Stroke::new(2.0, col));
+        let at = o + d + d.normalized() * 8.0;
+        p.text(at, Align2::CENTER_CENTER, name, theme::proportional(10.5), col);
+    }
 }
 
 fn section_controls(ui: &mut Ui, s: &mut Studio) {
@@ -424,25 +400,31 @@ fn section_controls(ui: &mut Ui, s: &mut Studio) {
             }
         }
     };
-    ui.label(RichText::new(t("view3d.section")).weak());
-    for (mode, key) in [
+    let c = theme::of(ui);
+    let modes = [
         ("off", "view3d.section_off"),
         ("x", "view3d.axis_x"),
         ("y", "view3d.axis_y"),
         ("z", "view3d.axis_z"),
         ("box", "view3d.section_box"),
-    ] {
-        let label = t(key);
-        let r = ui.selectable_label(current == mode, label);
-        widgets::name(&r, Role::Button, tf("a11y.section", &[("mode", &label)]));
-        if r.clicked() && current != mode {
-            let args = match mode {
-                "off" => json!({ "off": true }),
-                "box" => json!({ "box": {} }),
-                axis => json!({ "axis": axis }),
-            };
-            let _ = s.run("ui.section", args);
-        }
+    ];
+    ui.label(RichText::new(t("view3d.section")).color(c.plan.ink));
+    let items: Vec<(String, String, bool)> = modes
+        .iter()
+        .map(|(mode, key)| {
+            let label = t(key).to_owned();
+            (label.clone(), tf("a11y.section", &[("mode", &label)]), current == *mode)
+        })
+        .collect();
+    if let Some(i) = widgets::segmented(ui, &c, &items)
+        && current != modes[i].0
+    {
+        let args = match modes[i].0 {
+            "off" => json!({ "off": true }),
+            "box" => json!({ "box": {} }),
+            axis => json!({ "axis": axis }),
+        };
+        let _ = s.run("ui.section", args);
     }
     // The offset of an axis plane, in mm along its axis.
     if let Section::Plane { plane } = s.ui.view3d.section

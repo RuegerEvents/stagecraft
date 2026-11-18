@@ -10,6 +10,8 @@
 
 pub mod app;
 pub mod canvas;
+pub mod chrome;
+pub mod cmdline;
 pub mod commands;
 pub mod demo;
 pub mod dialogs;
@@ -29,6 +31,7 @@ pub mod state;
 pub mod table;
 pub mod theme;
 pub mod tools;
+pub mod toolsets;
 pub mod tutorial;
 pub mod view3d;
 pub mod widgets;

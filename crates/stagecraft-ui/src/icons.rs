@@ -41,6 +41,40 @@ static ICONS: &[(&str, &[u8])] = icons![
     "support" => "stage/support.svg",
     "hoist" => "stage/hoist.svg",
     "ceiling" => "stage/ceiling.svg",
+    "c-horizontal" => "stage/c-horizontal.svg",
+    "c-vertical" => "stage/c-vertical.svg",
+    "c-parallel" => "stage/c-parallel.svg",
+    "c-perpendicular" => "stage/c-perpendicular.svg",
+    "c-equal" => "stage/c-equal.svg",
+    "c-symmetric" => "stage/c-symmetric.svg",
+    "lock" => "lucide/lock.svg",
+    "file-plus" => "lucide/file-plus.svg",
+    "folder-open" => "lucide/folder-open.svg",
+    "save" => "lucide/save.svg",
+    "file-input" => "lucide/file-input.svg",
+    "printer" => "lucide/printer.svg",
+    "file-output" => "lucide/file-output.svg",
+    "graduation-cap" => "lucide/graduation-cap.svg",
+    "ellipsis" => "lucide/ellipsis.svg",
+    "sheet" => "lucide/file-text.svg",
+    "plus" => "lucide/plus.svg",
+    "sun-moon" => "lucide/sun-moon.svg",
+    "spline" => "lucide/spline.svg",
+    "waypoints" => "lucide/waypoints.svg",
+    "magnet" => "lucide/magnet.svg",
+    "grid" => "lucide/grid-3x3.svg",
+    "layers" => "lucide/layers.svg",
+    "tags" => "lucide/tags.svg",
+    "library" => "lucide/library.svg",
+    "cloud-download" => "lucide/cloud-download.svg",
+    "sliders" => "lucide/sliders-horizontal.svg",
+    "table" => "lucide/table.svg",
+    "menu" => "lucide/menu.svg",
+    "chevron-down" => "lucide/chevron-down.svg",
+    "chevron-right" => "lucide/chevron-right.svg",
+    "box" => "lucide/box.svg",
+    "eye" => "lucide/eye.svg",
+    "eye-off" => "lucide/eye-off.svg",
 ];
 
 fn set() -> &'static SvgIconSet {
@@ -99,19 +133,37 @@ pub fn rasterise(name: &str, px: u32) -> Option<ColorImage> {
 
 /// Paint icon `name` centred in `rect` at `size` points, tinted `colour`.
 pub fn paint(ui: &Ui, rect: Rect, name: &'static str, size: f32, colour: Color32) {
-    let px = (size * ui.ctx().pixels_per_point()).round().max(1.0) as u32;
+    paint_with(ui.painter(), ui.ctx(), rect, name, size, colour);
+}
+
+/// [`paint`] with any painter (another layer, a clip rect).
+pub fn paint_with(
+    painter: &egui::Painter,
+    ctx: &egui::Context,
+    rect: Rect,
+    name: &'static str,
+    size: f32,
+    colour: Color32,
+) {
+    let px = (size * ctx.pixels_per_point()).round().max(1.0) as u32;
     let id = egui::Id::unique(("stagecraft_icon", name, px));
-    let tex = ui.ctx().data(|d| d.get_temp::<TextureHandle>(id)).or_else(|| {
+    let tex = ctx.data(|d| d.get_temp::<TextureHandle>(id)).or_else(|| {
         let img = rasterise(name, px)?;
-        let tex = ui.ctx().load_texture(format!("icon-{name}-{px}"), img, TextureOptions::LINEAR);
-        ui.ctx().data_mut(|d| d.insert_temp(id, tex.clone()));
+        let tex = ctx.load_texture(format!("icon-{name}-{px}"), img, TextureOptions::LINEAR);
+        ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
         Some(tex)
     });
     if let Some(tex) = tex {
         let r = Rect::from_center_size(rect.center(), egui::vec2(size, size));
         let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-        ui.painter().image(tex.id(), r, uv, colour);
+        painter.image(tex.id(), r, uv, colour);
     }
+}
+
+/// Allocate room for icon `name` in the layout and paint it there.
+pub fn paint_inline(ui: &mut Ui, name: &'static str, size: f32, colour: Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    paint(ui, rect, name, size, colour);
 }
 
 #[cfg(test)]

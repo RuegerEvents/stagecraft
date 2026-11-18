@@ -415,6 +415,12 @@ pub fn relation(s: &Sketch, items: &[SketchItem], r: Relation) -> Option<Vec<Val
     (!out.is_empty()).then_some(out)
 }
 
+/// Whether a relation applies to what is picked now.
+pub fn relation_available(s: &Studio, r: Relation) -> bool {
+    let Some((layer, items)) = live_picks(s.engine.doc(), &s.ui.sketch) else { return false };
+    s.engine.doc().sketches.get(&layer).is_some_and(|sketch| relation(sketch, &items, r).is_some())
+}
+
 /// Add a relation to the picked items in one undo step.
 pub fn apply_relation(s: &mut Studio, r: Relation) {
     let Some((layer, items)) = live_picks(s.engine.doc(), &s.ui.sketch) else { return };
@@ -439,7 +445,7 @@ fn picked_fields(ui: &mut Ui, s: &mut Studio) {
     let Some(sketch) = s.engine.doc().sketches.get(&layer).cloned() else { return };
     let n_points = items.iter().filter(|i| matches!(i, SketchItem::Point(_))).count();
     let n_edges = items.len() - n_points;
-    ui.label(RichText::new(tf("sketch.picked", &[("points", &n_points), ("edges", &n_edges)])).strong());
+    crate::widgets::section(ui, tf("sketch.picked", &[("points", &n_points), ("edges", &n_edges)]));
     ui.horizontal_wrapped(|ui| {
         for r in Relation::ALL {
             let ok = relation(&sketch, &items, r).is_some();
@@ -751,7 +757,7 @@ pub fn inspector(ui: &mut Ui, s: &mut Studio) {
     let Some(layer) = layer else { return };
     let Some(sketch) = doc.sketches.get(&layer).cloned() else { return };
     let name = doc.layers[&layer].name.clone();
-    ui.label(RichText::new(tf("sketch.title", &[("layer", &name)])).strong());
+    crate::widgets::section(ui, tf("sketch.title", &[("layer", &name)]));
     let st = s.ui.sketch.status(layer, &sketch, false).cloned();
     let Some(st) = st else {
         ui.label(RichText::new(t("sketch.no_status")).weak());
@@ -759,7 +765,7 @@ pub fn inspector(ui: &mut Ui, s: &mut Studio) {
     };
     let (text, colour) = if !st.conflicting.is_empty() {
         let key = if st.conflicting.len() == 1 { "sketch.conflicts_one" } else { "sketch.conflicts" };
-        (tf(key, &[("n", &st.conflicting.len())]), theme::WARNING)
+        (tf(key, &[("n", &st.conflicting.len())]), theme::of(ui).warning)
     } else if st.dof == 0 {
         (t("sketch.fully_constrained").to_owned(), theme::palette(ui.visuals().dark_mode).constrained)
     } else if st.dof == 1 {
@@ -781,7 +787,7 @@ pub fn inspector(ui: &mut Ui, s: &mut Studio) {
         .weak(),
     );
     for id in &st.conflicting {
-        ui.label(RichText::new(sk::describe(&sketch, *id)).color(theme::WARNING));
+        ui.label(RichText::new(sk::describe(&sketch, *id)).color(theme::of(ui).warning));
     }
     if !st.redundant.is_empty() {
         let key = if st.redundant.len() == 1 { "sketch.redundant_one" } else { "sketch.redundant" };
@@ -819,13 +825,13 @@ fn dimension_fields(ui: &mut Ui, s: &mut Studio, src: DimSource) {
         }
     };
     let title = if driving == Some(true) { t("sketch.driving_dimension") } else { t("sketch.reference_dimension") };
-    ui.label(RichText::new(title).strong());
-    egui::Grid::new("inspector_dimension").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        ui.label(t("sketch.value"));
+    crate::widgets::section(ui, title);
+    egui::Grid::new("inspector_dimension").num_columns(2).spacing([6.0, 3.0]).show(ui, |ui| {
+        crate::widgets::prop_label(ui, t("sketch.value"));
         let shown = dims::format_value(value, angle);
         if driving == Some(true) {
             let id = egui::Id::unique(("inspector", "dimension_value"));
-            if let Some(v) = widgets::edit_field(ui, id, &shown, 90.0, "Inspector Dimension value") {
+            if let Some(v) = widgets::edit_field(ui, id, &shown, f32::INFINITY, "Inspector Dimension value") {
                 let parsed = if angle { crate::tools::parse_angle(&v) } else { crate::tools::parse_length(&v) };
                 match parsed {
                     Some(mm) => {
@@ -841,7 +847,7 @@ fn dimension_fields(ui: &mut Ui, s: &mut Studio, src: DimSource) {
         }
         ui.end_row();
         if let Some(d) = driving {
-            ui.label(t("sketch.driving"));
+            crate::widgets::prop_label(ui, t("sketch.driving"));
             let mut on = d;
             let r = ui.checkbox(&mut on, "");
             widgets::name(&r, egui::Role::CheckBox, "Inspector Driving");
@@ -852,9 +858,11 @@ fn dimension_fields(ui: &mut Ui, s: &mut Studio, src: DimSource) {
             }
             ui.end_row();
         }
-        ui.label(t("sketch.name"));
+        crate::widgets::prop_label(ui, t("sketch.name"));
         let id = egui::Id::unique(("inspector", "dimension_name"));
-        if let Some(v) = widgets::edit_field(ui, id, name.as_deref().unwrap_or(""), 140.0, "Inspector Dimension name") {
+        if let Some(v) =
+            widgets::edit_field(ui, id, name.as_deref().unwrap_or(""), f32::INFINITY, "Inspector Dimension name")
+        {
             let mut args = dim_args(src);
             args["name"] = json!(v);
             let _ = s.run("dimension.name", args);
@@ -877,7 +885,7 @@ pub fn link_row(ui: &mut Ui, s: &mut Studio, ids: &[Id]) {
     let linked: Vec<Id> =
         ids.iter().copied().filter(|id| doc.objects.get(id).is_some_and(|o| o.sketch.is_some())).collect();
     let free: Vec<Id> = ids.iter().copied().filter(|id| !linked.contains(id)).collect();
-    ui.label(t("sketch.geometry"));
+    crate::widgets::prop_label(ui, t("sketch.geometry"));
     ui.horizontal(|ui| {
         if !linked.is_empty() {
             ui.label(RichText::new(t("sketch.follows")).weak());

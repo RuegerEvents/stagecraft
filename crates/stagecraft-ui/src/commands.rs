@@ -402,6 +402,9 @@ struct ViewArgs {
 
 fn set_view(c: &mut UiCtx, a: ViewArgs) -> CmdResult {
     c.ui.view = a.view;
+    if a.view != View::Sheets {
+        c.ui.model_view = a.view;
+    }
     Ok(json!({ "view": a.view }))
 }
 
@@ -927,6 +930,9 @@ fn set_snap(c: &mut UiCtx, a: SnapArgs) -> CmdResult {
     let s = &mut c.ui.snap;
     if let Some(g) = a.grid {
         s.grid = (g > 0.0).then_some(g);
+        if g > 0.0 {
+            c.ui.grid_step = g;
+        }
     }
     if let Some(v) = a.endpoints {
         s.endpoints = v;

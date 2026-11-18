@@ -13,7 +13,7 @@ use stagecraft_core::{CmdError, Engine};
 use crate::commands::{UiCtx, UiExtension, check_shot_path, ui_registry};
 use crate::i18n::{t, tf};
 use crate::state::{FileRequest, PendingShot, Tool, UiState, View};
-use crate::{canvas, palette, panels, theme, view3d};
+use crate::{canvas, chrome, palette, panels, theme, view3d};
 
 pub struct Studio {
     pub engine: Engine,
@@ -101,15 +101,24 @@ impl Studio {
         }
     }
 
-    /// The window title: file name and a dot for unsaved changes.
-    pub fn title(&self) -> String {
-        let name = self
-            .engine
+    /// The document's file name, or "Untitled".
+    fn file_name(&self) -> String {
+        self.engine
             .path()
             .and_then(|p| p.file_name())
-            .map_or_else(|| t("app.untitled").to_owned(), |n| n.to_string_lossy().into_owned());
+            .map_or_else(|| t("app.untitled").to_owned(), |n| n.to_string_lossy().into_owned())
+    }
+
+    /// The OS window title: file name and a dot for unsaved changes.
+    pub fn title(&self) -> String {
         let dirty = if self.engine.dirty() { " •" } else { "" };
-        format!("{name}{dirty} — StageCraft")
+        format!("{}{dirty} — StageCraft", self.file_name())
+    }
+
+    /// The title the window's own title row shows (macOS inset title bar).
+    pub fn window_title(&self) -> String {
+        let dirty = if self.engine.dirty() { " •" } else { "" };
+        format!("StageCraft — {}{dirty}", self.file_name())
     }
 
     /// The whole window.
@@ -131,19 +140,27 @@ impl Studio {
         if !self.ui.native_menu {
             egui::Panel::top("menu").show(ui, |ui| crate::menu::show_in_window(ui, self));
         }
-        let c = theme::chrome(ui.visuals().dark_mode);
+        let none = egui::Frame::NONE;
+        if self.ui.inset_title_bar {
+            let bar = theme::of(ui).bar;
+            egui::Panel::top("title")
+                .exact_size(chrome::TITLE_BAR)
+                .frame(none.fill(bar))
+                .show(ui, |ui| chrome::title_row(ui, self));
+        }
+        let bar = theme::of(ui).bar;
         egui::Panel::top("toolbar")
-            .exact_size(panels::BAR_HEIGHT)
-            .frame(egui::Frame::new().fill(c.bar).stroke(egui::Stroke::new(1.0, c.separator)))
-            .show(ui, |ui| panels::toolbar(ui, self));
+            .exact_size(chrome::TOOL_BAR)
+            .frame(none.fill(bar))
+            .show(ui, |ui| chrome::toolbar(ui, self));
         egui::Panel::top("options")
-            .exact_size(30.0)
-            .frame(egui::Frame::new().fill(c.panel).inner_margin(egui::Margin::symmetric(6, 0)))
-            .show(ui, |ui| panels::options_bar(ui, self));
+            .exact_size(chrome::OPTIONS_BAR)
+            .frame(none)
+            .show(ui, |ui| chrome::options_row(ui, self));
         egui::Panel::bottom("status")
-            .exact_size(24.0)
-            .frame(egui::Frame::new().fill(c.status).inner_margin(egui::Margin::symmetric(10, 0)))
-            .show(ui, |ui| panels::status_bar(ui, self));
+            .exact_size(chrome::STATUS_BAR)
+            .frame(none)
+            .show(ui, |ui| chrome::status_bar(ui, self));
         egui::CentralPanel::no_frame().show(ui, |ui| crate::dock::show(ui, self));
         palette::show(ui.ctx(), self);
         crate::tutorial::paint(ui.ctx(), self);

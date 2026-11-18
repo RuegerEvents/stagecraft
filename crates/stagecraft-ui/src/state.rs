@@ -203,6 +203,8 @@ pub enum PanelKind {
     Table,
     /// The guided tour "Build a basic stage".
     Tutorial,
+    /// The tool palette.
+    Tools,
 }
 
 /// The plan camera: world mm at the centre of the canvas and pixels per mm.
@@ -437,6 +439,14 @@ pub struct UiState {
     pub sketch: crate::sketch_ui::SketchUi,
     /// The guided tour.
     pub tutorial: crate::tutorial::Tutorial,
+    /// The floating command line at the bottom of the canvas.
+    pub cmdline: crate::cmdline::CmdLine,
+    /// Tool palette sections the user folded (catalog keys).
+    pub collapsed_sections: BTreeSet<String>,
+    /// The view the Model tab goes back to from the Sheets mode.
+    pub model_view: View,
+    /// The grid the status bar's grid toggle turns back on, mm.
+    pub grid_step: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -492,6 +502,10 @@ impl Default for UiState {
             quit_confirmed: false,
             sketch: Default::default(),
             tutorial: Default::default(),
+            cmdline: Default::default(),
+            collapsed_sections: BTreeSet::new(),
+            model_view: View::Plan,
+            grid_step: 100.0,
         }
     }
 }
