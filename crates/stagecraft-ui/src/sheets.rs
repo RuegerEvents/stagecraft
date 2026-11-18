@@ -742,7 +742,7 @@ fn tag_line_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 .class
                 .as_deref()
                 .map_or_else(|| t("sheets.tag_default").to_owned(), |c| t(&format!("sheets.class.{c}")).to_owned());
-            let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("tag_class", salt, tag.id))
+            let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("tag_class", salt, tag.id))
                 .selected_text(text)
                 .show_ui(ui, |ui| {
                     if ui.selectable_label(cur.class.is_none(), t("sheets.tag_default")).clicked() {
@@ -759,7 +759,7 @@ fn tag_line_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 });
             widgets::name(&r.response, egui::Role::ComboBox, format!("Tag class {}", tag.name));
             let text = cur.weight.map_or_else(|| t("sheets.tag_default").to_owned(), |w| format!("{w} mm"));
-            let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("tag_pen", salt, tag.id))
+            let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("tag_pen", salt, tag.id))
                 .selected_text(text)
                 .show_ui(ui, |ui| {
                     if ui.selectable_label(cur.weight.is_none(), t("sheets.tag_default")).clicked() {
@@ -809,7 +809,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
         ui.end_row();
 
         crate::widgets::prop_label(ui, t("sheets.view"));
-        let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("vp_view", salt))
+        let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("vp_view", salt))
             .selected_text(view_label(&vp.view))
             .show_ui(ui, |ui| {
                 for name in [
@@ -868,7 +868,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
 
         if vp.view != ViewKind::FixtureList {
             crate::widgets::prop_label(ui, t("sheets.scale"));
-            let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("vp_scale", salt))
+            let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("vp_scale", salt))
                 .selected_text(format!("1:{}", vp.scale))
                 .show_ui(ui, |ui| {
                     for sc in SCALES {
@@ -900,7 +900,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 .label_template
                 .and_then(|l| doc.label_templates.get(&l))
                 .map_or(t("sheets.no_labels").to_owned(), |l| l.name.clone());
-            let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("vp_labels", salt))
+            let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("vp_labels", salt))
                 .selected_text(cur)
                 .show_ui(ui, |ui| {
                     if ui.selectable_label(vp.label_template.is_none(), t("sheets.no_labels")).clicked() {
@@ -1014,7 +1014,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 for class in ["thin", "medium", "thick", "hidden", "centre", "cut"] {
                     crate::widgets::prop_label(ui, t(&format!("sheets.class.{class}")));
                     let cur = stagecraft_sheet::compose::weight(vp, class);
-                    let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("pen", salt, class))
+                    let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("pen", salt, class))
                         .selected_text(format!("{cur} mm"))
                         .show_ui(ui, |ui| {
                             for p in PENS {
@@ -1076,7 +1076,7 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
         }
         ui.end_row();
         crate::widgets::prop_label(ui, t("sheets.paper"));
-        let r = crate::widgets::combo_w(ui.available_width() - 12.0, "sheet_paper")
+        let r = crate::widgets::combo_w(ui.available_width() - 8.0, "sheet_paper")
             .selected_text(sh.paper.name())
             .show_ui(ui, |ui| {
                 for (p, name) in
@@ -1102,7 +1102,7 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
         crate::widgets::prop_label(ui, t("sheets.title_block"));
         let current = TitleBlock::for_sheet(doc, &sh);
         let cur = if !sh.show_title_block { t("sheets.none_block").to_owned() } else { current.name.clone() };
-        let r = crate::widgets::combo_w(ui.available_width() - 12.0, "sheet_tb").selected_text(cur).show_ui(ui, |ui| {
+        let r = crate::widgets::combo_w(ui.available_width() - 8.0, "sheet_tb").selected_text(cur).show_ui(ui, |ui| {
             for (tb, arg) in TitleBlock::builtins().into_iter().zip(["compact", "generic"]) {
                 if ui.selectable_label(sh.show_title_block && current.id == tb.id, &tb.name).clicked() {
                     up(s, json!({ "title_block": arg }));
@@ -1191,7 +1191,7 @@ pub fn meta_value(field: &str, v: String) -> String {
 pub fn sheet_text_rows(ui: &mut Ui, s: &mut Studio, who: &str) {
     let meta = s.engine.doc().meta.clone();
     crate::widgets::prop_label(ui, t("meta.sheet_language"));
-    let r = crate::widgets::combo_w(ui.available_width() - 12.0, (who, "sheet_language"))
+    let r = crate::widgets::combo_w(ui.available_width() - 8.0, (who, "sheet_language"))
         .selected_text(meta.sheet_language.name())
         .show_ui(ui, |ui| {
             for l in Language::ALL {
@@ -1204,7 +1204,7 @@ pub fn sheet_text_rows(ui: &mut Ui, s: &mut Studio, who: &str) {
     ui.end_row();
     crate::widgets::prop_label(ui, t("meta.dimension_format"));
     let key = |f: DimFormat| format!("meta.dim.{}", f.code());
-    let r = crate::widgets::combo_w(ui.available_width() - 12.0, (who, "dimension_format"))
+    let r = crate::widgets::combo_w(ui.available_width() - 8.0, (who, "dimension_format"))
         .selected_text(t(&key(meta.dimension_format)))
         .show_ui(ui, |ui| {
             for f in DimFormat::ALL {
@@ -1219,7 +1219,7 @@ pub fn sheet_text_rows(ui: &mut Ui, s: &mut Studio, who: &str) {
     let options =
         [(None, "auto", "meta.sep.auto"), (Some('.'), ".", "meta.sep.point"), (Some(','), ",", "meta.sep.comma")];
     let shown = options.iter().find(|o| o.0 == meta.decimal_separator).map_or("meta.sep.auto", |o| o.2);
-    let r = crate::widgets::combo_w(ui.available_width() - 12.0, (who, "decimal_separator"))
+    let r = crate::widgets::combo_w(ui.available_width() - 8.0, (who, "decimal_separator"))
         .selected_text(t(shown))
         .show_ui(ui, |ui| {
             for (v, arg, label) in options {
@@ -1263,7 +1263,7 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
         return;
     };
     let lt = doc.label_templates[&cur].clone();
-    let r = crate::widgets::combo_w(ui.available_width() - 12.0, "lt_pick").selected_text(&lt.name).show_ui(ui, |ui| {
+    let r = crate::widgets::combo_w(ui.available_width() - 8.0, "lt_pick").selected_text(&lt.name).show_ui(ui, |ui| {
         for x in doc.label_templates.values() {
             if ui.selectable_label(x.id == cur, &x.name).clicked() {
                 s.ui.sheets.template = Some(x.id);
@@ -1311,7 +1311,7 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
         crate::widgets::prop_label(ui, "");
         ui.end_row();
         for (i, f) in fields.iter_mut().enumerate() {
-            let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("lt_field", cur, i))
+            let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("lt_field", cur, i))
                 .width(70.0)
                 .selected_text(&f.field)
                 .show_ui(ui, |ui| {

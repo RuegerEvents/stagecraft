@@ -95,7 +95,7 @@ pub fn rule(ui: &mut Ui) {
 
 /// A drop-down `width` wide, with a chevron.
 pub fn combo_w(width: f32, id: impl std::hash::Hash + std::fmt::Debug) -> egui::ComboBox<'static> {
-    egui::ComboBox::from_id_salt(id).width(width.max(60.0)).icon(|ui, rect, visuals, _open| {
+    egui::ComboBox::from_id_salt(id).width(width.max(60.0)).truncate().icon(|ui, rect, visuals, _open| {
         let r = egui::Rect::from_center_size(rect.center(), egui::vec2(12.0, 12.0));
         crate::icons::paint(ui, r, "chevron-down", 12.0, visuals.fg_stroke.color);
     })

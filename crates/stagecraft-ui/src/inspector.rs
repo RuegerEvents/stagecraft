@@ -91,7 +91,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         let layer = common(objs.iter().map(|o| o.layer));
         let shown =
             layer.and_then(|l| doc.layers.get(&l)).map_or_else(|| t("inspector.mixed").to_owned(), |l| l.name.clone());
-        let r = crate::widgets::combo_w(ui.available_width() - 12.0, "inspector_layer").selected_text(shown).show_ui(
+        let r = crate::widgets::combo_w(ui.available_width() - 8.0, "inspector_layer").selected_text(shown).show_ui(
             ui,
             |ui| {
                 for l in doc.layers_sorted() {
@@ -267,7 +267,7 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             }));
             crate::widgets::prop_label(ui, t("inspector.profile"));
             let shown = profile.clone().unwrap_or_else(|| t("inspector.mixed").to_owned());
-            let r = crate::widgets::combo_w(ui.available_width() - 12.0, "inspector_profile")
+            let r = crate::widgets::combo_w(ui.available_width() - 8.0, "inspector_profile")
                 .selected_text(shown)
                 .show_ui(ui, |ui| {
                     for p in stagecraft_geom::truss_profiles() {
@@ -429,7 +429,7 @@ fn choice(
         .as_ref()
         .and_then(|c| options.iter().find(|(v, _)| v == c).map(|o| o.1.clone()))
         .unwrap_or_else(|| t("inspector.mixed").to_owned());
-    let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("inspector_choice", salt))
+    let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("inspector_choice", salt))
         .selected_text(shown)
         .show_ui(ui, |ui| {
             for (v, label) in options {

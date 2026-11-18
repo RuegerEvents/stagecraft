@@ -376,7 +376,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                     (!s.ui.options.fixture_mode.is_empty()).then_some(s.ui.options.fixture_mode.as_str()),
                 );
                 let shown = cur.map(|m| format!("{} · {} ch", m.name, m.footprint_text())).unwrap_or_default();
-                let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("library_mode", &ft.key))
+                let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("library_mode", &ft.key))
                     .selected_text(shown)
                     .show_ui(ui, |ui| {
                         for m in &ft.modes {
@@ -391,7 +391,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                 crate::widgets::prop_label(ui, t("library.symbol"));
                 let auto = if ft.has_plan_svg { t("library.symbol_gdtf") } else { t("library.symbol_silhouette") };
                 let shown = ft.symbol.clone().map_or_else(|| auto.to_owned(), |n| t(&format!("symbol.{n}")).to_owned());
-                let r = crate::widgets::combo_w(ui.available_width() - 12.0, ("library_symbol", &ft.key))
+                let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("library_symbol", &ft.key))
                     .selected_text(shown)
                     .show_ui(ui, |ui| {
                         if ui.selectable_label(ft.symbol.is_none(), auto).clicked() {
