@@ -27,6 +27,9 @@ fn harness(theme: ThemePref) -> Harness<'static, Studio> {
 fn harness_with(theme: ThemePref, engine: stagecraft_core::Engine) -> Harness<'static, Studio> {
     let mut studio = Studio::new(engine);
     studio.ui.theme = theme;
+    // As on macOS: the menus are the system's, the tool bar is the title bar.
+    studio.ui.native_menu = true;
+    studio.ui.inset_title_bar = true;
     let (renderer, off) = renderer();
     studio.offscreen = Some(off);
     let mut h = Harness::builder()
@@ -42,7 +45,30 @@ fn harness_with(theme: ThemePref, engine: stagecraft_core::Engine) -> Harness<'s
 
 fn save(h: &mut Harness<'static, Studio>, dir: &str, name: &str) {
     h.run();
-    h.render().expect("render").save(format!("{dir}/{name}.png")).expect("save");
+    let mut img = h.render().expect("render");
+    window_buttons(&mut img);
+    img.save(format!("{dir}/{name}.png")).expect("save");
+}
+
+/// The macOS window buttons AppKit draws over the inset title bar, so the screens look like
+/// the window (they are not part of egui's frame).
+fn window_buttons(img: &mut image::RgbaImage) {
+    let ppp = img.width() as f32 / 1440.0;
+    for (i, rgb) in [[0xff, 0x5f, 0x57], [0xfe, 0xbc, 0x2e], [0x28, 0xc8, 0x40]].into_iter().enumerate() {
+        let (cx, cy, r) = ((20.0 + 20.0 * i as f32) * ppp, 20.0 * ppp, 6.0 * ppp);
+        for y in (cy - r - 1.0) as u32..=(cy + r + 1.0) as u32 {
+            for x in (cx - r - 1.0) as u32..=(cx + r + 1.0) as u32 {
+                let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+                let a = (r + 0.5 - d).clamp(0.0, 1.0);
+                if a > 0.0 && x < img.width() && y < img.height() {
+                    let p = img.get_pixel_mut(x, y);
+                    for (ch, want) in p.0.iter_mut().zip(rgb) {
+                        *ch = (*ch as f32 * (1.0 - a) + want as f32 * a) as u8;
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]

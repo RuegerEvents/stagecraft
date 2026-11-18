@@ -389,7 +389,11 @@ fn snap_key(k: stagecraft_geom::snap::SnapKind) -> &'static str {
 }
 
 pub fn layers(ui: &mut Ui, s: &mut Studio) {
+    let layers: Vec<Layer> = s.engine.doc().layers_sorted().into_iter().cloned().collect();
+    let active = s.ui.active_layer.or(layers.first().map(|l| l.id));
     ui.horizontal(|ui| {
+        ui.add_space(46.0);
+        ui.label(RichText::new(t("layers.name")).small().weak());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if icon_button(ui, Icon::Plus, "Add layer").on_hover_text(t("layers.add")).clicked() {
                 let n = s.engine.doc().layers.len() + 1;
@@ -401,15 +405,7 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
                 }
                 let _ = s.run("layer.create", json!({ "name": name }));
             }
-        });
-    });
-    let layers: Vec<Layer> = s.engine.doc().layers_sorted().into_iter().cloned().collect();
-    let active = s.ui.active_layer.or(layers.first().map(|l| l.id));
-    ui.horizontal(|ui| {
-        ui.add_space(46.0);
-        ui.label(RichText::new(t("layers.name")).small().weak());
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(64.0);
+            ui.add_space(42.0);
             ui.label(RichText::new(t("layers.elevation")).small().weak());
         });
     });

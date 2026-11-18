@@ -390,9 +390,10 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
 /// The GDTF Share panel: search the cached list, add revisions to the document.
 pub fn share_panel(ui: &mut Ui, s: &mut Studio) {
     let mut search = false;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
+        let w = (ui.available_width() - 70.0).clamp(120.0, 260.0);
         let r = ui.add(
-            egui::TextEdit::singleline(&mut s.ui.library.query).hint_text(t("share.search_hint")).desired_width(150.0),
+            egui::TextEdit::singleline(&mut s.ui.library.query).hint_text(t("share.search_hint")).desired_width(w),
         );
         widgets::name(&r, Role::TextInput, "Search GDTF Share");
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {

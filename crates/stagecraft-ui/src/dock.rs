@@ -147,11 +147,49 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let layout = display(&s.ui.layout, s.ui.view);
     let mut style = DockStyle::from_ui(ui);
     crate::theme::dock_style(&mut style, ui.visuals().dark_mode);
-    let out = DockArea::new(egui::Id::unique(DOCK_ID)).show_content(ui, &layout, &style, &mut Bodies { s });
+    let id = egui::Id::unique(DOCK_ID);
+    let out = DockArea::new(id).show_content(ui, &layout, &style, &mut Bodies { s });
+    underline_active(ui.ctx(), id, &layout);
     if !out.actions.is_empty()
         && let Err(e) = apply(&mut s.ui.layout, out.actions)
     {
         s.ui.error(e);
+    }
+}
+
+/// The active tab of every group gets a 2 pt accent line along its bottom (Style A).
+/// craft-ui fills the active tab; the line is drawn over it, on the tab's own layer.
+fn underline_active(ctx: &egui::Context, id: egui::Id, layout: &Layout<PanelKind>) {
+    fn walk(n: &Node<PanelKind>, out: &mut Vec<PanelKind>) {
+        match n {
+            Node::Tabs { panels, active } if panels.len() > 1 || panels.first() != Some(&PanelKind::Canvas) => {
+                out.extend(panels.get(*active).copied())
+            }
+            Node::Split { first, second, .. } => {
+                walk(first, out);
+                walk(second, out);
+            }
+            Node::Dock { columns, .. } => {
+                for g in columns.iter().filter(|c| !c.iconic).flat_map(|c| &c.groups) {
+                    out.extend(g.active_panel().copied())
+                }
+            }
+            Node::Stack { entries } => out.extend(entries.iter().filter(|e| e.open).map(|e| e.panel)),
+            _ => {}
+        }
+    }
+    let mut active = Vec::new();
+    for n in layout.root.iter().chain(layout.floating.iter().map(|f| &f.root)) {
+        walk(n, &mut active);
+    }
+    for p in active {
+        if let Some(r) = ctx.read_response(id.with(("tab", p))) {
+            let line = egui::Rect::from_min_max(
+                egui::pos2(r.rect.left() + 6.0, r.rect.bottom() - 2.0),
+                r.rect.right_bottom() - egui::vec2(6.0, 0.0),
+            );
+            ctx.layer_painter(r.layer_id).with_clip_rect(r.interact_rect).rect_filled(line, 1.0, crate::theme::ACCENT);
+        }
     }
 }
 
@@ -162,6 +200,13 @@ struct Bodies<'a> {
 impl DockContent<PanelKind> for Bodies<'_> {
     fn body(&mut self, ui: &mut Ui, panel: &PanelKind) {
         let s = &mut *self.s;
+        if *panel != PanelKind::Canvas {
+            let c = crate::theme::chrome(ui.visuals().dark_mode);
+            let r = ui.max_rect();
+            ui.painter().rect_filled(r, 0.0, c.panel);
+            // The tab strip's bottom edge.
+            ui.painter().hline(r.x_range(), r.top() + 0.5, egui::Stroke::new(1.0, c.separator));
+        }
         let scroll = |ui: &mut Ui, s: &mut Studio, f: fn(&mut Ui, &mut Studio)| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
                 egui::ScrollArea::vertical()

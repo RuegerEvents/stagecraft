@@ -146,11 +146,11 @@ pub fn palette(dark: bool) -> Palette {
             axis: Color32::from_rgb(0xb8, 0xbc, 0xc4),
             line: Color32::from_rgb(0x1e, 0x20, 0x24),
             text: Color32::from_rgb(0x1e, 0x20, 0x24),
-            floor: Color32::from_rgb(0xee, 0xec, 0xe6),
+            floor: Color32::from_rgb(0xee, 0xef, 0xf1),
             wall: Color32::from_rgb(0x55, 0x59, 0x60),
             body: Color32::from_rgb(0xf6, 0xf6, 0xf8),
             masking: Color32::from_rgb(0x3c, 0x3e, 0x44),
-            deck: Color32::from_rgb(0xe6, 0xe2, 0xda),
+            deck: Color32::from_rgb(0xe4, 0xe5, 0xe9),
             selected: ACCENT,
             hover: Color32::from_rgb(0x86, 0xb3, 0xfa),
             preview: Color32::from_rgb(0xe0, 0x7a, 0x00),
@@ -261,48 +261,92 @@ pub fn set_preference(ctx: &egui::Context, pref: ThemePref) {
 }
 
 fn style(style: &mut egui::Style, dark: bool) {
+    let c = chrome(dark);
     style.visuals = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
     let v = &mut style.visuals;
-    if dark {
-        v.panel_fill = Color32::from_rgb(0x24, 0x25, 0x29);
-        v.window_fill = Color32::from_rgb(0x2b, 0x2c, 0x31);
-        v.extreme_bg_color = Color32::from_rgb(0x18, 0x19, 0x1c);
-        v.faint_bg_color = Color32::from_rgb(0x2a, 0x2b, 0x30);
-    } else {
-        v.panel_fill = Color32::from_rgb(0xf5, 0xf5, 0xf6);
-        v.window_fill = Color32::from_rgb(0xff, 0xff, 0xff);
-        v.extreme_bg_color = Color32::from_rgb(0xff, 0xff, 0xff);
-        v.faint_bg_color = Color32::from_rgb(0xee, 0xef, 0xf1);
-    }
-    v.selection.bg_fill = if dark { Color32::from_rgb(0x2c, 0x4f, 0x86) } else { Color32::from_rgb(0xcf, 0xe0, 0xfd) };
-    v.selection.stroke = Stroke::new(1.0, if dark { Color32::WHITE } else { Color32::from_rgb(0x10, 0x3a, 0x80) });
+    v.panel_fill = c.panel;
+    v.window_fill = if dark { Color32::from_rgb(0x2a, 0x2b, 0x30) } else { Color32::WHITE };
+    v.window_stroke = Stroke::new(1.0, c.separator);
+    v.extreme_bg_color = c.field;
+    v.text_edit_bg_color = Some(c.field);
+    v.faint_bg_color = if dark { Color32::from_rgb(0x27, 0x28, 0x2c) } else { Color32::from_rgb(0xf0, 0xf0, 0xf2) };
+    v.code_bg_color = c.field;
+    v.selection.bg_fill = if dark { Color32::from_rgb(0x2b, 0x4d, 0x96) } else { Color32::from_rgb(0xcc, 0xdc, 0xff) };
+    v.selection.stroke = Stroke::new(1.0, if dark { Color32::WHITE } else { Color32::from_rgb(0x0f, 0x3a, 0x9a) });
     v.hyperlink_color = ACCENT;
-    let r = egui::CornerRadius::same(4);
+    v.weak_text_color = Some(c.text2);
+    v.override_text_color = None;
     v.window_corner_radius = egui::CornerRadius::same(8);
-    v.menu_corner_radius = egui::CornerRadius::same(6);
-    for w in [
-        &mut v.widgets.noninteractive,
-        &mut v.widgets.inactive,
-        &mut v.widgets.hovered,
-        &mut v.widgets.active,
-        &mut v.widgets.open,
-    ] {
-        w.corner_radius = r;
+    v.menu_corner_radius = egui::CornerRadius::same(8);
+    v.window_shadow = egui::epaint::Shadow {
+        offset: [0, 6],
+        blur: 24,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 110 } else { 40 }),
+    };
+    v.popup_shadow = egui::epaint::Shadow {
+        offset: [0, 4],
+        blur: 14,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 90 } else { 30 }),
+    };
+    craft_ui::theme::WidgetPalette {
+        noninteractive: c.panel,
+        inactive: c.field,
+        hovered: c.hover,
+        active: c.pressed,
+        open: c.hover,
     }
+    .apply_to(&mut v.widgets, egui::CornerRadius::same(6), Stroke::new(1.0, c.text));
+    let border = if dark { Stroke::NONE } else { Stroke::new(1.0, c.separator) };
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, c.separator);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, c.text);
+    v.widgets.inactive.bg_stroke = border;
+    v.widgets.hovered.bg_stroke = if dark { Stroke::NONE } else { Stroke::new(1.0, c.text2.gamma_multiply(0.6)) };
+    v.widgets.active.bg_stroke = Stroke::new(1.0, c.accent);
+    v.widgets.open.bg_stroke = border;
+    for w in [&mut v.widgets.hovered, &mut v.widgets.active] {
+        w.expansion = 0.0;
+    }
+    v.striped = false;
+    v.slider_trailing_fill = true;
+    v.handle_shape = egui::style::HandleShape::Circle;
+    v.interact_cursor = None;
     style.spacing.item_spacing = egui::vec2(6.0, 4.0);
     style.spacing.button_padding = egui::vec2(8.0, 3.0);
-    style.spacing.interact_size.y = 22.0;
+    style.spacing.interact_size = egui::vec2(36.0, 24.0);
+    style.spacing.menu_margin = egui::Margin::same(6);
+    style.spacing.window_margin = egui::Margin::same(10);
+    style.spacing.combo_width = 120.0;
+    style.spacing.icon_width = 14.0;
+    style.spacing.icon_width_inner = 8.0;
+    style.spacing.scroll = egui::style::ScrollStyle::thin();
     style.text_styles = [
         (TextStyle::Small, proportional(11.0)),
-        (TextStyle::Body, proportional(13.0)),
-        (TextStyle::Button, proportional(13.0)),
-        (TextStyle::Heading, bold(15.0)),
-        (TextStyle::Monospace, FontId::new(12.5, FontFamily::Monospace)),
+        (TextStyle::Body, proportional(12.5)),
+        (TextStyle::Button, proportional(12.5)),
+        (TextStyle::Heading, bold(14.0)),
+        (TextStyle::Monospace, FontId::new(12.0, FontFamily::Monospace)),
     ]
     .into();
 }
 
-/// Colours of the docking chrome (tab strips, borders, floating windows).
-pub fn dock_style(style: &mut craft_ui::docking::DockStyle, _dark: bool) {
+/// Colours and sizes of the docking chrome: tab strips in the panel colour, 1 pt hairline
+/// gaps between groups, the active tab underlined in the accent (`dock::underline_active`).
+pub fn dock_style(style: &mut craft_ui::docking::DockStyle, dark: bool) {
+    let c = chrome(dark);
     style.accent = ACCENT;
+    style.tab_height = 30.0;
+    style.gap = 1.0;
+    style.background = c.separator;
+    style.tab_background = c.panel;
+    style.active_background = c.panel;
+    style.text = c.text;
+    style.inactive_text = c.text2;
+    style.border = Stroke::NONE;
+    style.font = bold(12.0);
+    style.floating_background = c.panel;
+    style.floating_stroke = Stroke::new(1.0, c.separator);
+    style.title_height = 26.0;
+    style.column_bar_height = 12.0;
 }
