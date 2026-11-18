@@ -662,7 +662,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                     let (rect, resp) = ui.allocate_exact_size(vec2(c.width(), ROW_H), Sense::click());
                     let label = format!("{} {}", t(c.key()), ri + 1);
                     let text = cell_text(&doc, o, *c);
-                    resp.widget_info(|| egui::WidgetInfo::labeled(Role::Unknown, true, label.clone()));
+                    widgets::name(&resp, Role::Unknown, label.clone());
                     let in_range =
                         sel_range.is_some_and(|(r0, r1, c0, c1)| (r0..=r1).contains(&ri) && (c0..=c1).contains(&ci));
                     let is_cursor = s.ui.table.cursor == Some((id, ci));

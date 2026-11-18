@@ -57,7 +57,12 @@ impl Studio {
         match &out {
             Err(e) if e.code == "conflict" => self.ui.error(tf("status.rejected", &[("message", &e.message)])),
             Err(e) => self.ui.error(e.message.clone()),
-            Ok(_) => self.after(name),
+            Ok(_) => {
+                if name == "sheet.export_pdf" {
+                    self.ui.tutorial.pdf_exported = true;
+                }
+                self.after(name)
+            }
         }
         out
     }
@@ -120,6 +125,8 @@ impl Studio {
             ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
         crate::library::poll(self);
+        crate::tutorial::update(self);
+        crate::tutorial::begin_frame(ui.ctx(), self);
         shortcuts(ui, self);
         if !self.ui.native_menu {
             egui::Panel::top("menu").show(ui, |ui| crate::menu::show_in_window(ui, self));
@@ -139,6 +146,7 @@ impl Studio {
             .show(ui, |ui| panels::status_bar(ui, self));
         egui::CentralPanel::no_frame().show(ui, |ui| crate::dock::show(ui, self));
         palette::show(ui.ctx(), self);
+        crate::tutorial::paint(ui.ctx(), self);
         self.keep_prefs(ui.ctx());
     }
 

@@ -300,6 +300,20 @@ fn symbol_preview(ui: &mut Ui, doc: &Document, key: &str) {
     }
 }
 
+/// The bundled demo GDTFs into the document's library, one undo step.
+fn add_demo_types(s: &mut Studio, files: &[&(&str, &[u8])]) {
+    let steps: Vec<serde_json::Value> = files
+        .iter()
+        .map(|(name, bytes)| {
+            let data = stagecraft_core::sheet::base64_encode(bytes);
+            json!({ "command": "gdtf.import", "args": { "data_base64": data, "file_name": name } })
+        })
+        .collect();
+    if s.run("batch", json!({ "commands": steps })).is_ok() {
+        s.ui.info(tf("library.imported", &[("n", &files.len())]));
+    }
+}
+
 pub fn show(ui: &mut Ui, s: &mut Studio) {
     let doc = s.engine.doc().clone();
     ui.horizontal(|ui| {
@@ -307,6 +321,17 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             if widgets::button(ui, t("library.import"), "Import GDTF").on_hover_text(t("library.import_tip")).clicked()
             {
                 s.ui.file_request = Some(crate::state::FileRequest::ImportGdtf);
+            }
+            let missing: Vec<_> = crate::demo::DEMO_GDTFS
+                .iter()
+                .filter(|(file, _)| !doc.fixture_types.contains_key(file.trim_end_matches(".gdtf")))
+                .collect();
+            if !missing.is_empty()
+                && widgets::button(ui, t("library.demo"), "Demo fixtures")
+                    .on_hover_text(t("library.demo_tip"))
+                    .clicked()
+            {
+                add_demo_types(s, &missing);
             }
         });
     });

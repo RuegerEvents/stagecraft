@@ -29,6 +29,7 @@ pub mod state;
 pub mod table;
 pub mod theme;
 pub mod tools;
+pub mod tutorial;
 pub mod view3d;
 pub mod widgets;
 

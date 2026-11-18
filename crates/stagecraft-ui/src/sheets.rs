@@ -610,6 +610,8 @@ pub fn list_panel(ui: &mut Ui, s: &mut Studio) {
         widgets::name(&r, egui::Role::Button, format!("Sheet {}", sh.number));
         if r.clicked() {
             let _ = s.run("ui.sheet", json!({ "sheet": sh.id }));
+            // The sheet itself in the Inspector (its title block fields), not a viewport.
+            s.ui.sheets.viewport = None;
         }
     }
     let Some(cur) = cur else { return };
@@ -629,7 +631,11 @@ pub fn list_panel(ui: &mut Ui, s: &mut Studio) {
                 let [w, h] = doc.sheets[&cur].size();
                 let scale = if matches!(view, "plan" | "plan_3d" | "front" | "left" | "section_y") { 100 } else { 50 };
                 let label = doc.label_templates.values().next().map(|t| t.id);
-                let mut args = json!({ "sheet": cur, "view": view, "scale": scale, "position": [w * 0.4, h * 0.55] });
+                // New viewports take the next free quarter of the paper (clockwise from top
+                // left, clear of the title block), so a few added in a row do not stack.
+                let slots = [[0.27, 0.66], [0.68, 0.66], [0.27, 0.3], [0.55, 0.3]];
+                let [fx, fy] = slots[doc.sheets[&cur].viewports.len() % slots.len()];
+                let mut args = json!({ "sheet": cur, "view": view, "scale": scale, "position": [w * fx, h * fy] });
                 if matches!(view, "plan" | "plan_3d")
                     && let Some(l) = label
                 {

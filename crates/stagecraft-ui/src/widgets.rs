@@ -5,6 +5,7 @@ use egui::{Response, Role, TextEdit, Ui, WidgetInfo};
 /// Give a response an accessible name.
 pub fn name(resp: &Response, typ: Role, name: impl Into<String>) {
     let name = name.into();
+    crate::tutorial::mark(&resp.ctx, &name, resp.rect);
     resp.widget_info(|| WidgetInfo::labeled(typ, true, name.clone()));
 }
 

@@ -201,6 +201,8 @@ pub enum PanelKind {
     Share,
     Inspector,
     Table,
+    /// The guided tour "Build a basic stage".
+    Tutorial,
 }
 
 /// The plan camera: world mm at the centre of the canvas and pixels per mm.
@@ -433,6 +435,8 @@ pub struct UiState {
     pub quit_confirmed: bool,
     /// Sketch overlay, dimension selection and editing, drag preview.
     pub sketch: crate::sketch_ui::SketchUi,
+    /// The guided tour.
+    pub tutorial: crate::tutorial::Tutorial,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -487,6 +491,7 @@ impl Default for UiState {
             inset_title_bar: false,
             quit_confirmed: false,
             sketch: Default::default(),
+            tutorial: Default::default(),
         }
     }
 }

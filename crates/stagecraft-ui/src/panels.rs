@@ -89,6 +89,7 @@ fn tool_button(ui: &mut Ui, s: &mut Studio, tool: Tool, style: &craft_ui::button
                 })
         })
         .inner;
+    crate::tutorial::mark(ui.ctx(), &a11y, r.rect);
     if r.on_hover_text(tool_tip(tool)).clicked() {
         let _ = s.run("ui.set_tool", json!({ "tool": tool }));
     }

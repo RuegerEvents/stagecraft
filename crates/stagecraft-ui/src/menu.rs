@@ -145,7 +145,11 @@ pub fn bar(s: &Studio) -> MenuBar {
     .role(MenuRole::Window);
     let help = Menu::new(
         t("menu.help"),
-        vec![node(item("app.commands", t("menu.search_commands"))), node(item("app.about", t("menu.about")))],
+        vec![
+            node(with("ui.tutorial", json!({ "action": "start" }), t("menu.tutorial"))),
+            node(item("app.commands", t("menu.search_commands"))),
+            node(item("app.about", t("menu.about"))),
+        ],
     )
     .role(MenuRole::Help);
     let mut bar = MenuBar { menus: vec![file, edit, view, insert, window, help], documents: Vec::new() };

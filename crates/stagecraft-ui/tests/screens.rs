@@ -213,7 +213,25 @@ fn screenshots() {
             let pdf = format!("{dir}/demo-sheets.pdf");
             h.state_mut().run("sheet.export_pdf", json!({ "path": pdf })).expect("export");
         }
+        tutorial_shots(theme, &dir, tn);
     }
+}
+
+/// The tutorial panel on an empty document: the first step pointing at "Add layer", the
+/// floor step pointing at the Top height option, and the end.
+fn tutorial_shots(theme: ThemePref, dir: &str, tn: &str) {
+    let mut h = harness_with(theme, stagecraft_core::Engine::new());
+    h.state_mut().run("ui.tutorial", json!({ "action": "start" })).unwrap();
+    save(&mut h, dir, &format!("41-tutorial-start-{tn}"));
+    for _ in 0..2 {
+        h.state_mut().run("ui.tutorial", json!({ "action": "next" })).unwrap();
+    }
+    h.state_mut().run("ui.set_tool", json!({ "tool": "floor" })).unwrap();
+    save(&mut h, dir, &format!("42-tutorial-floor-{tn}"));
+    for _ in 0..10 {
+        h.state_mut().run("ui.tutorial", json!({ "action": "next" })).unwrap();
+    }
+    save(&mut h, dir, &format!("43-tutorial-end-{tn}"));
 }
 
 /// GDTF Share without a network: three entries, downloads from the demo GDTFs.
@@ -413,20 +431,20 @@ fn sketch_room() {
             h.state_mut().run(name, args).unwrap_or_else(|e| panic!("{name}: {e}"));
             h.run();
         };
-        run(&mut h, "ui.set_view", json!({ "view": "plan" }));
-        run(&mut h, "ui.zoom_to_fit", json!({}));
+        h.state_mut().run("ui.set_view", json!({ "view": "plan" })).unwrap();
+        h.state_mut().run("ui.zoom_to_fit", json!({})).unwrap();
         save(&mut h, &dir, &format!("30-sketch-room-{tn}"));
 
         // The width selected and its value editor open, "14" typed.
-        run(&mut h, "ui.dimension", json!({ "id": "room width", "edit": true }));
+        h.state_mut().run("ui.dimension", json!({ "id": "room width", "edit": true })).unwrap();
         h.run();
         if let Some(e) = &mut h.state_mut().ui.sketch.editing {
             e.text = "14".into();
         }
         save(&mut h, &dir, &format!("31-sketch-edit-{tn}"));
-        run(&mut h, "dimension.set_value", json!({ "id": "room width", "value": 14000 }));
-        run(&mut h, "ui.dimension", json!({ "id": null }));
-        run(&mut h, "ui.zoom_to_fit", json!({}));
+        h.state_mut().run("dimension.set_value", json!({ "id": "room width", "value": 14000 })).unwrap();
+        h.state_mut().run("ui.dimension", json!({ "id": null })).unwrap();
+        h.state_mut().run("ui.zoom_to_fit", json!({})).unwrap();
         save(&mut h, &dir, &format!("32-sketch-wider-{tn}"));
 
         // A drag in progress: the free line's right end pulled up.
@@ -474,8 +492,8 @@ fn sketch_room() {
                 "viewport.create",
                 json!({ "sheet": sh["id"], "view": "plan", "scale": 100, "position": [190, 160] }),
             );
-            run(&mut h, "ui.set_view", json!({ "view": "sheets" }));
-            run(&mut h, "ui.sheet", json!({ "sheet": "R-1", "fit": true }));
+            h.state_mut().run("ui.set_view", json!({ "view": "sheets" })).unwrap();
+            h.state_mut().run("ui.sheet", json!({ "sheet": "R-1", "fit": true })).unwrap();
             for _ in 0..20 {
                 h.run();
             }
@@ -490,7 +508,7 @@ fn sketch_room() {
                         "venue_address": "Theaterstraße 1\n12345 Beispielstadt", "production_dates": "01.05.2026 – 03.05.2026",
                         "company": "Beispiel Licht GmbH", "drawn_by": "StageCraft", "website": "stagecraft.example" }),
             );
-            run(&mut h, "dimension.set_value", json!({ "id": "room width", "value": 6155 }));
+            h.state_mut().run("dimension.set_value", json!({ "id": "room width", "value": 6155 })).unwrap();
             for _ in 0..20 {
                 h.run();
             }
@@ -500,11 +518,11 @@ fn sketch_room() {
             h.state_mut().ui.sheets.cam.center = [190.0, 160.0];
             h.state_mut().ui.sheets.cam.scale = 6.0;
             save(&mut h, &dir, "37-sheet-dims-light");
-            run(&mut h, "ui.set_view", json!({ "view": "plan" }));
-            run(&mut h, "ui.zoom_to_fit", json!({}));
+            h.state_mut().run("ui.set_view", json!({ "view": "plan" })).unwrap();
+            h.state_mut().run("ui.zoom_to_fit", json!({})).unwrap();
             save(&mut h, &dir, "38-plan-dims-de-light");
             let pdf = format!("{dir}/room-de.pdf");
-            run(&mut h, "sheet.export_pdf", json!({ "path": pdf }));
+            h.state_mut().run("sheet.export_pdf", json!({ "path": pdf })).unwrap();
         }
     }
 }

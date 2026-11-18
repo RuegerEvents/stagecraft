@@ -19,10 +19,10 @@ use crate::app::Studio;
 use crate::i18n::t;
 use crate::state::{PanelKind, ThemePref, View};
 
-/// Everything a panel can be. New panels (a tutorial) are a variant here, a label and a
-/// body; [`Workspace::reconcile`] puts panels an old saved layout does not know where
-/// [`Action::Open`] puts them.
-pub const PANELS: [PanelKind; 8] = [
+/// Everything a panel can be. A new panel is a variant here, a label and a body;
+/// [`Workspace::reconcile`] puts panels an old saved layout does not know where the
+/// default layout has them (hidden ones stay hidden).
+pub const PANELS: [PanelKind; 9] = [
     PanelKind::Canvas,
     PanelKind::Layers,
     PanelKind::Tags,
@@ -31,6 +31,7 @@ pub const PANELS: [PanelKind; 8] = [
     PanelKind::Share,
     PanelKind::Inspector,
     PanelKind::Table,
+    PanelKind::Tutorial,
 ];
 
 const LEFT_WIDTH: f32 = 272.0;
@@ -38,8 +39,8 @@ const RIGHT_WIDTH: f32 = 292.0;
 const TABLE_HEIGHT: f32 = 230.0;
 
 /// The arrangement of a new user and of View > Reset Layout: layers, tags and sheets as
-/// tabs above the library on the left, the inspector on the right, the table under the
-/// canvas.
+/// tabs above the library on the left, the inspector on the right (the tutorial above it
+/// when shown), the table under the canvas.
 pub fn default_layout() -> Layout<PanelKind> {
     use PanelKind::*;
     let left = Node::Dock {
@@ -49,8 +50,10 @@ pub fn default_layout() -> Layout<PanelKind> {
             LEFT_WIDTH,
         )],
     };
-    let right =
-        Node::Dock { side: Side::End, columns: vec![Column::new(vec![Group::new(vec![Inspector], 0)], RIGHT_WIDTH)] };
+    let right = Node::Dock {
+        side: Side::End,
+        columns: vec![Column::new(vec![Group::new(vec![Tutorial], 0), Group::new(vec![Inspector], 0)], RIGHT_WIDTH)],
+    };
     let centre = Node::Split {
         axis: SplitAxis::Vertical,
         size: SplitSize::FixedSecond(TABLE_HEIGHT),
@@ -73,8 +76,11 @@ pub fn default_layout() -> Layout<PanelKind> {
     }
 }
 
+/// The default layout with the tutorial hidden; it opens above the inspector.
 pub fn default_workspace() -> Workspace<PanelKind> {
-    Workspace::new(default_layout())
+    let mut ws = Workspace::new(default_layout());
+    set_visible(&mut ws, PanelKind::Tutorial, false).expect("the tutorial can close");
+    ws
 }
 
 pub fn permissions(p: &PanelKind) -> Permissions {
@@ -137,6 +143,7 @@ pub fn label(p: PanelKind) -> &'static str {
         PanelKind::Share => "panel.share",
         PanelKind::Inspector => "panel.inspector",
         PanelKind::Table => "panel.table",
+        PanelKind::Tutorial => "panel.tutorial",
     })
 }
 
@@ -224,6 +231,7 @@ impl DockContent<PanelKind> for Bodies<'_> {
             PanelKind::Share => scroll(ui, s, crate::library::share_panel),
             PanelKind::Inspector if s.ui.view == View::Sheets => scroll(ui, s, crate::sheets::inspector),
             PanelKind::Inspector => scroll(ui, s, crate::inspector::show),
+            PanelKind::Tutorial => scroll(ui, s, crate::tutorial::panel),
             PanelKind::Table => {
                 egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| crate::table::show(ui, s));
             }
@@ -251,6 +259,7 @@ impl DockContent<PanelKind> for Bodies<'_> {
         match panel {
             PanelKind::Layers | PanelKind::Tags | PanelKind::Sheets => Some(DockHeights::new(300.0).compact(150.0)),
             PanelKind::Library | PanelKind::Share => Some(DockHeights::new(200.0).compact(120.0).fill(260.0)),
+            PanelKind::Tutorial => Some(DockHeights::new(250.0).compact(150.0)),
             _ => None,
         }
     }
@@ -328,8 +337,12 @@ mod tests {
         let ws = default_workspace();
         ws.validate().unwrap();
         for p in PANELS {
-            assert!(ws.layout.contains(&p), "{p:?}");
+            assert!(ws.layout.contains(&p) || ws.hidden.iter().any(|(h, _)| *h == p), "{p:?}");
         }
+        assert!(!ws.layout.contains(&PanelKind::Tutorial), "the tutorial opens on demand");
+        let mut shown = ws.clone();
+        set_visible(&mut shown, PanelKind::Tutorial, true).unwrap();
+        assert!(shown.layout.contains(&PanelKind::Tutorial));
     }
 
     #[test]

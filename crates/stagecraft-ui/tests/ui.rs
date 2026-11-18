@@ -682,7 +682,7 @@ fn panels_hide_float_move_and_reset() {
 
     // View > Reset Layout.
     run(&mut h, "ui.reset_layout", Value::Null);
-    assert_eq!(h.state().ui.layout.layout, stagecraft_ui::dock::default_layout());
+    assert_eq!(h.state().ui.layout.layout, stagecraft_ui::dock::default_workspace().layout);
     assert!(floating_panels(&h).is_empty());
 }
 

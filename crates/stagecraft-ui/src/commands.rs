@@ -168,6 +168,11 @@ fn register(r: &mut UiRegistry) {
         "Show a file dialog: open, save_as, export_pdf, import_gdtf, import_mvr, export_mvr, import_model, import_underlay",
         file_dialog,
     );
+    r.add(
+        "ui.tutorial",
+        "The guided tour \"Build a basic stage\": start (opens the Tutorial panel), next, back, stop; returns the step",
+        tutorial,
+    );
     r.add("ui.screenshot", "Write a PNG of the window to `path` (answered after the next frame)", screenshot);
 }
 
@@ -200,12 +205,39 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "sheet_viewport": ui.sheets.viewport,
         "viewport_editor": ui.sheets.editor,
         "plan_labels": ui.plan_labels,
+        "tutorial": tutorial_json(ui),
         "sketch": { "show": ui.sketch.show, "colours": ui.sketch.colours, "dimensions": ui.sketch.dimensions,
                     "selected_dimension": ui.sketch.selected.map(crate::sketch_ui::dim_args),
                     "picked_layer": ui.sketch.picked_layer,
                     "picked": ui.sketch.picked.iter().map(|i| i.item_ref()).collect::<Vec<_>>(),
                     "editing": ui.sketch.editing.as_ref().map(|e| json!({ "dimension": crate::sketch_ui::dim_args(e.source), "text": e.text })) },
     }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct TutorialArgs {
+    /// start, next (skips an unfinished step), back or stop. Omitted: only report.
+    action: Option<crate::tutorial::Action>,
+}
+
+fn tutorial_json(ui: &UiState) -> Value {
+    let tut = &ui.tutorial;
+    let step = tut.current();
+    json!({
+        "active": tut.active,
+        "step": tut.step + 1,
+        "of": crate::tutorial::STEPS.len(),
+        "id": step.map(|s| s.id),
+        "title": step.map(|s| crate::i18n::t(&format!("tutorial.{}.title", s.id)).to_owned()),
+        "finished": tut.finished(),
+    })
+}
+
+fn tutorial(c: &mut UiCtx, a: TutorialArgs) -> CmdResult {
+    if let Some(action) = a.action {
+        crate::tutorial::act(c.ui, action);
+    }
+    Ok(tutorial_json(c.ui))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -788,6 +820,10 @@ fn float_panel(c: &mut UiCtx, a: FloatArgs) -> CmdResult {
 
 fn reset_layout(c: &mut UiCtx, _: NoArgs) -> CmdResult {
     c.ui.layout.reset(&crate::dock::default_layout());
+    // The tutorial's place is above the inspector; it stays open only while it runs.
+    if !c.ui.tutorial.active {
+        crate::dock::set_visible(&mut c.ui.layout, PanelKind::Tutorial, false).map_err(CmdError::invalid)?;
+    }
     Ok(json!({ "reset": true }))
 }
 
