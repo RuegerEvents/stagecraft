@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use egui::{Key, RichText, WidgetType};
+use egui::{Key, RichText, Role};
 use serde_json::Value;
 
 use crate::app::Studio;
@@ -129,7 +129,7 @@ pub fn show(ctx: &egui::Context, s: &mut Studio) {
     if !s.ui.palette.open {
         return;
     }
-    let modal = egui::Modal::new(egui::Id::new("palette")).show(ctx, |ui| {
+    let modal = egui::Modal::new(egui::Id::unique("palette")).show(ctx, |ui| {
         ui.set_width(560.0);
         match s.ui.palette.chosen.clone() {
             None => list(ui, s),
@@ -143,10 +143,10 @@ pub fn show(ctx: &egui::Context, s: &mut Studio) {
 
 fn list(ui: &mut egui::Ui, s: &mut Studio) {
     let p = &mut s.ui.palette;
-    let id = egui::Id::new("palette_search");
+    let id = egui::Id::unique("palette_search");
     let r = ui
         .add(egui::TextEdit::singleline(&mut p.query).id(id).hint_text(t("palette.hint")).desired_width(f32::INFINITY));
-    widgets::name(&r, WidgetType::TextEdit, "Search commands");
+    widgets::name(&r, Role::TextInput, "Search commands");
     if p.focus_search {
         r.request_focus();
         p.focus_search = false;
@@ -187,7 +187,7 @@ fn list(ui: &mut egui::Ui, s: &mut Studio) {
                     r
                 })
                 .inner;
-            widgets::name(&r, WidgetType::Button, e.name);
+            widgets::name(&r, Role::Button, e.name);
             if on && (down || up) {
                 r.scroll_to_me(None);
             }
@@ -224,21 +224,25 @@ fn form(ui: &mut egui::Ui, s: &mut Studio, name: &str) {
                 FieldKind::Bool => {
                     let mut on = value == "true";
                     let r = ui.checkbox(&mut on, "");
-                    widgets::name(&r, WidgetType::Checkbox, &accessible);
+                    widgets::name(&r, Role::CheckBox, &accessible);
                     *value = on.to_string();
                 }
                 FieldKind::Choice(options) => {
                     let shown = if value.is_empty() { "—".to_owned() } else { value.clone() };
-                    egui::ComboBox::from_id_salt(("palette_choice", &f.name)).selected_text(shown).show_ui(ui, |ui| {
-                        if !f.required && ui.selectable_label(value.is_empty(), "—").clicked() {
-                            value.clear();
-                        }
-                        for o in options {
-                            if ui.selectable_label(value == o, o).clicked() {
-                                *value = o.clone();
+                    let r = egui::ComboBox::from_id_salt(("palette_choice", &f.name)).selected_text(shown).show_ui(
+                        ui,
+                        |ui| {
+                            if !f.required && ui.selectable_label(value.is_empty(), "—").clicked() {
+                                value.clear();
                             }
-                        }
-                    });
+                            for o in options {
+                                if ui.selectable_label(value == o, o).clicked() {
+                                    *value = o.clone();
+                                }
+                            }
+                        },
+                    );
+                    widgets::name(&r.response, egui::Role::ComboBox, &accessible);
                 }
                 _ => {
                     let hint = match f.kind {
@@ -247,7 +251,7 @@ fn form(ui: &mut egui::Ui, s: &mut Studio, name: &str) {
                         _ => "",
                     };
                     let r = ui.add(egui::TextEdit::singleline(value).desired_width(360.0).hint_text(hint));
-                    widgets::name(&r, WidgetType::TextEdit, &accessible);
+                    widgets::name(&r, Role::TextInput, &accessible);
                     if first && ui.memory(|m| m.focused().is_none()) {
                         r.request_focus();
                     }

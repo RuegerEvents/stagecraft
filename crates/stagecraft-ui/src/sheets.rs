@@ -396,7 +396,7 @@ fn dragged_rect(drag: &SheetDrag, min: P2, max: P2, to: P2) -> (P2, P2) {
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
     let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-    widgets::name(&resp, egui::WidgetType::Other, "Sheet canvas");
+    widgets::name(&resp, egui::Role::Unknown, "Sheet canvas");
     let dark = ui.visuals().dark_mode;
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, if dark { Color32::from_gray(0x2a) } else { Color32::from_gray(0xd9) });
@@ -608,7 +608,7 @@ pub fn list_panel(ui: &mut Ui, s: &mut Studio) {
     for sh in doc.sheets_sorted() {
         let text = format!("{}  {}", sh.number, sh.name);
         let r = ui.selectable_label(cur == Some(sh.id), text);
-        widgets::name(&r, egui::WidgetType::Button, format!("Sheet {}", sh.number));
+        widgets::name(&r, egui::Role::Button, format!("Sheet {}", sh.number));
         if r.clicked() {
             let _ = s.run("ui.sheet", json!({ "sheet": sh.id }));
         }
@@ -650,7 +650,7 @@ pub fn list_panel(ui: &mut Ui, s: &mut Studio) {
             _ => format!("{}  1:{}", vp.name, vp.scale),
         };
         let r = ui.selectable_label(s.ui.sheets.viewport == Some(vp.id), text);
-        widgets::name(&r, egui::WidgetType::Button, format!("Viewport {}", vp.name));
+        widgets::name(&r, egui::Role::Button, format!("Viewport {}", vp.name));
         if r.clicked() {
             s.ui.sheets.viewport = Some(vp.id);
         }
@@ -707,7 +707,7 @@ fn viewport_window(ctx: &egui::Context, s: &mut Studio) {
     };
     let mut open = true;
     egui::Window::new(tf("sheets.viewport_title", &[("name", &vp.name)]))
-        .id(egui::Id::new("viewport_editor"))
+        .id(egui::Id::unique("viewport_editor"))
         .open(&mut open)
         .resizable(false)
         .default_width(320.0)
@@ -741,7 +741,7 @@ fn tag_line_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 .class
                 .as_deref()
                 .map_or_else(|| t("sheets.tag_default").to_owned(), |c| t(&format!("sheets.class.{c}")).to_owned());
-            egui::ComboBox::from_id_salt(("tag_class", salt, tag.id)).selected_text(text).show_ui(ui, |ui| {
+            let r = egui::ComboBox::from_id_salt(("tag_class", salt, tag.id)).selected_text(text).show_ui(ui, |ui| {
                 if ui.selectable_label(cur.class.is_none(), t("sheets.tag_default")).clicked() {
                     set(s, tag.id, &|e| e.class = None);
                 }
@@ -751,8 +751,9 @@ fn tag_line_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                     }
                 }
             });
+            widgets::name(&r.response, egui::Role::ComboBox, format!("Tag class {}", tag.name));
             let text = cur.weight.map_or_else(|| t("sheets.tag_default").to_owned(), |w| format!("{w} mm"));
-            egui::ComboBox::from_id_salt(("tag_pen", salt, tag.id)).selected_text(text).show_ui(ui, |ui| {
+            let r = egui::ComboBox::from_id_salt(("tag_pen", salt, tag.id)).selected_text(text).show_ui(ui, |ui| {
                 if ui.selectable_label(cur.weight.is_none(), t("sheets.tag_default")).clicked() {
                     set(s, tag.id, &|e| e.weight = None);
                 }
@@ -762,6 +763,7 @@ fn tag_line_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                     }
                 }
             });
+            widgets::name(&r.response, egui::Role::ComboBox, format!("Tag pen {}", tag.name));
             ui.end_row();
         }
     });
@@ -791,13 +793,13 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
     };
     egui::Grid::new(("vp_grid", salt)).num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         ui.label(t("inspector.name"));
-        if let Some(v) = edit_field(ui, egui::Id::new(("vp_name", salt, vp.id)), &vp.name, 170.0, "Viewport name") {
+        if let Some(v) = edit_field(ui, egui::Id::unique(("vp_name", salt, vp.id)), &vp.name, 170.0, "Viewport name") {
             up(s, json!({ "name": v }));
         }
         ui.end_row();
 
         ui.label(t("sheets.view"));
-        egui::ComboBox::from_id_salt(("vp_view", salt)).selected_text(view_label(&vp.view)).show_ui(ui, |ui| {
+        let r = egui::ComboBox::from_id_salt(("vp_view", salt)).selected_text(view_label(&vp.view)).show_ui(ui, |ui| {
             for name in [
                 "plan",
                 "plan_3d",
@@ -827,13 +829,14 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 }
             }
         });
+        widgets::name(&r.response, egui::Role::ComboBox, "Viewport view");
         ui.end_row();
 
         if let ViewKind::Section { origin, normal } = vp.view {
             ui.label(t("sheets.cut_at"));
             let off = origin[0] * normal[0] + origin[1] * normal[1] + origin[2] * normal[2];
             if let Some(v) =
-                edit_field(ui, egui::Id::new(("vp_cut", salt, vp.id)), &fmt_mm(off.abs()), 90.0, "Cut position")
+                edit_field(ui, egui::Id::unique(("vp_cut", salt, vp.id)), &fmt_mm(off.abs()), 90.0, "Cut position")
             {
                 match parse_mm(&v) {
                     Some(mm) => {
@@ -849,7 +852,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
 
         if vp.view != ViewKind::FixtureList {
             ui.label(t("sheets.scale"));
-            egui::ComboBox::from_id_salt(("vp_scale", salt)).selected_text(format!("1:{}", vp.scale)).show_ui(
+            let r = egui::ComboBox::from_id_salt(("vp_scale", salt)).selected_text(format!("1:{}", vp.scale)).show_ui(
                 ui,
                 |ui| {
                     for sc in SCALES {
@@ -859,6 +862,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                     }
                 },
             );
+            widgets::name(&r.response, egui::Role::ComboBox, "Viewport scale");
             ui.end_row();
 
             ui.label(t("sheets.crop"));
@@ -881,7 +885,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 .label_template
                 .and_then(|l| doc.label_templates.get(&l))
                 .map_or(t("sheets.no_labels").to_owned(), |l| l.name.clone());
-            egui::ComboBox::from_id_salt(("vp_labels", salt)).selected_text(cur).show_ui(ui, |ui| {
+            let r = egui::ComboBox::from_id_salt(("vp_labels", salt)).selected_text(cur).show_ui(ui, |ui| {
                 if ui.selectable_label(vp.label_template.is_none(), t("sheets.no_labels")).clicked() {
                     up(s, json!({ "label_template": "" }));
                 }
@@ -891,19 +895,20 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                     }
                 }
             });
+            widgets::name(&r.response, egui::Role::ComboBox, "Viewport labels");
             ui.end_row();
         }
 
         let mut title = vp.show_title;
         ui.label(t("sheets.title"));
-        if ui.checkbox(&mut title, "").changed() {
+        if ui.checkbox(&mut title, "").accessible_name("Viewport title").changed() {
             up(s, json!({ "show_title": title }));
         }
         ui.end_row();
         if vp.view != ViewKind::FixtureList {
             let mut bar = vp.scale_bar;
             ui.label(t("sheets.scale_bar"));
-            if ui.checkbox(&mut bar, "").changed() {
+            if ui.checkbox(&mut bar, "").accessible_name("Viewport scale bar").changed() {
                 up(s, json!({ "scale_bar": bar }));
             }
             ui.end_row();
@@ -916,7 +921,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 let mut v = on;
                 ui.label(t(key));
                 let r = ui.checkbox(&mut v, "");
-                crate::widgets::name(&r, egui::WidgetType::Checkbox, t(key));
+                crate::widgets::name(&r, egui::Role::CheckBox, t(key));
                 if r.changed() {
                     up(s, json!({ field: v }));
                 }
@@ -932,7 +937,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
             for tag in doc.tags.values() {
                 let mut shown = !vp.hidden_tags.contains(&tag.id);
                 let r = ui.checkbox(&mut shown, &tag.name);
-                widgets::name(&r, egui::WidgetType::Checkbox, format!("Viewport tag {}", tag.name));
+                widgets::name(&r, egui::Role::CheckBox, format!("Viewport tag {}", tag.name));
                 if r.changed() {
                     let mut hidden: Vec<Id> = vp.hidden_tags.clone();
                     if shown {
@@ -965,7 +970,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
     if stagecraft_sheet::compose::is_vector_3d(&vp.view) {
         let mut hidden = vp.hidden_lines;
         let r = ui.checkbox(&mut hidden, t("sheets.hidden_lines"));
-        widgets::name(&r, egui::WidgetType::Checkbox, "Hidden lines");
+        widgets::name(&r, egui::Role::CheckBox, "Hidden lines");
         if r.changed() {
             up(s, json!({ "hidden_lines": hidden }));
         }
@@ -973,7 +978,8 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
             ui.horizontal(|ui| {
                 ui.label(t("sheets.cut_height"));
                 let text = cut.map(fmt_mm).unwrap_or_default();
-                if let Some(v) = edit_field(ui, egui::Id::new(("vp_cut_z", salt, vp.id)), &text, 90.0, "Cut height") {
+                if let Some(v) = edit_field(ui, egui::Id::unique(("vp_cut_z", salt, vp.id)), &text, 90.0, "Cut height")
+                {
                     let cut = if v.trim().is_empty() { None } else { parse_mm(&v) };
                     if cut.is_none() && !v.trim().is_empty() {
                         s.ui.error(tf("status.bad_number", &[("text", &v)]));
@@ -990,9 +996,9 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 for class in ["thin", "medium", "thick", "hidden", "centre", "cut"] {
                     ui.label(t(&format!("sheets.class.{class}")));
                     let cur = stagecraft_sheet::compose::weight(vp, class);
-                    egui::ComboBox::from_id_salt(("pen", salt, class)).selected_text(format!("{cur} mm")).show_ui(
-                        ui,
-                        |ui| {
+                    let r = egui::ComboBox::from_id_salt(("pen", salt, class))
+                        .selected_text(format!("{cur} mm"))
+                        .show_ui(ui, |ui| {
                             for p in PENS {
                                 if ui.selectable_label(cur == p, format!("{p} mm")).clicked() {
                                     let mut w = vp.line_weights.clone();
@@ -1000,8 +1006,8 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                                     up(s, json!({ "line_weights": w }));
                                 }
                             }
-                        },
-                    );
+                        });
+                    widgets::name(&r.response, egui::Role::ComboBox, format!("Pen {class}"));
                     ui.end_row();
                 }
             });
@@ -1040,17 +1046,17 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
     };
     egui::Grid::new("sheet_grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         ui.label(t("inspector.name"));
-        if let Some(v) = edit_field(ui, egui::Id::new(("sheet_name", id)), &sh.name, 170.0, "Sheet name") {
+        if let Some(v) = edit_field(ui, egui::Id::unique(("sheet_name", id)), &sh.name, 170.0, "Sheet name") {
             up(s, json!({ "name": v }));
         }
         ui.end_row();
         ui.label(t("sheets.number"));
-        if let Some(v) = edit_field(ui, egui::Id::new(("sheet_number", id)), &sh.number, 90.0, "Sheet number") {
+        if let Some(v) = edit_field(ui, egui::Id::unique(("sheet_number", id)), &sh.number, 90.0, "Sheet number") {
             up(s, json!({ "number": v }));
         }
         ui.end_row();
         ui.label(t("sheets.paper"));
-        egui::ComboBox::from_id_salt("sheet_paper").selected_text(sh.paper.name()).show_ui(ui, |ui| {
+        let r = egui::ComboBox::from_id_salt("sheet_paper").selected_text(sh.paper.name()).show_ui(ui, |ui| {
             for (p, name) in
                 [(Paper::A4, "a4"), (Paper::A3, "a3"), (Paper::A2, "a2"), (Paper::A1, "a1"), (Paper::A0, "a0")]
             {
@@ -1059,6 +1065,7 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
                 }
             }
         });
+        widgets::name(&r.response, egui::Role::ComboBox, "Sheet paper");
         ui.end_row();
         ui.label(t("sheets.orientation"));
         ui.horizontal(|ui| {
@@ -1073,7 +1080,7 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
         ui.label(t("sheets.title_block"));
         let current = TitleBlock::for_sheet(doc, &sh);
         let cur = if !sh.show_title_block { t("sheets.none_block").to_owned() } else { current.name.clone() };
-        egui::ComboBox::from_id_salt("sheet_tb").selected_text(cur).show_ui(ui, |ui| {
+        let r = egui::ComboBox::from_id_salt("sheet_tb").selected_text(cur).show_ui(ui, |ui| {
             for (tb, arg) in TitleBlock::builtins().into_iter().zip(["compact", "generic"]) {
                 if ui.selectable_label(sh.show_title_block && current.id == tb.id, &tb.name).clicked() {
                     up(s, json!({ "title_block": arg }));
@@ -1088,10 +1095,11 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
                 up(s, json!({ "title_block": "none" }));
             }
         });
+        widgets::name(&r.response, egui::Role::ComboBox, "Sheet title block");
         ui.end_row();
         ui.label(t("sheets.legend"));
         let mut legend = sh.show_legend;
-        if ui.checkbox(&mut legend, "").changed() {
+        if ui.checkbox(&mut legend, "").accessible_name("Sheet legend").changed() {
             up(s, json!({ "legend": legend }));
         }
         ui.end_row();
@@ -1114,7 +1122,7 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
         for (key, field, v) in meta_texts(&meta) {
             ui.label(t(key));
             if let Some(v) =
-                edit_field(ui, egui::Id::new(("sheet_meta", field)), &v, 170.0, &format!("Title block {field}"))
+                edit_field(ui, egui::Id::unique(("sheet_meta", field)), &v, 170.0, &format!("Title block {field}"))
             {
                 let _ = s.run("doc.set_meta", json!({ field: meta_value(field, v) }));
             }
@@ -1169,7 +1177,7 @@ pub fn sheet_text_rows(ui: &mut Ui, s: &mut Studio, who: &str) {
             }
         },
     );
-    widgets::name(&r.response, egui::WidgetType::ComboBox, format!("{who} sheet language"));
+    widgets::name(&r.response, egui::Role::ComboBox, format!("{who} sheet language"));
     ui.end_row();
     ui.label(t("meta.dimension_format"));
     let key = |f: DimFormat| format!("meta.dim.{}", f.code());
@@ -1182,7 +1190,7 @@ pub fn sheet_text_rows(ui: &mut Ui, s: &mut Studio, who: &str) {
                 }
             }
         });
-    widgets::name(&r.response, egui::WidgetType::ComboBox, format!("{who} dimension format"));
+    widgets::name(&r.response, egui::Role::ComboBox, format!("{who} dimension format"));
     ui.end_row();
     ui.label(t("meta.decimal_separator"));
     let options =
@@ -1195,7 +1203,7 @@ pub fn sheet_text_rows(ui: &mut Ui, s: &mut Studio, who: &str) {
             }
         }
     });
-    widgets::name(&r.response, egui::WidgetType::ComboBox, format!("{who} decimal separator"));
+    widgets::name(&r.response, egui::Role::ComboBox, format!("{who} decimal separator"));
     ui.end_row();
 }
 
@@ -1229,13 +1237,14 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
         return;
     };
     let lt = doc.label_templates[&cur].clone();
-    egui::ComboBox::from_id_salt("lt_pick").selected_text(&lt.name).show_ui(ui, |ui| {
+    let r = egui::ComboBox::from_id_salt("lt_pick").selected_text(&lt.name).show_ui(ui, |ui| {
         for x in doc.label_templates.values() {
             if ui.selectable_label(x.id == cur, &x.name).clicked() {
                 s.ui.sheets.template = Some(x.id);
             }
         }
     });
+    widgets::name(&r.response, egui::Role::ComboBox, "Label template");
     let up = |s: &mut Studio, args: Value| {
         let mut a = args;
         a["template"] = json!(cur);
@@ -1243,7 +1252,7 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
     };
     egui::Grid::new("lt_grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         ui.label(t("inspector.name"));
-        if let Some(v) = edit_field(ui, egui::Id::new(("lt_name", cur)), &lt.name, 160.0, "Template name") {
+        if let Some(v) = edit_field(ui, egui::Id::unique(("lt_name", cur)), &lt.name, 160.0, "Template name") {
             up(s, json!({ "name": v }));
         }
         ui.end_row();
@@ -1255,7 +1264,7 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
                 (LabelRotation::Follow, "sheets.rot.follow"),
             ] {
                 let resp = ui.radio(lt.rotation == r, t(key));
-                widgets::name(&resp, egui::WidgetType::RadioButton, format!("Label rotation {r:?}"));
+                widgets::name(&resp, egui::Role::RadioButton, format!("Label rotation {r:?}"));
                 if resp.clicked() && lt.rotation != r {
                     up(s, json!({ "rotation": r }));
                 }
@@ -1276,18 +1285,22 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
         ui.label("");
         ui.end_row();
         for (i, f) in fields.iter_mut().enumerate() {
-            egui::ComboBox::from_id_salt(("lt_field", cur, i)).width(70.0).selected_text(&f.field).show_ui(ui, |ui| {
-                for name in FIELDS {
-                    if ui.selectable_label(f.field == name, name).clicked() && f.field != name {
-                        f.field = name.into();
-                        changed = true;
+            let r = egui::ComboBox::from_id_salt(("lt_field", cur, i)).width(70.0).selected_text(&f.field).show_ui(
+                ui,
+                |ui| {
+                    for name in FIELDS {
+                        if ui.selectable_label(f.field == name, name).clicked() && f.field != name {
+                            f.field = name.into();
+                            changed = true;
+                        }
                     }
-                }
-            });
+                },
+            );
+            widgets::name(&r.response, egui::Role::ComboBox, format!("Label field {i}"));
             for (axis, salt) in [(0usize, "x"), (1, "y")] {
                 if let Some(v) = edit_field(
                     ui,
-                    egui::Id::new(("lt_anchor", cur, i, salt)),
+                    egui::Id::unique(("lt_anchor", cur, i, salt)),
                     &fmt_mm(f.anchor[axis]),
                     42.0,
                     &format!("Field {i} {salt}"),
@@ -1299,7 +1312,7 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
             }
             if let Some(v) = edit_field(
                 ui,
-                egui::Id::new(("lt_size", cur, i)),
+                egui::Id::unique(("lt_size", cur, i)),
                 &format!("{}", f.size),
                 32.0,
                 &format!("Field {i} size"),
@@ -1308,7 +1321,7 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
                 f.size = x;
                 changed = true;
             }
-            if ui.checkbox(&mut f.boxed, "").changed() {
+            if ui.checkbox(&mut f.boxed, "").accessible_name(format!("Label field {i} boxed")).changed() {
                 changed = true;
             }
             if icon_button(ui, Icon::Close, &format!("Remove field {i}")).clicked() {

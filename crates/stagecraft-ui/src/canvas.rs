@@ -41,7 +41,7 @@ pub fn tolerance(cam: &Camera) -> f64 {
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
     let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, t("canvas.name")));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, t("canvas.name")));
     s.ui.camera.rect = rect;
     if s.ui.fit_pending {
         let ids = visible_ids(s.engine.doc(), &s.ui);
@@ -264,7 +264,7 @@ pub fn draw_images(p: &Painter, cam: &Camera, doc: &Document, prims: &[PlanPrim]
 /// in the context's memory: a texture belongs to one egui context.
 fn image_texture(ctx: &egui::Context, hash: &str, doc: &Document) -> Option<egui::TextureHandle> {
     type Cache = std::collections::HashMap<String, Option<egui::TextureHandle>>;
-    let key = egui::Id::new("underlay_textures");
+    let key = egui::Id::unique("underlay_textures");
     if let Some(t) = ctx.data(|d| d.get_temp::<Cache>(key).and_then(|c| c.get(hash).cloned())) {
         return t;
     }

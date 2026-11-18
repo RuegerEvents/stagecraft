@@ -11,7 +11,7 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use egui::{RichText, Sense, Ui, WidgetType, vec2};
+use egui::{RichText, Role, Sense, Ui, vec2};
 use serde_json::json;
 use stagecraft_core::{Document, Id, Object, ObjectKind};
 use stagecraft_gdtf::share::{self, ShareClient, ShareEntry, ShareError};
@@ -325,7 +325,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         ui.horizontal(|ui| {
             symbol_preview(ui, &doc, &ft.key);
             let r = ui.selectable_label(active, ft.display_name());
-            widgets::name(&r, WidgetType::SelectableLabel, format!("Fixture type {}", ft.key));
+            widgets::name(&r, Role::Button, format!("Fixture type {}", ft.key));
             if r.on_hover_text(t("library.pick_tip")).clicked() {
                 let key = if active { "" } else { ft.key.as_str() };
                 let _ = s.run("ui.set_tool_options", json!({ "fixture_type": key }));
@@ -352,32 +352,36 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                     (!s.ui.options.fixture_mode.is_empty()).then_some(s.ui.options.fixture_mode.as_str()),
                 );
                 let shown = cur.map(|m| format!("{} · {} ch", m.name, m.footprint_text())).unwrap_or_default();
-                egui::ComboBox::from_id_salt(("library_mode", &ft.key)).selected_text(shown).show_ui(ui, |ui| {
-                    for m in &ft.modes {
-                        let label = format!("{} · {} ch", m.name, m.footprint_text());
-                        if ui.selectable_label(cur.is_some_and(|c| c.name == m.name), label).clicked() {
-                            let _ = s.run("ui.set_tool_options", json!({ "fixture_mode": m.name }));
+                let r =
+                    egui::ComboBox::from_id_salt(("library_mode", &ft.key)).selected_text(shown).show_ui(ui, |ui| {
+                        for m in &ft.modes {
+                            let label = format!("{} · {} ch", m.name, m.footprint_text());
+                            if ui.selectable_label(cur.is_some_and(|c| c.name == m.name), label).clicked() {
+                                let _ = s.run("ui.set_tool_options", json!({ "fixture_mode": m.name }));
+                            }
                         }
-                    }
-                });
+                    });
+                widgets::name(&r.response, egui::Role::ComboBox, format!("Mode {}", ft.key));
                 ui.end_row();
                 ui.label(t("library.symbol"));
                 let auto = if ft.has_plan_svg { t("library.symbol_gdtf") } else { t("library.symbol_silhouette") };
                 let shown = ft.symbol.clone().map_or_else(|| auto.to_owned(), |n| t(&format!("symbol.{n}")).to_owned());
-                egui::ComboBox::from_id_salt(("library_symbol", &ft.key)).selected_text(shown).show_ui(ui, |ui| {
-                    if ui.selectable_label(ft.symbol.is_none(), auto).clicked() {
-                        let _ = s.run("symbol.assign", json!({ "gdtf_type": ft.key, "symbol": "" }));
-                    }
-                    for (name, _) in stagecraft_core::fixture_type::SYMBOLS {
-                        let mut label = t(&format!("symbol.{name}")).to_owned();
-                        if ft.suggested_symbol.as_deref() == Some(name) {
-                            label.push_str(" ★");
+                let r =
+                    egui::ComboBox::from_id_salt(("library_symbol", &ft.key)).selected_text(shown).show_ui(ui, |ui| {
+                        if ui.selectable_label(ft.symbol.is_none(), auto).clicked() {
+                            let _ = s.run("symbol.assign", json!({ "gdtf_type": ft.key, "symbol": "" }));
                         }
-                        if ui.selectable_label(ft.symbol.as_deref() == Some(name), label).clicked() {
-                            let _ = s.run("symbol.assign", json!({ "gdtf_type": ft.key, "symbol": name }));
+                        for (name, _) in stagecraft_core::fixture_type::SYMBOLS {
+                            let mut label = t(&format!("symbol.{name}")).to_owned();
+                            if ft.suggested_symbol.as_deref() == Some(name) {
+                                label.push_str(" ★");
+                            }
+                            if ui.selectable_label(ft.symbol.as_deref() == Some(name), label).clicked() {
+                                let _ = s.run("symbol.assign", json!({ "gdtf_type": ft.key, "symbol": name }));
+                            }
                         }
-                    }
-                });
+                    });
+                widgets::name(&r.response, egui::Role::ComboBox, format!("Symbol {}", ft.key));
                 ui.end_row();
             });
         }
@@ -394,7 +398,7 @@ fn share_section(ui: &mut Ui, s: &mut Studio) {
         let r = ui.add(
             egui::TextEdit::singleline(&mut s.ui.library.query).hint_text(t("share.search_hint")).desired_width(150.0),
         );
-        widgets::name(&r, WidgetType::TextEdit, "Search GDTF Share");
+        widgets::name(&r, Role::TextInput, "Search GDTF Share");
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             search = true;
         }

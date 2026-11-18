@@ -3,7 +3,7 @@
 //! selected cell; "Fill series" counts up from the first cell; ⌘V pastes TSV from
 //! Excel or Numbers. Selecting cells selects their objects in the plan.
 
-use egui::{Align2, Event, Key, Modifiers, RichText, Sense, Ui, WidgetType, vec2};
+use egui::{Align2, Event, Key, Modifiers, RichText, Role, Sense, Ui, vec2};
 use serde_json::{Value, json};
 use stagecraft_core::model::{format_address, parse_address};
 use stagecraft_core::{Document, Id, Object, ObjectKind};
@@ -587,7 +587,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         for (k, key) in kinds {
             let on = s.ui.table.kind.as_deref() == k;
             let r = ui.selectable_label(on, t(key));
-            widgets::name(&r, WidgetType::Button, format!("Show {}", t(key)));
+            widgets::name(&r, Role::Button, format!("Show {}", t(key)));
             if r.clicked() && !on {
                 s.ui.table = TableState { kind: k.map(String::from), tag: s.ui.table.tag, ..Default::default() };
             }
@@ -598,7 +598,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                 .tag
                 .and_then(|t| doc.tags.get(&t))
                 .map_or_else(|| t("table.any_tag").to_owned(), |t| t.name.clone());
-        egui::ComboBox::from_id_salt("table_tag").selected_text(tag_name).show_ui(ui, |ui| {
+        let r = egui::ComboBox::from_id_salt("table_tag").selected_text(tag_name).show_ui(ui, |ui| {
             if ui.selectable_label(s.ui.table.tag.is_none(), t("table.any_tag")).clicked() {
                 s.ui.table.tag = None;
             }
@@ -610,6 +610,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                 }
             }
         });
+        widgets::name(&r.response, egui::Role::ComboBox, "Table tag");
         ui.separator();
         if widgets::button(ui, t("table.fill"), "Fill series").on_hover_text(t("table.fill_tip")).clicked() {
             fill_selected(s);
@@ -663,7 +664,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                     let (rect, resp) = ui.allocate_exact_size(vec2(c.width(), ROW_H), Sense::click());
                     let label = format!("{} {}", t(c.key()), ri + 1);
                     let text = cell_text(&doc, o, *c);
-                    resp.widget_info(|| egui::WidgetInfo::labeled(WidgetType::Other, true, label.clone()));
+                    resp.widget_info(|| egui::WidgetInfo::labeled(Role::Unknown, true, label.clone()));
                     let in_range =
                         sel_range.is_some_and(|(r0, r1, c0, c1)| (r0..=r1).contains(&ri) && (c0..=c1).contains(&ci));
                     let is_cursor = s.ui.table.cursor == Some((id, ci));
@@ -689,15 +690,15 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                     }
                     if is_cursor && s.ui.table.editing.is_some() {
                         let mut buf = s.ui.table.editing.clone().unwrap_or_default();
-                        let ed_id = egui::Id::new("table_editor");
+                        let ed_id = egui::Id::unique("table_editor");
                         let r = ui.put(
                             rect.shrink(1.0),
                             egui::TextEdit::singleline(&mut buf).id(ed_id).margin(vec2(4.0, 2.0)),
                         );
-                        widgets::name(&r, WidgetType::TextEdit, "Cell editor");
+                        widgets::name(&r, Role::TextInput, "Cell editor");
                         let options = cell_options(&doc, o, *c);
                         if !options.is_empty() {
-                            egui::Area::new(egui::Id::new("table_choices"))
+                            egui::Area::new(egui::Id::unique("table_choices"))
                                 .order(egui::Order::Foreground)
                                 .fixed_pos(rect.left_bottom())
                                 .show(ui.ctx(), |ui| {
@@ -705,7 +706,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                                         ui.set_min_width(rect.width());
                                         for (value, label) in &options {
                                             let b = ui.selectable_label(text == *value, label);
-                                            widgets::name(&b, WidgetType::SelectableLabel, format!("Choose {value}"));
+                                            widgets::name(&b, Role::Button, format!("Choose {value}"));
                                             if b.clicked() {
                                                 picked = Some(value.clone());
                                             }

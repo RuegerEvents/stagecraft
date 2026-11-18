@@ -1051,7 +1051,7 @@ fn snap_marker(p: &egui::Painter, at: Pos2, kind: SnapKind, pal: &Palette) {
 
 /// The small box next to the pointer showing what is being typed.
 fn dim_box(ui: &Ui, at: Pos2, dim: &DimInput, angle_only: bool) {
-    egui::Area::new(egui::Id::new("dim_input"))
+    egui::Area::new(egui::Id::unique("dim_input"))
         .fixed_pos(at + vec2(18.0, 18.0))
         .order(egui::Order::Tooltip)
         .interactable(false)

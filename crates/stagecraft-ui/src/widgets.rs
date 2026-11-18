@@ -1,9 +1,9 @@
 //! Small widgets with accessible names, so tests find them.
 
-use egui::{Response, TextEdit, Ui, WidgetInfo, WidgetType};
+use egui::{Response, Role, TextEdit, Ui, WidgetInfo};
 
 /// Give a response an accessible name.
-pub fn name(resp: &Response, typ: WidgetType, name: impl Into<String>) {
+pub fn name(resp: &Response, typ: Role, name: impl Into<String>) {
     let name = name.into();
     resp.widget_info(|| WidgetInfo::labeled(typ, true, name.clone()));
 }
@@ -11,7 +11,7 @@ pub fn name(resp: &Response, typ: WidgetType, name: impl Into<String>) {
 /// A button whose accessible name may differ from its text (icons, short labels).
 pub fn button(ui: &mut Ui, text: impl Into<egui::WidgetText>, accessible: &str) -> Response {
     let r = ui.button(text);
-    name(&r, WidgetType::Button, accessible);
+    name(&r, Role::Button, accessible);
     r
 }
 
@@ -36,7 +36,7 @@ pub fn edit_field_hint(
         current.to_owned()
     };
     let r = ui.add(TextEdit::singleline(&mut buf).id(id).desired_width(width).hint_text(hint));
-    name(&r, WidgetType::TextEdit, accessible);
+    name(&r, Role::TextInput, accessible);
     let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
     if r.gained_focus() {
         select_all(ui.ctx(), id, &buf);
@@ -77,7 +77,7 @@ pub enum Icon {
 pub fn icon_button(ui: &mut Ui, icon: Icon, accessible: &str) -> Response {
     let size = egui::vec2(18.0, 18.0);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-    name(&resp, WidgetType::Button, accessible);
+    name(&resp, Role::Button, accessible);
     if ui.is_rect_visible(rect) {
         let v = ui.style().interact(&resp);
         let p = ui.painter();

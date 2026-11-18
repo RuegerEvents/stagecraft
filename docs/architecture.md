@@ -60,7 +60,7 @@ so an AI can see the app.
 
 ## Versions
 
-egui/eframe/egui_kittest 0.36.x and wgpu as egui pulls it (same as grandPA), glam 0.34,
+egui/eframe/egui_kittest 0.37 from storytold's egui fork (round 2; the revision craft-libs pins, patched in the root `Cargo.toml`) and wgpu as egui-wgpu pulls it (30), glam 0.34,
 quick-xml 0.42, krilla for PDF, lyon or earcutr for triangulation, i_overlay for 2D
 booleans, ureq for HTTP, keyring/security-framework for the keychain.
 

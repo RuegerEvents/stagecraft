@@ -141,9 +141,14 @@ fn fonts() -> FontDefinitions {
     add("Roboto", include_bytes!("../../../assets/fonts/Roboto-Regular.ttf"));
     add("Roboto Bold", include_bytes!("../../../assets/fonts/Roboto-Bold.ttf"));
     add("Roboto Mono", include_bytes!("../../../assets/fonts/RobotoMono-Regular.ttf"));
-    // Ours first; egui's own stay behind them for symbols Roboto lacks.
-    fonts.families.get_mut(&FontFamily::Proportional).expect("egui has it").insert(0, "Roboto".into());
-    fonts.families.get_mut(&FontFamily::Monospace).expect("egui has it").insert(0, "Roboto Mono".into());
+    add("DejaVu Symbols", include_bytes!("../../../assets/fonts/DejaVuSans-Symbols.ttf"));
+    // Ours first, then the DejaVu cut for arrows and key symbols (⌘ ⇧ ⌥) that Roboto
+    // lacks; egui's own stay behind them.
+    for (family, face) in [(FontFamily::Proportional, "Roboto"), (FontFamily::Monospace, "Roboto Mono")] {
+        let list = fonts.families.get_mut(&family).expect("egui has it");
+        list.insert(0, face.into());
+        list.insert(1, "DejaVu Symbols".into());
+    }
     let mut bold = vec!["Roboto Bold".to_string()];
     bold.extend(fonts.families[&FontFamily::Proportional].iter().cloned());
     fonts.families.insert(FontFamily::Name("bold".into()), bold);

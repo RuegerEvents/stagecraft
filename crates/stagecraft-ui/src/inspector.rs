@@ -25,7 +25,7 @@ pub fn common<T: PartialEq>(mut it: impl Iterator<Item = T>) -> Option<T> {
 /// A labelled field; `None` as current shows the "mixed" hint.
 fn field(ui: &mut Ui, key: &str, salt: &str, current: Option<String>) -> Option<String> {
     ui.label(t(key));
-    let id = egui::Id::new(("inspector", salt));
+    let id = egui::Id::unique(("inspector", salt));
     let mixed = current.is_none();
     let hint = if mixed { t("inspector.mixed") } else { "" };
     let w = ui.available_width().clamp(90.0, 170.0);
@@ -93,13 +93,14 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         let layer = common(objs.iter().map(|o| o.layer));
         let shown =
             layer.and_then(|l| doc.layers.get(&l)).map_or_else(|| t("inspector.mixed").to_owned(), |l| l.name.clone());
-        egui::ComboBox::from_id_salt("inspector_layer").selected_text(shown).show_ui(ui, |ui| {
+        let r = egui::ComboBox::from_id_salt("inspector_layer").selected_text(shown).show_ui(ui, |ui| {
             for l in doc.layers_sorted() {
                 if ui.selectable_label(layer == Some(l.id), &l.name).clicked() {
                     let _ = s.run("object.set_layer", json!({ "ids": sel, "layer": l.id }));
                 }
             }
         });
+        widgets::name(&r.response, egui::Role::ComboBox, format!("Inspector {}", t("inspector.layer")));
         ui.end_row();
 
         for (axis, key) in [(0usize, "inspector.x"), (1, "inspector.y"), (2, "inspector.z")] {
@@ -215,13 +216,14 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             }));
             ui.label(t("inspector.profile"));
             let shown = profile.clone().unwrap_or_else(|| t("inspector.mixed").to_owned());
-            egui::ComboBox::from_id_salt("inspector_profile").selected_text(shown).show_ui(ui, |ui| {
+            let r = egui::ComboBox::from_id_salt("inspector_profile").selected_text(shown).show_ui(ui, |ui| {
                 for p in stagecraft_geom::truss_profiles() {
                     if ui.selectable_label(profile.as_deref() == Some(&p.name), &p.name).clicked() {
                         batch(s, each("truss.update", &|id| json!({ "id": id, "profile": p.name })));
                     }
                 }
             });
+            widgets::name(&r.response, egui::Role::ComboBox, format!("Inspector {}", t("inspector.profile")));
             ui.end_row();
             let len = common(objs.iter().map(|o| match &o.kind {
                 ObjectKind::Truss { length, .. } => fmt_mm(*length),
@@ -370,13 +372,14 @@ fn choice(
         .as_ref()
         .and_then(|c| options.iter().find(|(v, _)| v == c).map(|o| o.1.clone()))
         .unwrap_or_else(|| t("inspector.mixed").to_owned());
-    egui::ComboBox::from_id_salt(("inspector_choice", salt)).selected_text(shown).show_ui(ui, |ui| {
+    let r = egui::ComboBox::from_id_salt(("inspector_choice", salt)).selected_text(shown).show_ui(ui, |ui| {
         for (v, label) in options {
             if ui.selectable_label(current.as_deref() == Some(v), label).clicked() {
                 batch(s, sel.iter().map(|id| step(cmd, json!({ "id": id, arg: v }))).collect());
             }
         }
     });
+    widgets::name(&r.response, egui::Role::ComboBox, format!("Inspector {}", t(key)));
     ui.end_row();
 }
 
@@ -384,7 +387,7 @@ fn flag(ui: &mut Ui, s: &mut Studio, sel: &[Id], key: &str, current: Option<bool
     ui.label(t(key));
     let mut on = current.unwrap_or(false);
     let r = ui.checkbox(&mut on, "");
-    widgets::name(&r, egui::WidgetType::Checkbox, format!("Inspector {}", t(key)));
+    widgets::name(&r, egui::Role::CheckBox, format!("Inspector {}", t(key)));
     if r.changed() {
         batch(s, sel.iter().map(|id| step(cmd, json!({ "id": id, arg: on }))).collect());
     }
@@ -395,7 +398,7 @@ fn colour(ui: &mut Ui, s: &mut Studio, sel: &[Id], current: Option<String>, cmd:
     ui.label(t("inspector.colour"));
     let mut rgb = current.as_deref().and_then(stagecraft_core::model::parse_color).unwrap_or([128, 128, 128]);
     let r = ui.color_edit_button_srgb(&mut rgb);
-    widgets::name(&r, egui::WidgetType::ColorButton, "Inspector colour");
+    widgets::name(&r, egui::Role::ColorWell, "Inspector colour");
     if r.changed() {
         let hex = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
         batch(s, sel.iter().map(|id| step(cmd, json!({ "id": id, "color": hex }))).collect());
@@ -954,7 +957,7 @@ fn tags_field(ui: &mut Ui, s: &mut Studio, doc: &stagecraft_core::Document, objs
                 });
         }
     });
-    let id = egui::Id::new("inspector_add_tag");
+    let id = egui::Id::unique("inspector_add_tag");
     if let Some(name) = edit_field_hint(ui, id, "", 140.0, "Add tag", t("inspector.add_tag"))
         && !name.trim().is_empty()
     {

@@ -17,6 +17,9 @@ use stagecraft_ui::library::ShareBackend;
 
 fn harness(engine: Engine) -> Harness<'static, Studio> {
     let mut h = Harness::builder()
+        // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
+        // asks for one more frame; closing a modal can take six.
+        .with_max_steps(8)
         .with_size(vec2(1400.0, 900.0))
         .build_ui_state(|ui, s: &mut Studio| s.show(ui), Studio::new(engine));
     h.run_steps(4);

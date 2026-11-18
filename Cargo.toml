@@ -36,11 +36,11 @@ ezpz = "0.2.29"
 faer = { version = "0.24", default-features = false, features = ["std"] }
 earcutr = "0.5"
 rayon = "1.11"
-egui = "0.36.2"
-eframe = "0.36.2"
-egui-wgpu = "0.36.2"
+egui = "0.37"
+eframe = "0.37"
+egui-wgpu = "0.37"
 bytemuck = { version = "1", features = ["derive"] }
-egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot"] }
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 clap = { version = "4.6", features = ["derive"] }
 dirs = "7"
@@ -69,6 +69,21 @@ craft-mcp-server = { git = "https://github.com/storytold/craft-libs", rev = "52f
 craft-mesh = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 craft-xml = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 craft-zip = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
+
+# storytold's egui fork (0.37 plus the suite's patches) and its winit companion, at the
+# revisions craft-libs pins in its own workspace [patch]. A dependency's [patch] is ignored by
+# its consumer, so they are repeated here.
+[patch.crates-io]
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
 
 # Hidden-line removal runs on every sheet change; keep it fast in debug builds too.
 [profile.dev.package.stagecraft-hlr]

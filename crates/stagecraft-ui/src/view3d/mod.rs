@@ -14,7 +14,7 @@ pub mod gpu;
 pub mod offscreen;
 pub mod scene;
 
-use egui::{Align2, Color32, Event, MouseWheelUnit, PointerButton, Rgba, RichText, Sense, Ui, UiBuilder, WidgetType};
+use egui::{Align2, Color32, Event, MouseWheelUnit, PointerButton, Rgba, RichText, Role, Sense, Ui, UiBuilder};
 use glam::DVec3;
 use serde::Serialize;
 use serde_json::json;
@@ -236,7 +236,7 @@ pub(crate) fn uniforms(v: &View3d, pal: &Palette3d, ppp: f32) -> gpu::Uniforms {
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
     let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-    widgets::name(&resp, WidgetType::Other, t("view3d.name"));
+    widgets::name(&resp, Role::Unknown, t("view3d.name"));
     let v = &mut s.ui.view3d;
     v.camera.rect = rect;
     let ids = crate::canvas::visible_ids(s.engine.doc(), &s.ui);
@@ -352,20 +352,20 @@ fn overlay(ui: &mut Ui, s: &mut Studio, rect: egui::Rect) {
     for v in [StdView::Top, StdView::Front, StdView::Side, StdView::Iso] {
         let label = t(v.key());
         let r = child.small_button(label);
-        widgets::name(&r, WidgetType::Button, tf("a11y.view3d", &[("view", &label)]));
+        widgets::name(&r, Role::Button, tf("a11y.view3d", &[("view", &label)]));
         if r.clicked() {
             let _ = s.run("ui.camera", json!({ "view": v }));
         }
     }
     let ortho = s.ui.view3d.camera.projection == Projection::Orthographic;
     let r = child.selectable_label(ortho, t("view3d.ortho_short"));
-    widgets::name(&r, WidgetType::Button, t("view3d.orthographic"));
+    widgets::name(&r, Role::Button, t("view3d.orthographic"));
     if r.clicked() {
         let p = if ortho { Projection::Perspective } else { Projection::Orthographic };
         let _ = s.run("ui.camera", json!({ "projection": p }));
     }
     let r = child.small_button(t("view3d.fit"));
-    widgets::name(&r, WidgetType::Button, t("menu.zoom_fit"));
+    widgets::name(&r, Role::Button, t("menu.zoom_fit"));
     if r.clicked() {
         s.ui.view3d.fit(None);
     }
@@ -408,7 +408,7 @@ fn section_controls(ui: &mut Ui, s: &mut Studio) {
     ] {
         let label = t(key);
         let r = ui.selectable_label(current == mode, label);
-        widgets::name(&r, WidgetType::Button, tf("a11y.section", &[("mode", &label)]));
+        widgets::name(&r, Role::Button, tf("a11y.section", &[("mode", &label)]));
         if r.clicked() && current != mode {
             let args = match mode {
                 "off" => json!({ "off": true }),
@@ -425,7 +425,7 @@ fn section_controls(ui: &mut Ui, s: &mut Studio) {
         let n = plane.n();
         let mut offset = plane.o().dot(n.abs());
         let r = ui.add(egui::DragValue::new(&mut offset).speed(20.0).suffix(" mm"));
-        widgets::name(&r, WidgetType::DragValue, t("view3d.offset"));
+        widgets::name(&r, Role::SpinButton, t("view3d.offset"));
         if r.changed() {
             let o = n.abs() * offset;
             let _ = s.run("ui.section", json!({ "origin": [o.x, o.y, o.z], "normal": plane.normal }));

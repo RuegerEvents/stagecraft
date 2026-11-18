@@ -445,7 +445,7 @@ fn picked_fields(ui: &mut Ui, s: &mut Studio) {
             let ok = relation(&sketch, &items, r).is_some();
             let label = t(r.key());
             let resp = ui.add_enabled(ok, egui::Button::new(label));
-            widgets::name(&resp, egui::WidgetType::Button, format!("Sketch {label}"));
+            widgets::name(&resp, egui::Role::Button, format!("Sketch {label}"));
             if resp.clicked() {
                 apply_relation(s, r);
             }
@@ -691,14 +691,14 @@ pub fn editor(ui: &Ui, s: &mut Studio) {
     let mut apply = false;
     let mut cancel = false;
     let mut focused = false;
-    egui::Area::new(egui::Id::new("dimension_editor"))
+    egui::Area::new(egui::Id::unique("dimension_editor"))
         .fixed_pos(at - vec2(42.0, 11.0))
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).inner_margin(2.0).show(ui, |ui| {
                 let r =
                     ui.add(egui::TextEdit::singleline(&mut text).desired_width(76.0).font(theme::proportional(13.0)));
-                widgets::name(&r, egui::WidgetType::TextEdit, "Dimension value");
+                widgets::name(&r, egui::Role::TextInput, "Dimension value");
                 if edit.focus && !r.has_focus() {
                     r.request_focus();
                 }
@@ -824,7 +824,7 @@ fn dimension_fields(ui: &mut Ui, s: &mut Studio, src: DimSource) {
         ui.label(t("sketch.value"));
         let shown = dims::format_value(value, angle);
         if driving == Some(true) {
-            let id = egui::Id::new(("inspector", "dimension_value"));
+            let id = egui::Id::unique(("inspector", "dimension_value"));
             if let Some(v) = widgets::edit_field(ui, id, &shown, 90.0, "Inspector Dimension value") {
                 let parsed = if angle { crate::tools::parse_angle(&v) } else { crate::tools::parse_length(&v) };
                 match parsed {
@@ -844,7 +844,7 @@ fn dimension_fields(ui: &mut Ui, s: &mut Studio, src: DimSource) {
             ui.label(t("sketch.driving"));
             let mut on = d;
             let r = ui.checkbox(&mut on, "");
-            widgets::name(&r, egui::WidgetType::Checkbox, "Inspector Driving");
+            widgets::name(&r, egui::Role::CheckBox, "Inspector Driving");
             if r.changed() {
                 let mut args = dim_args(src);
                 args["driving"] = json!(on);
@@ -853,7 +853,7 @@ fn dimension_fields(ui: &mut Ui, s: &mut Studio, src: DimSource) {
             ui.end_row();
         }
         ui.label(t("sketch.name"));
-        let id = egui::Id::new(("inspector", "dimension_name"));
+        let id = egui::Id::unique(("inspector", "dimension_name"));
         if let Some(v) = widgets::edit_field(ui, id, name.as_deref().unwrap_or(""), 140.0, "Inspector Dimension name") {
             let mut args = dim_args(src);
             args["name"] = json!(v);

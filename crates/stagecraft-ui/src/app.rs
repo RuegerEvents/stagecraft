@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use egui::{Event, KeyboardShortcut, Modifiers, Ui};
+use egui::{KeyboardShortcut, Modifiers, Ui};
 use serde_json::{Value, json};
 use stagecraft_control::{Server, discovery};
 use stagecraft_core::{CmdError, Engine};
@@ -245,6 +245,8 @@ pub struct StageApp {
     server: Option<Server>,
     _registration: Option<discovery::Registration>,
     shot_requested: bool,
+    /// Filled by the screenshot callback once the frame arrives.
+    shot_slot: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
     title: String,
 }
 
@@ -275,12 +277,7 @@ impl StageApp {
     }
 
     fn take_screenshots(&mut self, ui: &Ui) {
-        let image = ui.input(|i| {
-            i.events.iter().find_map(|e| match e {
-                Event::Screenshot { image, .. } => Some(image.clone()),
-                _ => None,
-            })
-        });
+        let image = self.shot_slot.lock().ok().and_then(|mut s| s.take());
         if let Some(image) = image {
             self.shot_requested = false;
             for shot in std::mem::take(&mut self.studio.ui.shots) {
@@ -296,7 +293,15 @@ impl StageApp {
             }
         }
         if !self.studio.ui.shots.is_empty() && !self.shot_requested {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            let slot = self.shot_slot.clone();
+            let ctx = ui.ctx().clone();
+            let done = egui::ScreenshotCallback::new(move |image| {
+                if let Ok(mut s) = slot.lock() {
+                    *s = Some(image);
+                }
+                ctx.request_repaint();
+            });
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(done));
             self.shot_requested = true;
             ui.ctx().request_repaint();
         }
@@ -382,7 +387,14 @@ pub fn run(engine: Engine) -> Result<(), String> {
             let wake = ctx.clone();
             studio.dialogs = craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint()));
             studio.offscreen = cc.wgpu_render_state.as_ref().map(view3d::offscreen::Offscreen::from_render_state);
-            Ok(Box::new(StageApp { studio, server, _registration: registration, shot_requested: false, title }))
+            Ok(Box::new(StageApp {
+                studio,
+                server,
+                _registration: registration,
+                shot_requested: false,
+                shot_slot: Default::default(),
+                title,
+            }))
         }),
     )
     .map_err(|e| e.to_string())

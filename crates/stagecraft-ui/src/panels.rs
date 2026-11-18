@@ -1,6 +1,6 @@
 //! Menu bar, toolbar, status bar, layers and tags panels.
 
-use egui::{RichText, Ui, WidgetType};
+use egui::{RichText, Role, Ui};
 use serde_json::{Value, json};
 use stagecraft_core::{Id, Layer};
 
@@ -143,7 +143,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
                 }
                 let label = t(tool.key());
                 let r = ui.selectable_label(s.ui.tool == tool, label);
-                widgets::name(&r, WidgetType::Button, tf("a11y.tool", &[("tool", &label)]));
+                widgets::name(&r, Role::Button, tf("a11y.tool", &[("tool", &label)]));
                 let tip = match tool.shortcut() {
                     Some(k) => tf("tool.tip", &[("tool", &label), ("key", &format!("{k:?}"))]),
                     None => label.to_owned(),
@@ -166,7 +166,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
             ] {
                 let label = t(key);
                 let r = ui.selectable_label(s.ui.view == view, label);
-                widgets::name(&r, WidgetType::Button, tf("a11y.view", &[("view", &label)]));
+                widgets::name(&r, Role::Button, tf("a11y.view", &[("view", &label)]));
                 if r.clicked() {
                     let _ = s.run("ui.set_view", json!({ "view": view }));
                 }
@@ -185,7 +185,7 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
     let o = s.ui.options.clone();
     let profile_box = |ui: &mut Ui, s: &mut Studio| {
         ui.label(t("option.profile"));
-        egui::ComboBox::from_id_salt("truss_profile").selected_text(&o.truss_profile).show_ui(ui, |ui| {
+        let r = egui::ComboBox::from_id_salt("truss_profile").selected_text(&o.truss_profile).show_ui(ui, |ui| {
             for p in stagecraft_geom::truss_profiles() {
                 let label = format!("{}  {} · {} mm", p.name, p.maker, p.width);
                 if ui.selectable_label(p.name == o.truss_profile, label).clicked() {
@@ -193,6 +193,7 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
                 }
             }
         });
+        widgets::name(&r.response, egui::Role::ComboBox, format!("Option {}", t("option.profile")));
     };
     match s.ui.tool {
         Tool::Truss | Tool::Run => {
@@ -217,7 +218,7 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
         }
         Tool::Wings => {
             ui.label(t("option.count"));
-            let id = egui::Id::new(("tool_option", "wing_count"));
+            let id = egui::Id::unique(("tool_option", "wing_count"));
             if let Some(v) = edit_field(ui, id, &o.wing_count.to_string(), 32.0, t("option.count"))
                 && let Ok(n) = v.trim().parse::<u32>()
             {
@@ -228,18 +229,20 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
         }
         Tool::Platform => {
             ui.label(t("option.size"));
-            egui::ComboBox::from_id_salt("platform_preset").selected_text(&o.platform_preset).show_ui(ui, |ui| {
-                for p in ["2x1", "1x1", "2x0.5", "1x0.5"] {
-                    if ui.selectable_label(o.platform_preset == p, format!("{p} m")).clicked() {
-                        let _ = s.run("ui.set_tool_options", json!({ "platform_preset": p }));
+            let r =
+                egui::ComboBox::from_id_salt("platform_preset").selected_text(&o.platform_preset).show_ui(ui, |ui| {
+                    for p in ["2x1", "1x1", "2x0.5", "1x0.5"] {
+                        if ui.selectable_label(o.platform_preset == p, format!("{p} m")).clicked() {
+                            let _ = s.run("ui.set_tool_options", json!({ "platform_preset": p }));
+                        }
                     }
-                }
-            });
+                });
+            widgets::name(&r.response, egui::Role::ComboBox, format!("Option {}", t("option.size")));
             mm_option(ui, s, "option.height", "platform_height", o.platform_height);
             ui.label(t("option.system"));
             let shown =
                 if o.platform_system.is_empty() { t("option.none").to_owned() } else { o.platform_system.clone() };
-            egui::ComboBox::from_id_salt("platform_system").selected_text(shown).show_ui(ui, |ui| {
+            let r = egui::ComboBox::from_id_salt("platform_system").selected_text(shown).show_ui(ui, |ui| {
                 if ui.selectable_label(o.platform_system.is_empty(), t("option.none")).clicked() {
                     let _ = s.run("ui.set_tool_options", json!({ "platform_system": "" }));
                 }
@@ -250,16 +253,18 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
                     }
                 }
             });
+            widgets::name(&r.response, egui::Role::ComboBox, format!("Option {}", t("option.system")));
         }
         Tool::Support => {
             ui.label(t("option.preset"));
-            egui::ComboBox::from_id_salt("support_preset").selected_text(&o.support_preset).show_ui(ui, |ui| {
+            let r = egui::ComboBox::from_id_salt("support_preset").selected_text(&o.support_preset).show_ui(ui, |ui| {
                 for p in stagecraft_geom::supports() {
                     if ui.selectable_label(o.support_preset == p.name, &p.name).clicked() {
                         let _ = s.run("ui.set_tool_options", json!({ "support_preset": p.name }));
                     }
                 }
             });
+            widgets::name(&r.response, egui::Role::ComboBox, format!("Option {}", t("option.preset")));
         }
         Tool::Hoist => mm_option(ui, s, "option.height", "hoist_height", o.hoist_height),
         Tool::Ceiling => mm_option(ui, s, "option.height", "ceiling_height", o.ceiling_height),
@@ -276,7 +281,7 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
 
 fn mm_option(ui: &mut Ui, s: &mut Studio, label: &str, field: &str, value: f64) {
     ui.label(t(label));
-    let id = egui::Id::new(("tool_option", field));
+    let id = egui::Id::unique(("tool_option", field));
     if let Some(v) = edit_field(ui, id, &fmt_mm(value), 56.0, t(label))
         && let Some(mm) = parse_mm(&v)
     {
@@ -390,7 +395,7 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
             ui.spacing_mut().item_spacing.x = 4.0;
             let mut vis = l.visible;
             let r = ui.checkbox(&mut vis, "");
-            widgets::name(&r, WidgetType::Checkbox, format!("Visible {}", l.name));
+            widgets::name(&r, Role::CheckBox, format!("Visible {}", l.name));
             if r.on_hover_text(t("layers.visible")).changed() {
                 let _ = s.run("layer.update", json!({ "layer": l.id, "visible": vis }));
             }
@@ -403,13 +408,13 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
             }
             // Name takes what the elevation field and the three buttons leave.
             let name_w = (ui.available_width() - 56.0 - 3.0 * 22.0 - 8.0).max(50.0);
-            let id = egui::Id::new(("layer_name", l.id));
+            let id = egui::Id::unique(("layer_name", l.id));
             if let Some(name) = edit_field(ui, id, &l.name, name_w, &format!("Layer name {}", l.name))
                 && !name.trim().is_empty()
             {
                 let _ = s.run("layer.update", json!({ "layer": l.id, "name": name.trim() }));
             }
-            let id = egui::Id::new(("layer_elev", l.id));
+            let id = egui::Id::unique(("layer_elev", l.id));
             if let Some(v) = edit_field(ui, id, &fmt_mm(l.elevation), 48.0, &format!("Elevation {}", l.name)) {
                 match parse_mm(&v) {
                     Some(mm) => {
@@ -472,7 +477,7 @@ pub fn tags(ui: &mut Ui, s: &mut Studio) {
         ui.horizontal(|ui| {
             let mut vis = !s.ui.hidden_tags.contains(&id);
             let r = ui.checkbox(&mut vis, format!("{name}  ({n})"));
-            widgets::name(&r, WidgetType::Checkbox, format!("Show tag {name}"));
+            widgets::name(&r, Role::CheckBox, format!("Show tag {name}"));
             if r.changed() {
                 let _ = s.run("ui.set_tag_visible", json!({ "tag": id, "visible": vis }));
             }
@@ -485,7 +490,7 @@ pub fn tags(ui: &mut Ui, s: &mut Studio) {
         });
     }
     ui.horizontal(|ui| {
-        let id = egui::Id::new("new_tag");
+        let id = egui::Id::unique("new_tag");
         if let Some(name) = crate::widgets::edit_field_hint(ui, id, "", 140.0, "New tag", t("tags.new_hint"))
             && !name.trim().is_empty()
         {

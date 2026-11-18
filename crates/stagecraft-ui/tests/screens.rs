@@ -30,6 +30,9 @@ fn harness_with(theme: ThemePref, engine: stagecraft_core::Engine) -> Harness<'s
     let (renderer, off) = renderer();
     studio.offscreen = Some(off);
     let mut h = Harness::builder()
+        // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
+        // asks for one more frame; closing a modal can take six.
+        .with_max_steps(8)
         .with_size(vec2(1440.0, 900.0))
         .renderer(renderer)
         .build_ui_state(|ui, s: &mut Studio| s.show(ui), studio);

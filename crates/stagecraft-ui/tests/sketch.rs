@@ -12,6 +12,9 @@ use stagecraft_ui::Studio;
 
 fn harness(engine: Engine) -> Harness<'static, Studio> {
     let mut h = Harness::builder()
+        // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
+        // asks for one more frame; closing a modal can take six.
+        .with_max_steps(8)
         .with_size(vec2(1400.0, 900.0))
         // Real frame times, so two clicks can be a double click (the default step of
         // 0.25 s is near egui's 0.3 s double-click delay).
