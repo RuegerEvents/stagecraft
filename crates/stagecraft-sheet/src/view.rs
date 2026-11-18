@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 
 use glam::{DAffine3, DVec3, Vec3};
-use stagecraft_core::{Document, Id};
+use stagecraft_core::{Document, Id, ObjectKind};
 use stagecraft_geom::section::{self, Plane};
 use stagecraft_geom::{Lod, Mesh};
 
@@ -110,6 +110,10 @@ const CREASE_DEG: f64 = 25.0;
 
 fn lod_for(doc: &Document, id: Id, scale: f64) -> Lod {
     let Some(o) = doc.objects.get(&id) else { return Lod::Box };
+    // Pleats as outlines are a wall of lines; draw cloth flat unless close up.
+    if matches!(o.kind, ObjectKind::Curtain { .. } | ObjectKind::Masking { .. }) && scale > 25.0 {
+        return Lod::Box;
+    }
     match stagecraft_geom::kinds::detail_size(o) {
         Some(d) if d / scale < 0.4 => Lod::Box,
         Some(d) if d / scale < 1.2 => Lod::Simple,

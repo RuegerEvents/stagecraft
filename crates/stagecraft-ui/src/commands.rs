@@ -88,7 +88,17 @@ pub const UI_KIND: &str = "ui";
 fn register(r: &mut UiRegistry) {
     r.add("ui.state", "Tool, view, camera, theme, panels, hidden tags, selection and status", state);
     r.add("ui.set_tool", "Pick the active tool (select, move, rotate, floor, wall, truss, fixture)", set_tool);
-    r.add("ui.set_view", "Show the plan, the 3D view, or both side by side (split)", set_view);
+    r.add("ui.set_view", "Show the plan, the 3D view, both side by side (split), or the sheets", set_view);
+    r.add(
+        "ui.sheet",
+        "Sheets mode: show a sheet (id, number or name), select a viewport, open its editor, fit the paper",
+        sheet,
+    );
+    r.add(
+        "ui.set_label_template",
+        "Draw fixture labels in the plan with a label template (or FIDs only with null)",
+        set_label_template,
+    );
     r.add("ui.zoom", "Zoom the plan by a factor or to a scale", zoom);
     r.add("ui.pan", "Move the plan view by an offset or centre it on a point", pan);
     r.add("ui.zoom_to_fit", "Fit the drawing (or the selection) into the views shown", zoom_to_fit);
@@ -141,6 +151,10 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "palette_open": ui.palette.open,
         "selection": c.engine.selection(),
         "status": ui.status.as_ref().map(|s| &s.0),
+        "sheet": crate::sheets::current(c.engine.doc(), &ui.sheets),
+        "sheet_viewport": ui.sheets.viewport,
+        "viewport_editor": ui.sheets.editor,
+        "plan_labels": ui.plan_labels,
     }))
 }
 
@@ -162,6 +176,86 @@ struct ViewArgs {
 fn set_view(c: &mut UiCtx, a: ViewArgs) -> CmdResult {
     c.ui.view = a.view;
     Ok(json!({ "view": a.view }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SheetArgs {
+    /// Sheet id, number or name. Default: the one shown (or the first).
+    sheet: Option<String>,
+    /// Select this viewport (on the sheet); `null` clears the selection.
+    #[serde(default, deserialize_with = "some")]
+    viewport: Option<Option<stagecraft_core::Id>>,
+    /// Open (true) or close the viewport editor for the selected viewport.
+    editor: Option<bool>,
+    /// Fit the paper into the window. Default true when the sheet changes.
+    fit: Option<bool>,
+}
+
+/// Tells a missing field from an explicit `null`.
+fn some<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
+fn sheet(c: &mut UiCtx, a: SheetArgs) -> CmdResult {
+    let doc = c.engine.doc();
+    let before = crate::sheets::current(doc, &c.ui.sheets);
+    if let Some(r) = &a.sheet {
+        let id = if let Ok(id) = r.parse::<stagecraft_core::Id>()
+            && doc.sheets.contains_key(&id)
+        {
+            id
+        } else {
+            doc.sheets
+                .values()
+                .find(|s| &s.number == r || &s.name == r)
+                .map(|s| s.id)
+                .ok_or_else(|| CmdError::not_found("sheet", r))?
+        };
+        c.ui.sheets.current = Some(id);
+    }
+    let cur =
+        crate::sheets::current(doc, &c.ui.sheets).ok_or_else(|| CmdError::invalid("the document has no sheets"))?;
+    if before != Some(cur) {
+        c.ui.sheets.viewport = None;
+        c.ui.sheets.fit_pending = true;
+    }
+    if let Some(v) = a.viewport {
+        if let Some(v) = v
+            && doc.sheets[&cur].viewport(v).is_none()
+        {
+            return Err(CmdError::not_found("viewport on this sheet", v));
+        }
+        c.ui.sheets.viewport = v;
+    }
+    if let Some(e) = a.editor {
+        c.ui.sheets.editor = e && c.ui.sheets.viewport.is_some();
+    }
+    if let Some(f) = a.fit {
+        c.ui.sheets.fit_pending = f;
+    }
+    c.ui.view = View::Sheets;
+    Ok(json!({ "sheet": cur, "viewport": c.ui.sheets.viewport, "editor": c.ui.sheets.editor }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct LabelTemplateArgs {
+    /// Template id or name; `null` = plain FIDs.
+    template: Option<String>,
+}
+
+fn set_label_template(c: &mut UiCtx, a: LabelTemplateArgs) -> CmdResult {
+    let doc = c.engine.doc();
+    c.ui.plan_labels = match a.template {
+        None => None,
+        Some(r) => Some(
+            doc.label_templates
+                .values()
+                .find(|t| t.id.to_string() == r || t.name == r)
+                .map(|t| t.id)
+                .ok_or_else(|| CmdError::not_found("label template", &r))?,
+        ),
+    };
+    Ok(json!({ "template": c.ui.plan_labels }))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -218,6 +312,9 @@ fn zoom_to_fit(c: &mut UiCtx, a: FitArgs) -> CmdResult {
     let ids: Vec<_> =
         if a.selection { c.engine.selection().to_vec() } else { crate::canvas::visible_ids(c.engine.doc(), c.ui) };
     let mut out = json!({});
+    if c.ui.view == View::Sheets {
+        c.ui.sheets.fit_pending = true;
+    }
     if c.ui.view.shows_plan() {
         let b = stagecraft_geom::pick::objects_bounds(c.engine.doc(), ids.clone(), &Default::default());
         c.ui.camera.fit(b);

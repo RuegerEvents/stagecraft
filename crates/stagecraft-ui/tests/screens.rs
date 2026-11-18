@@ -140,5 +140,28 @@ fn screenshots() {
         run(&mut h, "ui.set_view", json!({ "view": "split" }));
         run(&mut h, "ui.zoom_to_fit", json!(null));
         save(&mut h, &dir, &format!("10-split-{tn}"));
+
+        // Sheets: white paper in both themes. The lighting plan with a viewport
+        // selected, then the elevation sheet with the viewport editor open.
+        run(&mut h, "ui.sheet", json!({ "sheet": "L-101", "fit": true }));
+        let doc = h.state().engine.doc().clone();
+        let l101 = doc.sheets.values().find(|s| s.number == "L-101").unwrap();
+        run(&mut h, "ui.sheet", json!({ "viewport": l101.viewports[0].id }));
+        save(&mut h, &dir, &format!("17-sheet-plan-{tn}"));
+        let l102 = doc.sheets.values().find(|s| s.number == "L-102").unwrap();
+        run(&mut h, "ui.sheet", json!({ "sheet": "L-102", "viewport": l102.viewports[0].id, "editor": true }));
+        save(&mut h, &dir, &format!("18-sheet-sections-{tn}"));
+        run(&mut h, "ui.sheet", json!({ "editor": false, "viewport": null }));
+        // Labels in the plan canvas, close to LX1 (fixtures turned 180°).
+        run(&mut h, "ui.set_view", json!({ "view": "plan" }));
+        run(&mut h, "ui.set_label_template", json!({ "template": "Electrics" }));
+        run(&mut h, "ui.zoom", json!({ "scale": 0.12 }));
+        run(&mut h, "ui.pan", json!({ "center": [0, 2400] }));
+        save(&mut h, &dir, &format!("19-plan-labels-{tn}"));
+        run(&mut h, "ui.set_label_template", json!({ "template": null }));
+        if tn == "light" {
+            let pdf = format!("{dir}/demo-sheets.pdf");
+            h.state_mut().run("sheet.export_pdf", json!({ "path": pdf })).expect("export");
+        }
     }
 }

@@ -345,19 +345,22 @@ impl TitleBlock {
                 line([0.0, 34.0], [180.0, 34.0]),
                 line([0.0, 17.0], [180.0, 17.0]),
                 line([120.0, 0.0], [120.0, 50.0]),
-                line([60.0, 0.0], [60.0, 17.0]),
+                line([55.0, 0.0], [55.0, 17.0]),
+                line([95.0, 0.0], [95.0, 17.0]),
                 line([150.0, 0.0], [150.0, 17.0]),
                 // Project and venue.
                 t([3.0, 45.5], "PROJECT", small, false),
                 t([3.0, 37.5], "{project}", 4.0, true),
                 t([3.0, 28.5], "VENUE", small, false),
                 t([3.0, 21.0], "{venue}", 3.0, false),
-                // Sheet name and number.
+                // Sheet name, drawn by, number.
                 t([3.0, 12.0], "SHEET", small, false),
                 t([3.0, 4.0], "{sheet_name}", 3.0, true),
-                t([63.0, 12.0], "DRAWN BY", small, false),
-                t([63.0, 4.0], "{drawn_by}", 2.5, false),
-                // Right column: company/logo, scale, date, revision, number.
+                t([58.0, 12.0], "DRAWN BY", small, false),
+                t([58.0, 4.0], "{drawn_by}", 2.2, false),
+                t([98.0, 12.0], "No.", small, false),
+                t([98.0, 4.0], "{sheet_number}", 3.5, true),
+                // Right column: company/logo, scale, date, revision.
                 TitleItem::Logo { min: [122.0, 35.5], max: [178.0, 48.5] },
                 t([123.0, 28.5], "COMPANY", small, false),
                 t([123.0, 21.0], "{company}", 2.5, false),
@@ -365,9 +368,6 @@ impl TitleBlock {
                 t([123.0, 4.0], "{scale}", 2.5, false),
                 t([153.0, 12.0], "DATE / REV", small, false),
                 t([153.0, 4.0], "{date} {revision}", 2.2, false),
-                t([90.0, 12.0], "No.", small, false),
-                t([90.0, 4.0], "{sheet_number}", 3.5, true),
-                line([87.0, 0.0], [87.0, 17.0]),
             ],
         }
     }

@@ -208,8 +208,74 @@ pub fn engine() -> Engine {
     let plate = run(&mut e, "support.create", json!({ "preset": "Base plate 600", "position": [-6500, 10800, 0] }));
     fixture(&mut e, &plate["id"], "Floor wash", [0.0, 0.0, 10.0], [180.0, 0.0, 0.0]);
 
+    sheets(&mut e);
+
     // Nothing to undo in a fresh demo.
     let mut fresh = Engine::with_document(e.doc().clone());
     std::mem::swap(&mut e, &mut fresh);
     e
+}
+
+/// Gels and circuits on the fixtures, two label templates and two sheets: the
+/// lighting plan with labels, legend and fixture list, and elevations/sections.
+fn sheets(e: &mut Engine) {
+    run(e, "doc.set_meta", json!({ "drawn_by": "StageCraft demo", "date": "2026-11-18", "revision": "A" }));
+    let mut fixtures: Vec<(u32, stagecraft_core::Id, String)> = e
+        .doc()
+        .objects
+        .values()
+        .filter_map(|o| match o.kind {
+            stagecraft_core::ObjectKind::Fixture { fid, .. } => Some((fid.unwrap_or(0), o.id, o.name.clone())),
+            _ => None,
+        })
+        .collect();
+    fixtures.sort();
+    for (circuit, (_, id, name)) in (1..).zip(fixtures) {
+        let gel = match name.split(' ').next().unwrap_or("") {
+            "FOH" => "L201",
+            "LX1" => "L202",
+            "LX2" => "L106",
+            "LX3" => "R80",
+            "Boom" => "L156",
+            _ => "L117",
+        };
+        run(e, "object.set_attrs", json!({ "ids": [id], "attrs": { "gel": gel, "circuit": circuit.to_string() } }));
+    }
+    run(e, "label.create", json!({ "name": "Electrics" }));
+    run(
+        e,
+        "label.create",
+        json!({ "name": "Focus", "rotation": "follow", "fields": [
+            { "field": "fid", "boxed": true, "bold": true, "size": 2.2 },
+            { "field": "gel", "anchor": [0, 230], "size": 1.8 },
+            { "field": "circuit", "anchor": [0, -190], "size": 1.6, "prefix": "C" }
+        ] }),
+    );
+    let plan = run(e, "sheet.create", json!({ "name": "Lighting plan", "number": "L-101", "paper": "a3" }));
+    run(
+        e,
+        "viewport.create",
+        json!({ "sheet": plan["id"], "view": "plan", "name": "Lighting plan", "scale": 100, "label_template": "Electrics",
+                "hidden_tags": ["ceiling"], "crop": [[-10200, -9000], [10200, 12600]], "position": [117, 160] }),
+    );
+    run(e, "viewport.create", json!({ "sheet": plan["id"], "view": "fixture_list", "position": [323, 195] }));
+    let cuts = run(e, "sheet.create", json!({ "name": "Elevation and section", "number": "L-102", "paper": "a3" }));
+    run(
+        e,
+        "viewport.create",
+        json!({ "sheet": cuts["id"], "view": "front", "name": "Front elevation", "scale": 100,
+                "hidden_tags": ["ceiling", "house"], "crop": [[-10200, -1200], [10200, 10500]], "position": [117, 205] }),
+    );
+    run(
+        e,
+        "viewport.create",
+        json!({ "sheet": cuts["id"], "view": "section_x", "name": "Centre-line section", "scale": 150,
+                "hidden_tags": ["ceiling"], "position": [117, 75] }),
+    );
+    run(
+        e,
+        "viewport.create",
+        json!({ "sheet": cuts["id"], "view": "rendered", "name": "3D view", "scale": 100,
+                "crop": [[-8000, -5500], [8000, 5500]], "position": [320, 205] }),
+    );
 }

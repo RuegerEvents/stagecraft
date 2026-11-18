@@ -151,6 +151,8 @@ pub enum View {
     ThreeD,
     /// Plan on the left, 3D on the right.
     Split,
+    /// Drawing sheets: white paper with viewports, title block and labels.
+    Sheets,
 }
 
 impl View {
@@ -372,6 +374,10 @@ pub struct UiState {
     pub table: TableState,
     /// Last message for the status bar; `true` = error.
     pub status: Option<(String, bool)>,
+    /// The Sheets mode: current sheet, selected viewport, paper camera.
+    pub sheets: crate::sheets::SheetsState,
+    /// Label template the plan canvas draws fixture labels with (`None` = FIDs only).
+    pub plan_labels: Option<Id>,
     pub shots: Vec<PendingShot>,
     /// Set by the File menu; the app shows a native dialog outside the frame.
     pub file_request: Option<FileRequest>,
@@ -383,6 +389,10 @@ pub struct UiState {
 pub enum FileRequest {
     Open,
     SaveAs,
+    /// Export every sheet as one PDF.
+    ExportPdf,
+    /// Pick a logo for the title block.
+    Logo,
 }
 
 impl Default for UiState {
@@ -403,6 +413,8 @@ impl Default for UiState {
             palette: PaletteState::default(),
             table: TableState::default(),
             status: None,
+            sheets: Default::default(),
+            plan_labels: None,
             shots: Vec::new(),
             file_request: None,
             native_dialogs: false,

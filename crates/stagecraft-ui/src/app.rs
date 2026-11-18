@@ -22,6 +22,7 @@ pub struct Studio {
 
 impl Studio {
     pub fn new(engine: Engine) -> Self {
+        stagecraft_sheet::install();
         Self { engine, ui: UiState::default() }
     }
 
@@ -46,6 +47,8 @@ impl Studio {
             self.ui.hidden_tags.clear();
             self.ui.active_layer = None;
             self.ui.gesture = Default::default();
+            self.ui.sheets = Default::default();
+            self.ui.plan_labels = None;
         }
     }
 
@@ -84,14 +87,19 @@ impl Studio {
         egui::Panel::top("menu").show(ui, |ui| panels::menu_bar(ui, self));
         egui::Panel::top("toolbar").show(ui, |ui| panels::toolbar(ui, self));
         egui::Panel::bottom("status").show(ui, |ui| panels::status_bar(ui, self));
-        if self.ui.panels.table {
+        if self.ui.panels.table && self.ui.view != View::Sheets {
             egui::Panel::bottom("table")
                 .resizable(true)
                 .default_size(230.0)
                 .min_size(120.0)
                 .show(ui, |ui| table::show(ui, self));
         }
-        if self.ui.panels.layers || self.ui.panels.tags {
+        let sheets = self.ui.view == View::Sheets;
+        if sheets {
+            egui::Panel::left("left").resizable(true).default_size(270.0).min_size(220.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| crate::sheets::list_panel(ui, self));
+            });
+        } else if self.ui.panels.layers || self.ui.panels.tags {
             egui::Panel::left("left").resizable(true).default_size(270.0).min_size(220.0).show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if self.ui.panels.layers {
@@ -106,12 +114,15 @@ impl Studio {
         }
         if self.ui.panels.inspector {
             egui::Panel::right("inspector").resizable(true).default_size(280.0).min_size(240.0).show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| crate::inspector::show(ui, self));
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if sheets { crate::sheets::inspector(ui, self) } else { crate::inspector::show(ui, self) }
+                });
             });
         }
         egui::CentralPanel::no_frame().show(ui, |ui| match self.ui.view {
             View::Plan => canvas::show(ui, self),
             View::ThreeD => view3d::show(ui, self),
+            View::Sheets => crate::sheets::show(ui, self),
             View::Split => {
                 let (left, right) = ui.max_rect().split_left_right_at_fraction(0.5);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(left.shrink2(egui::vec2(0.5, 0.0))), |ui| {
@@ -159,8 +170,10 @@ fn shortcuts(ui: &mut Ui, s: &mut Studio) {
     if pressed(ui, cmd(Key::Num0)) {
         let _ = s.run("ui.zoom_to_fit", Value::Null);
     }
-    // ⌘1 plan, ⌘2 3D, ⌘3 split.
-    for (key, view) in [(Key::Num1, View::Plan), (Key::Num2, View::ThreeD), (Key::Num3, View::Split)] {
+    // ⌘1 plan, ⌘2 3D, ⌘3 split, ⌘4 sheets.
+    for (key, view) in
+        [(Key::Num1, View::Plan), (Key::Num2, View::ThreeD), (Key::Num3, View::Split), (Key::Num4, View::Sheets)]
+    {
         if pressed(ui, cmd(key)) {
             let _ = s.run("ui.set_view", json!({ "view": view }));
         }
@@ -271,6 +284,24 @@ impl StageApp {
             FileRequest::SaveAs => {
                 if let Some(path) = filter(rfd::FileDialog::new()).set_file_name("Untitled.stagecraft").save_file() {
                     let _ = s.run("doc.save", json!({ "path": path }));
+                }
+            }
+            FileRequest::ExportPdf => {
+                let name = s
+                    .engine
+                    .path()
+                    .and_then(|p| p.file_stem())
+                    .map_or_else(|| "Sheets".to_owned(), |n| n.to_string_lossy().into_owned());
+                if let Some(path) =
+                    rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(format!("{name}.pdf")).save_file()
+                    && s.run("sheet.export_pdf", json!({ "path": path })).is_ok()
+                {
+                    s.ui.info(tf("status.exported", &[("path", &path.display())]));
+                }
+            }
+            FileRequest::Logo => {
+                if let Some(path) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() {
+                    let _ = s.run("doc.set_meta", json!({ "logo_file": path }));
                 }
             }
         }

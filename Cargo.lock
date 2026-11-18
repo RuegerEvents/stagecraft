@@ -4031,6 +4031,7 @@ dependencies = [
  "stagecraft-control",
  "stagecraft-core",
  "stagecraft-geom",
+ "stagecraft-sheet",
  "tempfile",
  "uuid",
 ]

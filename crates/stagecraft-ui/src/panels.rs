@@ -40,6 +40,10 @@ pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
             if ui.button(t("menu.save_as")).clicked() {
                 save(s, true);
             }
+            ui.separator();
+            if ui.add_enabled(!s.engine.doc().sheets.is_empty(), egui::Button::new(t("menu.export_pdf"))).clicked() {
+                s.ui.file_request = Some(FileRequest::ExportPdf);
+            }
         });
         ui.menu_button(t("menu.edit"), |ui| {
             if ui.add_enabled(s.engine.can_undo(), egui::Button::new(t("menu.undo"))).clicked() {
@@ -59,7 +63,12 @@ pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
             }
         });
         ui.menu_button(t("menu.view"), |ui| {
-            for (view, key) in [(View::Plan, "view.plan"), (View::ThreeD, "view.3d"), (View::Split, "view.split")] {
+            for (view, key) in [
+                (View::Plan, "view.plan"),
+                (View::ThreeD, "view.3d"),
+                (View::Split, "view.split"),
+                (View::Sheets, "view.sheets"),
+            ] {
                 if ui.radio(s.ui.view == view, t(key)).clicked() {
                     let _ = s.run("ui.set_view", json!({ "view": view }));
                 }
@@ -103,7 +112,9 @@ pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
 pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
     ui.add_space(3.0);
     ui.horizontal(|ui| {
-        for (i, group) in [&Tool::DRAW[..], &Tool::STAGE[..]].into_iter().enumerate() {
+        let groups: Vec<&[Tool]> =
+            if s.ui.view == View::Sheets { Vec::new() } else { vec![&Tool::DRAW[..], &Tool::STAGE[..]] };
+        for (i, group) in groups.into_iter().enumerate() {
             if i > 0 {
                 ui.separator();
             }
@@ -125,7 +136,12 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
                 s.ui.palette.open();
             }
             ui.separator();
-            for (view, key) in [(View::Split, "view.split"), (View::ThreeD, "view.3d"), (View::Plan, "view.plan")] {
+            for (view, key) in [
+                (View::Sheets, "view.sheets"),
+                (View::Split, "view.split"),
+                (View::ThreeD, "view.3d"),
+                (View::Plan, "view.plan"),
+            ] {
                 let label = t(key);
                 let r = ui.selectable_label(s.ui.view == view, label);
                 widgets::name(&r, WidgetType::Button, tf("a11y.view", &[("view", &label)]));
@@ -135,7 +151,11 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
             }
         });
     });
-    ui.horizontal(|ui| tool_options(ui, s));
+    if s.ui.view == View::Sheets {
+        ui.label(RichText::new(t("hint.sheets")).weak());
+    } else {
+        ui.horizontal(|ui| tool_options(ui, s));
+    }
     ui.add_space(3.0);
 }
 

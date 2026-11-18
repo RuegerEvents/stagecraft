@@ -224,7 +224,17 @@ pub fn plan_labels(doc: &Document, vp: &Viewport, t: &LabelTemplate, ids: &[Id],
                 && f.center[1] <= rect[1][1]
         })
         .collect();
-    labels::place(t, &inputs, &text_width, &[])
+    // Text the plan draws itself (batten numbers, platform heights) stays readable.
+    let obstacles: Vec<[P2; 2]> = plan_prims(doc, vp, ids)
+        .into_iter()
+        .flat_map(|x| x.1)
+        .filter(|p| matches!(p, PlanPrim::Text { .. }))
+        .map(|p| {
+            let b = p.extent();
+            [m.to_paper(b.min), m.to_paper(b.max)]
+        })
+        .collect();
+    labels::place(t, &inputs, &text_width, &obstacles)
 }
 
 /// Primitives of placed labels: boxes, text, leaders.
@@ -556,10 +566,33 @@ fn title_block(doc: &Document, sheet: &Sheet, tb: &TitleBlock, origin: P2, out: 
                 if s.is_empty() {
                     continue;
                 }
+                // Shrink text that would run into the next cell.
+                let room = if *align == TextAlign::Left {
+                    tb.items
+                        .iter()
+                        .filter_map(|i| match i {
+                            TitleItem::Line { from, to, .. }
+                                if (from[0] - to[0]).abs() < 1e-6
+                                    && from[0] > pos[0]
+                                    && pos[1] >= from[1].min(to[1])
+                                    && pos[1] <= from[1].max(to[1]) =>
+                            {
+                                Some(from[0])
+                            }
+                            _ => None,
+                        })
+                        .fold(tb.width, f64::min)
+                        - pos[0]
+                        - 1.5
+                } else {
+                    f64::INFINITY
+                };
+                let w = text_width(&s, *size, *bold);
+                let size = if w > room && room > 0.0 { size * room / w } else { *size };
                 out.push(Prim::Text {
                     pos: at(*pos),
                     text: s,
-                    size: *size,
+                    size,
                     angle: 0.0,
                     h: match align {
                         TextAlign::Left => HAlign::Left,

@@ -19,7 +19,7 @@ use crate::prim::{HAlign, ImageData, P2, Page, Pen, Prim, Rgb, VAlign};
 const PT: f64 = 72.0 / 25.4;
 
 /// Where a text's baseline starts, paper mm, after alignment.
-fn text_origin(pos: P2, text: &str, size: f64, angle: f64, h: HAlign, v: VAlign, bold: bool) -> P2 {
+pub fn text_origin(pos: P2, text: &str, size: f64, angle: f64, h: HAlign, v: VAlign, bold: bool) -> P2 {
     let w = text_width(text, size, bold);
     let dx = match h {
         HAlign::Left => 0.0,

@@ -538,3 +538,74 @@ fn the_fly_bar_table_lists_battens_by_number_with_loads() {
     let after = stagecraft_core::geom::world_placement(h.state().engine.doc(), lx1).unwrap().position[2];
     assert_eq!(after - before, 500.0);
 }
+
+fn paper(h: &Harness<'static, Studio>, p: [f64; 2]) -> Pos2 {
+    h.state().ui.sheets.cam.to_screen(p)
+}
+
+#[test]
+fn sheets_mode_moves_viewports_and_labels_by_drag() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    run(&mut h, "ui.sheet", json!({ "sheet": "L-101" }));
+    assert_eq!(h.state().ui.view, stagecraft_ui::View::Sheets);
+    h.get_by_label("Sheet canvas");
+    h.get_by_label("Sheet L-102").click();
+    h.run();
+    let doc = h.state().engine.doc().clone();
+    let l102 = doc.sheets.values().find(|s| s.number == "L-102").unwrap().id;
+    assert_eq!(h.state_mut().run("ui.state", json!(null)).unwrap()["sheet"], json!(l102));
+
+    // Drag the front elevation 20 mm to the right on the paper.
+    let vp = doc.sheets[&l102].viewports[0].clone();
+    let page = stagecraft_sheet::pages(&doc, &[l102]).remove(0);
+    let hit = page.viewports.iter().find(|v| v.id == vp.id).unwrap();
+    let c = [(hit.min[0] + hit.max[0]) / 2.0, (hit.min[1] + hit.max[1]) / 2.0];
+    let (a, b) = (paper(&h, c), paper(&h, [c[0] + 20.0, c[1]]));
+    drag(&mut h, a, b);
+    let moved = h.state().engine.doc().sheets[&l102].viewport(vp.id).unwrap().position;
+    assert!((moved[0] - vp.position[0] - 20.0).abs() < 0.5, "{moved:?} vs {:?}", vp.position);
+    assert_eq!(h.state().ui.sheets.viewport, Some(vp.id));
+
+    // Drag a label on the lighting plan: it gets a hand-placed offset.
+    run(&mut h, "ui.sheet", json!({ "sheet": "L-101" }));
+    let doc = h.state().engine.doc().clone();
+    let l101 = doc.sheets.values().find(|s| s.number == "L-101").unwrap().id;
+    let page = stagecraft_sheet::pages(&doc, &[l101]).remove(0);
+    let label = page.labels.iter().find(|l| l.max[0] - l.min[0] > 3.0).unwrap().clone();
+    let c = [(label.min[0] + label.max[0]) / 2.0, (label.min[1] + label.max[1]) / 2.0];
+    let (a, b) = (paper(&h, c), paper(&h, [c[0], c[1] + 12.0]));
+    drag(&mut h, a, b);
+    let vp = h.state().engine.doc().sheets[&l101].viewport(label.viewport).unwrap().clone();
+    let off = vp.label_offsets[&label.fixture];
+    assert!((off[1] - 12.0).abs() < 0.5, "{off:?}");
+    run(&mut h, "history.undo", json!(null));
+    assert!(h.state().engine.doc().sheets[&l101].viewport(label.viewport).unwrap().label_offsets.is_empty());
+}
+
+#[test]
+fn sheet_panel_buttons_create_sheets_and_viewports() {
+    let mut h = harness(Engine::new());
+    run(&mut h, "ui.set_view", json!({ "view": "sheets" }));
+    h.get_by_label("Create sheet").click();
+    h.run();
+    assert_eq!(h.state().engine.doc().sheets.len(), 1);
+    h.get_by_label("Add viewport plan").click();
+    h.run();
+    h.get_by_label("Add viewport fixture_list").click();
+    h.run();
+    let s = h.state().engine.doc().sheets.values().next().unwrap().clone();
+    assert_eq!(s.viewports.len(), 2);
+    assert_eq!(h.state().ui.sheets.viewport, Some(s.viewports[1].id));
+    run(&mut h, "ui.sheet", json!({ "viewport": s.viewports[0].id, "editor": true }));
+    assert!(h.state().ui.sheets.editor);
+    h.get_by_label("New label template").click();
+    h.run();
+    assert_eq!(h.state().engine.doc().label_templates.len(), 1);
+    h.get_by_label("Label rotation Follow").click();
+    h.run();
+    let t = h.state().engine.doc().label_templates.values().next().unwrap().clone();
+    assert_eq!(t.rotation, stagecraft_core::sheet::LabelRotation::Follow);
+    run(&mut h, "ui.set_label_template", json!({ "template": t.name }));
+    assert_eq!(h.state().ui.plan_labels, Some(t.id));
+    assert!(h.state_mut().run("ui.sheet", json!({ "sheet": "nope" })).is_err());
+}

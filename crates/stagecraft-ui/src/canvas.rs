@@ -56,7 +56,11 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     draw_grid(&painter, &s.ui.camera, &pal);
 
     let ids = visible_ids(s.engine.doc(), &s.ui);
-    let style = plan_style(&s.ui.camera);
+    let mut style = plan_style(&s.ui.camera);
+    let template = s.ui.plan_labels.and_then(|t| s.engine.doc().label_templates.get(&t)).cloned();
+    if template.is_some() {
+        style.labels = false;
+    }
     let hover = crate::tools::hovered(ui, &resp, s, &ids, &style);
     let doc = s.engine.doc();
     let sel = s.engine.selection();
@@ -73,8 +77,68 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         draw_prims(&painter, &s.ui.camera, &pal, &prims, colour, 1.0);
     }
 
+    if let Some(t) = &template {
+        draw_labels(&painter, &s.ui.camera, &pal, doc, &ids, t);
+    }
+
     crate::tools::interact(ui, &resp, s, &ids, &style);
     crate::tools::draw_overlay(ui, &painter, s, &pal, &style);
+}
+
+/// Screen points per paper mm for plan labels: label sizes are paper mm, as on a
+/// sheet, so they keep their size on screen while zooming.
+pub const LABEL_PX_PER_MM: f64 = 3.2;
+
+/// Fixture labels with a template, placed as on a sheet (same rotation modes and
+/// collision avoidance), in the canvas colours.
+fn draw_labels(
+    painter: &Painter,
+    cam: &Camera,
+    pal: &Palette,
+    doc: &Document,
+    ids: &[Id],
+    t: &stagecraft_core::sheet::LabelTemplate,
+) {
+    // Too far out, labels would only pile up.
+    if cam.scale * stagecraft_geom::kinds::fixture::BODY_WIDTH < 5.0 {
+        return;
+    }
+    let k = cam.scale / LABEL_PX_PER_MM;
+    let view = [cam.to_world(cam.rect.left_bottom()), cam.to_world(cam.rect.right_top())];
+    let inputs: Vec<_> = ids
+        .iter()
+        .filter_map(|id| doc.objects.get(id))
+        .filter_map(|o| stagecraft_sheet::labels::fixture_input(doc, o, t, &|p| [p[0] * k, p[1] * k], k, None))
+        .filter(|f| {
+            let w = [f.center[0] / k, f.center[1] / k];
+            w[0] >= view[0][0] && w[0] <= view[1][0] && w[1] >= view[0][1] && w[1] <= view[1][1]
+        })
+        .collect();
+    let placed = stagecraft_sheet::labels::place(t, &inputs, &stagecraft_sheet::fonts::text_width, &[]);
+    let mut prims = Vec::new();
+    stagecraft_sheet::compose::label_prims(&placed, &mut prims);
+    let rgb = |c: Color32| stagecraft_sheet::prim::Rgb(c.r(), c.g(), c.b());
+    let (fg, bg) = (rgb(pal.text), rgb(pal.canvas));
+    for p in &mut prims {
+        match p {
+            stagecraft_sheet::Prim::Path { pen, fill, .. } | stagecraft_sheet::Prim::Circle { pen, fill, .. } => {
+                if let Some(pen) = pen {
+                    pen.color = fg;
+                }
+                if let Some(f) = fill {
+                    *f = if *f == stagecraft_sheet::prim::Rgb::WHITE { bg } else { fg };
+                }
+            }
+            stagecraft_sheet::Prim::Text { color, .. } => *color = fg,
+            _ => {}
+        }
+    }
+    let pcam = crate::sheets::PaperCam {
+        center: [cam.center[0] * k, cam.center[1] * k],
+        scale: LABEL_PX_PER_MM,
+        rect: cam.rect,
+    };
+    crate::sheets::paint_prims(painter, &pcam, &prims);
 }
 
 /// Scroll and pinch. Mouse wheels (line units) zoom, trackpad scrolling (point units)
