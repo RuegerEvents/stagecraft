@@ -77,12 +77,34 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         draw_prims(&painter, &s.ui.camera, &pal, &prims, colour, 1.0);
     }
 
+    draw_conflicts(&painter, &s.ui.camera, doc, &ids);
+
     if let Some(t) = &template {
         draw_labels(&painter, &s.ui.camera, &pal, doc, &ids, t);
     }
 
     crate::tools::interact(ui, &resp, s, &ids, &style);
     crate::tools::draw_overlay(ui, &painter, s, &pal, &style);
+}
+
+/// A warning ring around every fixture whose patch overlaps another or runs past
+/// its universe.
+fn draw_conflicts(painter: &Painter, cam: &Camera, doc: &Document, ids: &[Id]) {
+    let bad = stagecraft_core::patch::conflicting(doc);
+    if bad.is_empty() {
+        return;
+    }
+    for id in ids.iter().filter(|id| bad.contains(id)) {
+        let Some(o) = doc.objects.get(id) else { continue };
+        let Some(w) = stagecraft_core::geom::world(doc, *id) else { continue };
+        let (lo, hi) = stagecraft_geom::gdtf::plan_bounds(doc, o);
+        let frame = stagecraft_geom::kinds::fixture::plan_frame(&w);
+        let c = frame([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0]);
+        let r = ((hi[0] - lo[0]).hypot(hi[1] - lo[1]) / 2.0 * cam.scale) as f32 + 4.0;
+        let p = cam.to_screen(c);
+        painter.circle_stroke(p, r.max(6.0), Stroke::new(2.0, theme::WARNING));
+        painter.circle_stroke(p, r.max(6.0) + 3.0, Stroke::new(1.0, theme::WARNING.gamma_multiply(0.5)));
+    }
 }
 
 /// Screen points per paper mm for plan labels: label sizes are paper mm, as on a

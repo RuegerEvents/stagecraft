@@ -89,6 +89,7 @@ pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
                 (PanelKind::Tags, "panel.tags"),
                 (PanelKind::Inspector, "panel.inspector"),
                 (PanelKind::Table, "panel.table"),
+                (PanelKind::Library, "panel.library"),
             ] {
                 let mut on = *s.ui.panels.get_mut(p);
                 if ui.checkbox(&mut on, t(key)).changed() {

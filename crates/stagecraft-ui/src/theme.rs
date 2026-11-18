@@ -8,6 +8,8 @@ use stagecraft_geom::{FillClass, LineClass};
 use crate::state::ThemePref;
 
 pub const ACCENT: Color32 = Color32::from_rgb(0x2f, 0x7c, 0xf6);
+/// Patch conflicts and other problems, readable on light and dark.
+pub const WARNING: Color32 = Color32::from_rgb(0xe0, 0x4a, 0x2f);
 
 /// Colours of the plan canvas.
 #[derive(Clone, Copy, Debug)]

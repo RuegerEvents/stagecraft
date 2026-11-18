@@ -10,6 +10,7 @@ license.workspace = true
 [dependencies]
 stagecraft-core.workspace = true
 stagecraft-geom.workspace = true
+stagecraft-gdtf = { workspace = true, features = ["keychain"] }
 stagecraft-sheet.workspace = true
 stagecraft-control.workspace = true
 egui.workspace = true

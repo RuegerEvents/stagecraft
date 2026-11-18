@@ -193,7 +193,8 @@ fn table_multi_cell_edit_and_tsv_paste() {
 
     h.get_by_label("CID 1").click();
     h.run();
-    h.event(Event::Paste("A1\t1.001\nA2\t1.017\n".into()));
+    // CID, fixture type, mode, footprint (read only, skipped), address.
+    h.event(Event::Paste("A1\t\t\t\t1.001\nA2\t\t\t\t1.017\n".into()));
     h.run();
     let doc = h.state().engine.doc();
     let ids: Vec<Id> = doc.objects.keys().copied().collect();

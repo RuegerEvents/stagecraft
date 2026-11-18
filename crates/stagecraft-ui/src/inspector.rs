@@ -4,7 +4,6 @@
 
 use egui::{RichText, Ui};
 use serde_json::{Value, json};
-use stagecraft_core::model::format_address;
 use stagecraft_core::{Id, Object, ObjectKind};
 
 use crate::app::Studio;
@@ -245,14 +244,13 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
                 ObjectKind::Fixture { cid, .. } => cid.clone().unwrap_or_default(),
                 _ => String::new(),
             });
-            let mode = get(|k| match k {
-                ObjectKind::Fixture { mode, .. } => mode.clone().unwrap_or_default(),
+            let doc = s.engine.doc().clone();
+            let ty = get(|k| match k {
+                ObjectKind::Fixture { gdtf, .. } => gdtf.clone().unwrap_or_default(),
                 _ => String::new(),
             });
-            let addr = get(|k| match k {
-                ObjectKind::Fixture { address, .. } => address.map(format_address).unwrap_or_default(),
-                _ => String::new(),
-            });
+            let mode = common(objs.iter().map(|o| stagecraft_sheet::labels::mode_name(&doc, o)));
+            let addr = common(objs.iter().map(|o| stagecraft_core::patch::address_text(o)));
             if let Some(v) = field(ui, "inspector.fid", "fid", fid) {
                 let v = v.trim();
                 if v.is_empty() {
@@ -272,11 +270,39 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             if let Some(v) = field(ui, "inspector.cid", "cid", cid) {
                 batch(s, each("fixture.update", &|id| json!({ "id": id, "cid": v })));
             }
-            if let Some(v) = field(ui, "inspector.mode", "mode", mode) {
-                batch(s, each("fixture.update", &|id| json!({ "id": id, "mode": v })));
+            let mut types: Vec<(String, String)> = vec![(String::new(), t("inspector.no_type").to_owned())];
+            types.extend(doc.fixture_types.values().map(|ft| (ft.key.clone(), ft.display_name())));
+            choice(ui, s, sel, "inspector.fixture_type", "fixture_type", ty.clone(), &types, "fixture.update", "gdtf");
+            if let Some(ft) = ty.as_deref().and_then(|k| doc.fixture_types.get(k)) {
+                let modes: Vec<(String, String)> = ft
+                    .modes
+                    .iter()
+                    .map(|m| (m.name.clone(), format!("{} · {} ch", m.name, m.footprint_text())))
+                    .collect();
+                choice(ui, s, sel, "inspector.mode", "fixture_mode", mode, &modes, "fixture.update", "mode");
             }
             if let Some(v) = field(ui, "inspector.address", "address", addr) {
-                batch(s, each("fixture.update", &|id| json!({ "id": id, "address": v.trim() })));
+                match crate::table::address_args(&v) {
+                    Ok((first, extra)) => batch(
+                        s,
+                        each("fixture.update", &|id| json!({ "id": id, "address": first, "extra_addresses": extra })),
+                    ),
+                    Err(e) => s.ui.error(e),
+                }
+            }
+            if sel.len() == 1 {
+                let o = &doc.objects[&sel[0]];
+                let fp = stagecraft_sheet::labels::footprint_text(&doc, o);
+                if !fp.is_empty() {
+                    ui.label(t("col.footprint"));
+                    ui.label(fp);
+                    ui.end_row();
+                }
+                if let Some(p) = stagecraft_core::patch::conflicts(&doc).remove(&sel[0]) {
+                    ui.label("");
+                    ui.label(RichText::new(crate::table::problem_text(&doc, &p)).color(crate::theme::WARNING));
+                    ui.end_row();
+                }
             }
             num(
                 ui,

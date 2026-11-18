@@ -39,6 +39,12 @@ pub enum Col {
     MaxLoad,
     /// Fixture weight, kg.
     Weight,
+    /// GDTF fixture type (library key).
+    FixtureType,
+    /// DMX slots of the mode, per break (read only).
+    Footprint,
+    /// Patch problems (read only).
+    Conflict,
 }
 
 impl Col {
@@ -62,6 +68,9 @@ impl Col {
             Col::Load => "col.load",
             Col::MaxLoad => "col.max_load",
             Col::Weight => "col.weight",
+            Col::FixtureType => "col.gdtf_type",
+            Col::Footprint => "col.footprint",
+            Col::Conflict => "col.conflict",
         }
     }
 
@@ -69,7 +78,11 @@ impl Col {
         match self {
             Col::Name => 170.0,
             Col::Tags => 170.0,
+            Col::FixtureType => 190.0,
+            Col::Conflict => 150.0,
+            Col::Address => 110.0,
             Col::Layer | Col::Mode => 110.0,
+            Col::Footprint => 70.0,
             Col::Number => 50.0,
             _ => 80.0,
         }
@@ -80,7 +93,7 @@ impl Col {
 pub fn columns(kind: Option<&str>) -> Vec<Col> {
     use Col::*;
     match kind {
-        Some("fixture") => vec![Name, Fid, Cid, Address, Mode, Weight, Layer, Tags],
+        Some("fixture") => vec![Name, Fid, Cid, FixtureType, Mode, Footprint, Address, Conflict, Weight, Layer, Tags],
         Some("truss") => vec![Name, Profile, Length, Load, Layer, Tags],
         Some("batten") => vec![Number, Name, PosY, Trim, Length, Load, MaxLoad, Tags],
         Some("wall") => vec![Name, Height, Thickness, Layer, Tags],
@@ -164,8 +177,15 @@ pub fn cell_text(doc: &Document, o: &Object, col: Col) -> String {
         (Col::Type, k) => t(&format!("type.{}", k.type_name())).to_owned(),
         (Col::Fid, ObjectKind::Fixture { fid, .. }) => fid.map(|f| f.to_string()).unwrap_or_default(),
         (Col::Cid, ObjectKind::Fixture { cid, .. }) => cid.clone().unwrap_or_default(),
-        (Col::Address, ObjectKind::Fixture { address, .. }) => address.map(format_address).unwrap_or_default(),
-        (Col::Mode, ObjectKind::Fixture { mode, .. }) => mode.clone().unwrap_or_default(),
+        (Col::Address, ObjectKind::Fixture { .. }) => stagecraft_core::patch::address_text(o),
+        (Col::Mode, ObjectKind::Fixture { .. }) => stagecraft_sheet::labels::mode_name(doc, o),
+        (Col::FixtureType, ObjectKind::Fixture { gdtf, .. }) => gdtf.clone().unwrap_or_default(),
+        (Col::Footprint, ObjectKind::Fixture { .. }) => {
+            stagecraft_core::patch::mode(doc, o).map(|m| m.footprint_text()).unwrap_or_default()
+        }
+        (Col::Conflict, ObjectKind::Fixture { .. }) => {
+            stagecraft_core::patch::conflicts(doc).remove(&o.id).map(|p| problem_text(doc, &p)).unwrap_or_default()
+        }
         (Col::Profile, ObjectKind::Truss { profile, .. }) => profile.clone(),
         (Col::Length, ObjectKind::Truss { length, .. } | ObjectKind::Batten { length, .. }) => fmt_mm(*length),
         (Col::Number, ObjectKind::Batten { number, .. }) => number.to_string(),
@@ -216,12 +236,18 @@ pub fn edit_steps(doc: &Document, o: &Object, col: Col, text: &str) -> Result<Ve
         }
         Col::Cid => step("fixture.update", json!({ "id": id, "cid": text })),
         Col::Address => {
-            if !text.is_empty() && parse_address(text).is_none() {
-                return Err(tf("table.bad_address", &[("text", &text)]));
-            }
-            step("fixture.update", json!({ "id": id, "address": text }))
+            let (first, extra) = address_args(text)?;
+            step("fixture.update", json!({ "id": id, "address": first, "extra_addresses": extra }))
         }
+        // An empty mode keeps the current one (a pasted blank cell).
+        Col::Mode if text.is_empty() => return Ok(Vec::new()),
         Col::Mode => step("fixture.update", json!({ "id": id, "mode": text })),
+        Col::FixtureType => {
+            // A key, or a display name / unique part of one.
+            let key = resolve_type(doc, text)?;
+            step("fixture.update", json!({ "id": id, "gdtf": key }))
+        }
+        Col::Footprint | Col::Conflict => return Err(t("table.read_only").to_owned()),
         Col::Profile => step("truss.update", json!({ "id": id, "profile": text })),
         Col::Length if o.kind.type_name() == "batten" => step("batten.update", json!({ "id": id, "length": mm()? })),
         Col::Length => step("truss.update", json!({ "id": id, "length": mm()? })),
@@ -260,7 +286,9 @@ pub fn edit_steps(doc: &Document, o: &Object, col: Col, text: &str) -> Result<Ve
     };
     // Cells of other types in a mixed table are left alone.
     let fits = match col {
-        Col::Fid | Col::Cid | Col::Address | Col::Mode => matches!(o.kind, ObjectKind::Fixture { .. }),
+        Col::Fid | Col::Cid | Col::Address | Col::Mode | Col::FixtureType => {
+            matches!(o.kind, ObjectKind::Fixture { .. })
+        }
         Col::Profile => matches!(o.kind, ObjectKind::Truss { .. }),
         Col::Length => matches!(o.kind, ObjectKind::Truss { .. } | ObjectKind::Batten { .. }),
         Col::Number | Col::PosY | Col::Trim | Col::MaxLoad => matches!(o.kind, ObjectKind::Batten { .. }),
@@ -270,6 +298,82 @@ pub fn edit_steps(doc: &Document, o: &Object, col: Col, text: &str) -> Result<Ve
         _ => true,
     };
     Ok(if fits { vec![s] } else { Vec::new() })
+}
+
+/// `1.001`, `1.001 / 3.001` (one address per DMX break) or empty → the
+/// `fixture.update` arguments `address` and `extra_addresses`.
+pub fn address_args(text: &str) -> Result<(String, Vec<String>), String> {
+    let parts: Vec<&str> = text.split('/').map(str::trim).collect();
+    for p in &parts {
+        if !p.is_empty() && *p != "–" && *p != "-" && parse_address(p).is_none() {
+            return Err(tf("table.bad_address", &[("text", p)]));
+        }
+    }
+    let norm = |p: &&str| if *p == "–" || *p == "-" { String::new() } else { (*p).to_owned() };
+    let first = parts.first().map(norm).unwrap_or_default();
+    Ok((first, parts.iter().skip(1).map(norm).collect()))
+}
+
+/// A library key from what was typed: the key itself, else a type whose display
+/// name contains the text (case-insensitive) if only one does. Empty clears.
+pub fn resolve_type(doc: &Document, text: &str) -> Result<String, String> {
+    if text.is_empty() || doc.fixture_types.contains_key(text) {
+        return Ok(text.to_owned());
+    }
+    let low = text.to_lowercase();
+    let hits: Vec<&String> = doc
+        .fixture_types
+        .values()
+        .filter(|t| t.display_name().to_lowercase().contains(&low) || t.key.to_lowercase().contains(&low))
+        .map(|t| &t.key)
+        .collect();
+    match hits.as_slice() {
+        [one] => Ok((*one).clone()),
+        _ => Err(tf("table.unknown_type", &[("text", &text)])),
+    }
+}
+
+/// Patch problems in a few words: "overlaps 101, 102 · crosses universe".
+pub fn problem_text(doc: &Document, problems: &[stagecraft_core::patch::Problem]) -> String {
+    use stagecraft_core::patch::Problem;
+    let mut with: Vec<String> = Vec::new();
+    let mut crosses = false;
+    for p in problems {
+        match p {
+            Problem::Overlap { with: w } => {
+                let name = match doc.objects.get(w).map(|o| &o.kind) {
+                    Some(ObjectKind::Fixture { fid: Some(f), .. }) => f.to_string(),
+                    _ => doc.objects.get(w).map(|o| o.name.clone()).unwrap_or_default(),
+                };
+                if !with.contains(&name) {
+                    with.push(name);
+                }
+            }
+            Problem::CrossesUniverse { .. } => crosses = true,
+        }
+    }
+    let mut parts = Vec::new();
+    if !with.is_empty() {
+        parts.push(tf("table.overlaps", &[("with", &with.join(", "))]));
+    }
+    if crosses {
+        parts.push(t("table.crosses_universe").to_owned());
+    }
+    parts.join(" · ")
+}
+
+/// Choices offered while editing a cell: modes of the row's type, library types.
+pub fn cell_options(doc: &Document, o: &Object, col: Col) -> Vec<(String, String)> {
+    match col {
+        Col::Mode => match stagecraft_core::patch::fixture_type(doc, o) {
+            Some(ft) => {
+                ft.modes.iter().map(|m| (m.name.clone(), format!("{} · {} ch", m.name, m.footprint_text()))).collect()
+            }
+            None => Vec::new(),
+        },
+        Col::FixtureType => doc.fixture_types.values().map(|t| (t.key.clone(), t.display_name())).collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// Text split into a number and the text around it: "Spot 12" → ("Spot ", 12, "").
@@ -387,7 +491,21 @@ pub fn fill_selected(s: &mut Studio) {
         let second = cell_text(&doc, &doc.objects[&ids[1]], *col);
         // Two filled cells set the step; otherwise count by one.
         let second = (!second.trim().is_empty() && ids.len() > 2).then_some(second);
+        let first_addr = |t: &str| t.split('/').next().unwrap_or_default().trim().to_owned();
+        let (first, second) = if *col == Col::Address {
+            (first_addr(&first), second.as_deref().map(first_addr))
+        } else {
+            (first, second)
+        };
         let values = fill_series(*col, &first, second.as_deref(), ids.len());
+        // Addresses without a given step follow the footprints: auto-patch in row order.
+        if *col == Col::Address && second.is_none() {
+            let start = first.split('/').next().unwrap_or_default().trim().to_owned();
+            if parse_address(&start).is_some() {
+                steps.push(json!({ "command": "patch.auto", "args": { "ids": ids, "start": start } }));
+                continue;
+            }
+        }
         if *col == Col::Fid {
             let start: u32 = values[0].parse().unwrap_or(1);
             let step = values.get(1).and_then(|v| v.parse::<u32>().ok()).map_or(1, |b| b.saturating_sub(start).max(1));
@@ -424,7 +542,7 @@ pub fn paste(s: &mut Studio, text: &str) {
         };
         for (j, cell) in line.iter().enumerate() {
             let Some(col) = cols.get(c0 + j) else { continue };
-            if *col == Col::Type {
+            if matches!(col, Col::Type | Col::Footprint | Col::Conflict | Col::Load) {
                 continue;
             }
             match edit_steps(&doc, &doc.objects[id], *col, cell) {
@@ -523,6 +641,8 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         return;
     }
     let selected_objects: Vec<Id> = s.engine.selection().to_vec();
+    let conflicting = stagecraft_core::patch::conflicting(&doc);
+    let mut picked: Option<String> = None;
     let mut clicked: Option<(Id, usize, Modifiers)> = None;
     let mut double: Option<(Id, usize)> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, ROW_H, rows.len(), |ui, visible| {
@@ -575,6 +695,24 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                             egui::TextEdit::singleline(&mut buf).id(ed_id).margin(vec2(4.0, 2.0)),
                         );
                         widgets::name(&r, WidgetType::TextEdit, "Cell editor");
+                        let options = cell_options(&doc, o, *c);
+                        if !options.is_empty() {
+                            egui::Area::new(egui::Id::new("table_choices"))
+                                .order(egui::Order::Foreground)
+                                .fixed_pos(rect.left_bottom())
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                        ui.set_min_width(rect.width());
+                                        for (value, label) in &options {
+                                            let b = ui.selectable_label(text == *value, label);
+                                            widgets::name(&b, WidgetType::SelectableLabel, format!("Choose {value}"));
+                                            if b.clicked() {
+                                                picked = Some(value.clone());
+                                            }
+                                        }
+                                    });
+                                });
+                        }
                         if s.ui.table.focus_editor {
                             r.request_focus();
                             // Put the caret at the end of what was typed.
@@ -586,7 +724,19 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                             s.ui.table.focus_editor = false;
                         }
                         let (enter, escape) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
-                        if r.lost_focus() || enter || escape {
+                        let chose = picked.is_some();
+                        if chose {
+                            s.ui.table.editing = None;
+                        } else if !options.is_empty()
+                            && r.lost_focus()
+                            && ui.input(|i| i.pointer.any_pressed())
+                            && !enter
+                            && !escape
+                        {
+                            // A click into the choice list arrives after focus is lost;
+                            // keep the editor until the click lands.
+                            s.ui.table.editing = Some(buf);
+                        } else if r.lost_focus() || enter || escape {
                             s.ui.table.editing = None;
                             if !escape {
                                 edit_selected(s, &buf);
@@ -595,12 +745,14 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                             s.ui.table.editing = Some(buf);
                         }
                     } else {
+                        let warn = matches!(c, Col::Address | Col::Conflict) && conflicting.contains(&id);
+                        let colour = if warn { crate::theme::WARNING } else { ui.visuals().text_color() };
                         ui.painter().with_clip_rect(rect.shrink(2.0)).text(
                             rect.left_center() + vec2(6.0, 0.0),
                             Align2::LEFT_CENTER,
                             &text,
                             egui::TextStyle::Body.resolve(ui.style()),
-                            ui.visuals().text_color(),
+                            colour,
                         );
                     }
                     if resp.double_clicked() {
@@ -612,6 +764,10 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             });
         }
     });
+    if let Some(v) = picked {
+        s.ui.table.editing = None;
+        edit_selected(s, &v);
+    }
     if let Some((id, ci, m)) = clicked {
         let st = &mut s.ui.table;
         if st.editing.is_some() {

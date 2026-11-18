@@ -172,6 +172,8 @@ pub enum PanelKind {
     Tags,
     Inspector,
     Table,
+    /// Fixture types of the document and GDTF Share.
+    Library,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -180,11 +182,12 @@ pub struct Panels {
     pub tags: bool,
     pub inspector: bool,
     pub table: bool,
+    pub library: bool,
 }
 
 impl Default for Panels {
     fn default() -> Self {
-        Self { layers: true, tags: true, inspector: true, table: true }
+        Self { layers: true, tags: true, inspector: true, table: true, library: true }
     }
 }
 
@@ -195,6 +198,7 @@ impl Panels {
             PanelKind::Tags => &mut self.tags,
             PanelKind::Inspector => &mut self.inspector,
             PanelKind::Table => &mut self.table,
+            PanelKind::Library => &mut self.library,
         }
     }
 }
@@ -319,6 +323,9 @@ pub struct ToolOptions {
     pub support_preset: String,
     pub hoist_height: f64,
     pub ceiling_height: f64,
+    /// Library key of the type the fixture tool places; empty = generic fixture.
+    pub fixture_type: String,
+    pub fixture_mode: String,
 }
 
 impl ToolOptions {
@@ -350,6 +357,8 @@ impl Default for ToolOptions {
             support_preset: "Base plate 600".into(),
             hoist_height: 9000.0,
             ceiling_height: 9000.0,
+            fixture_type: String::new(),
+            fixture_mode: String::new(),
         }
     }
 }
@@ -372,6 +381,8 @@ pub struct UiState {
     pub gesture: Gesture,
     pub palette: PaletteState,
     pub table: TableState,
+    /// The library panel: GDTF Share search and downloads.
+    pub library: crate::library::LibraryState,
     /// Last message for the status bar; `true` = error.
     pub status: Option<(String, bool)>,
     /// The Sheets mode: current sheet, selected viewport, paper camera.
@@ -393,6 +404,8 @@ pub enum FileRequest {
     ExportPdf,
     /// Pick a logo for the title block.
     Logo,
+    /// Import `.gdtf` files into the library.
+    ImportGdtf,
 }
 
 impl Default for UiState {
@@ -412,6 +425,7 @@ impl Default for UiState {
             gesture: Gesture::default(),
             palette: PaletteState::default(),
             table: TableState::default(),
+            library: Default::default(),
             status: None,
             sheets: Default::default(),
             plan_labels: None,

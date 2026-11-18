@@ -83,6 +83,7 @@ impl Studio {
         if (drawing || self.ui.table.focused) && ui.memory(|m| m.focused().is_none()) {
             ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
+        crate::library::poll(self);
         shortcuts(ui, self);
         egui::Panel::top("menu").show(ui, |ui| panels::menu_bar(ui, self));
         egui::Panel::top("toolbar").show(ui, |ui| panels::toolbar(ui, self));
@@ -99,7 +100,7 @@ impl Studio {
             egui::Panel::left("left").resizable(true).default_size(270.0).min_size(220.0).show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| crate::sheets::list_panel(ui, self));
             });
-        } else if self.ui.panels.layers || self.ui.panels.tags {
+        } else if self.ui.panels.layers || self.ui.panels.tags || self.ui.panels.library {
             egui::Panel::left("left").resizable(true).default_size(270.0).min_size(220.0).show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if self.ui.panels.layers {
@@ -108,6 +109,10 @@ impl Studio {
                     }
                     if self.ui.panels.tags {
                         panels::tags(ui, self);
+                        ui.add_space(10.0);
+                    }
+                    if self.ui.panels.library {
+                        crate::library::show(ui, self);
                     }
                 });
             });
@@ -297,6 +302,15 @@ impl StageApp {
                     && s.run("sheet.export_pdf", json!({ "path": path })).is_ok()
                 {
                     s.ui.info(tf("status.exported", &[("path", &path.display())]));
+                }
+            }
+            FileRequest::ImportGdtf => {
+                if let Some(paths) = rfd::FileDialog::new().add_filter("GDTF", &["gdtf"]).pick_files() {
+                    let steps: Vec<Value> =
+                        paths.iter().map(|p| json!({ "command": "gdtf.import", "args": { "path": p } })).collect();
+                    if s.run("batch", json!({ "commands": steps })).is_ok() {
+                        s.ui.info(tf("library.imported", &[("n", &paths.len())]));
+                    }
                 }
             }
             FileRequest::Logo => {

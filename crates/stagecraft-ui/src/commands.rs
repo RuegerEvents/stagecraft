@@ -113,13 +113,23 @@ fn register(r: &mut UiRegistry) {
         section,
     );
     r.add("ui.set_theme", "Light, dark, or follow the system", set_theme);
-    r.add("ui.toggle_panel", "Show or hide a panel (layers, tags, inspector, table)", toggle_panel);
+    r.add("ui.toggle_panel", "Show or hide a panel (layers, tags, inspector, table, library)", toggle_panel);
+    r.add(
+        "ui.share_search",
+        "Search GDTF Share in the library panel (loads the cached list off the UI thread; returns hits once loaded)",
+        share_search,
+    );
+    r.add(
+        "ui.share_add",
+        "Download a GDTF Share revision (rid) and import it into the document, in the background",
+        share_add,
+    );
     r.add("ui.set_tag_visible", "Show or hide objects carrying a tag in the views", set_tag_visible);
     r.add("ui.set_active_layer", "Layer that new objects go on", set_active_layer);
     r.add("ui.set_snap", "Turn snaps on or off and set the grid", set_snap);
     r.add(
         "ui.set_tool_options",
-        "Options for new objects: truss, wall, batten, curtain, proscenium, wings, platform, support, hoist, ceiling",
+        "Options for new objects: fixture type, truss, wall, batten, curtain, proscenium, wings, platform, support, hoist, ceiling",
         set_options,
     );
     r.add("ui.palette", "Open or close the command palette", palette);
@@ -517,6 +527,51 @@ fn toggle_panel(c: &mut UiCtx, a: PanelArgs) -> CmdResult {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct ShareSearchArgs {
+    /// Words that must all appear in manufacturer, fixture or revision.
+    #[serde(default)]
+    query: String,
+    /// Fetch a new list from the server instead of the cached one.
+    #[serde(default)]
+    refresh: bool,
+}
+
+fn share_search(c: &mut UiCtx, a: ShareSearchArgs) -> CmdResult {
+    let lib = &mut c.ui.library;
+    lib.query = a.query;
+    c.ui.panels.library = true;
+    let started = lib.load_list(a.refresh);
+    let hits: Vec<Value> = lib
+        .hits(40)
+        .iter()
+        .map(|e| {
+            let modes: Vec<Value> = e.modes.iter().map(|m| json!({ "name": m.name, "footprint": m.dmx_footprint })).collect();
+            json!({ "rid": e.rid, "manufacturer": e.manufacturer, "fixture": e.fixture, "revision": e.revision, "modes": modes })
+        })
+        .collect();
+    Ok(
+        json!({ "loading": started || lib.busy(), "list_loaded": lib.list.is_some(), "hits": hits, "message": lib.message.as_ref().map(|m| &m.0) }),
+    )
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ShareAddArgs {
+    /// GDTF Share revision id from `ui.share_search`.
+    rid: u64,
+}
+
+fn share_add(c: &mut UiCtx, a: ShareAddArgs) -> CmdResult {
+    let lib = &mut c.ui.library;
+    let entry = lib
+        .list
+        .as_ref()
+        .and_then(|l| l.iter().find(|e| e.rid == a.rid).cloned())
+        .unwrap_or_else(|| stagecraft_gdtf::share::ShareEntry { rid: a.rid, ..Default::default() });
+    lib.add(entry);
+    Ok(json!({ "started": true, "rid": a.rid }))
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct TagVisibleArgs {
     /// Tag id or name.
     tag: String,
@@ -624,10 +679,26 @@ struct OptionsArgs {
     hoist_height: Option<f64>,
     /// Underside of new ceilings, mm.
     ceiling_height: Option<f64>,
+    /// Fixture type (library key) the fixture tool places; empty = generic.
+    fixture_type: Option<String>,
+    /// Mode of new fixtures; empty = the type's first mode.
+    fixture_mode: Option<String>,
 }
 
 fn set_options(c: &mut UiCtx, a: OptionsArgs) -> CmdResult {
+    if let Some(k) = a.fixture_type.as_deref().filter(|k| !k.is_empty())
+        && !c.engine.doc().fixture_types.contains_key(k)
+    {
+        return Err(CmdError::not_found("fixture type", k));
+    }
     let o = &mut c.ui.options;
+    if let Some(v) = a.fixture_type {
+        o.fixture_type = v;
+        o.fixture_mode.clear();
+    }
+    if let Some(v) = a.fixture_mode {
+        o.fixture_mode = v;
+    }
     if let Some(v) = a.truss_profile {
         o.truss_profile = v;
     }

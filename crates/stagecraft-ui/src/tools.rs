@@ -439,6 +439,14 @@ fn place_fixture(s: &mut Studio, ids: &[Id], raw: P2, cursor: Snapped, tol: f64)
             "layer": s.active_layer_arg()
         }),
     };
+    let mut args = args;
+    let o = &s.ui.options;
+    if let Some(t) = doc.fixture_types.get(&o.fixture_type) {
+        args["gdtf"] = json!(t.key);
+        if t.mode(&o.fixture_mode).is_some() {
+            args["mode"] = json!(o.fixture_mode);
+        }
+    }
     created(s, "fixture.create", args, "tool.fixture");
 }
 
@@ -613,6 +621,17 @@ fn commit_rotate(s: &mut Studio, pivot: P2, angle: f64) {
 
 /// The ghost of an object kind at a placement, for previews of things not yet created.
 fn ghost(kind: ObjectKind, placement: Placement, style: &PlanStyle) -> Vec<stagecraft_geom::PlanPrim> {
+    static EMPTY: std::sync::OnceLock<stagecraft_core::Document> = std::sync::OnceLock::new();
+    ghost_in(EMPTY.get_or_init(Default::default), kind, placement, style)
+}
+
+/// A ghost that may use the document's fixture types.
+fn ghost_in(
+    doc: &stagecraft_core::Document,
+    kind: ObjectKind,
+    placement: Placement,
+    style: &PlanStyle,
+) -> Vec<stagecraft_geom::PlanPrim> {
     let obj = Object {
         id: Id::nil(),
         name: String::new(),
@@ -625,7 +644,7 @@ fn ghost(kind: ObjectKind, placement: Placement, style: &PlanStyle) -> Vec<stage
         attrs: Default::default(),
     };
     let w = stagecraft_core::geom::placement_to_affine(&obj.placement);
-    stagecraft_geom::kinds::plan_at(&stagecraft_core::Document::default(), &w, &obj, style)
+    stagecraft_geom::kinds::plan_at(doc, &w, &obj, style)
 }
 
 /// Previews, the snap marker, the selection box and the typed-dimension box.
@@ -763,16 +782,18 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
         }
         (Tool::Fixture, Some(c)) => {
             let placement = Placement { position: [c[0], c[1], 0.0], rotation: [0.0; 3] };
+            let o = &s.ui.options;
+            let typed = s.engine.doc().fixture_types.contains_key(&o.fixture_type);
             let kind = ObjectKind::Fixture {
                 fid: None,
                 cid: None,
-                gdtf: None,
-                mode: None,
+                gdtf: typed.then(|| o.fixture_type.clone()),
+                mode: (typed && !o.fixture_mode.is_empty()).then(|| o.fixture_mode.clone()),
                 address: None,
                 extra_addresses: Vec::new(),
                 weight_kg: None,
             };
-            ghosts(ghost(kind, placement, style));
+            ghosts(ghost_in(s.engine.doc(), kind, placement, style));
         }
         _ => {}
     }
