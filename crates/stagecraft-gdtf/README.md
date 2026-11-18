@@ -4,13 +4,13 @@ GDTF 1.2 fixture types for StageCraft: `description.xml`, the geometry tree, DMX
 modes with footprints, 3DS/GLB models assembled into a fixture mesh, a top-view
 silhouette for plan symbols, and a GDTF Share client.
 
-No dependencies on other StageCraft crates. Default features build for
-`wasm32-unknown-unknown`.
+No dependencies on other StageCraft crates (core depends on this one). Default
+features build for `wasm32-unknown-unknown`. Decisions are rows "GDTF: …" in
+`docs/spec/decisions.md`.
 
 ```
-cd crates/stagecraft-gdtf
-CARGO_TARGET_DIR=../../target-gdtf cargo test
-CARGO_TARGET_DIR=../../target-gdtf cargo test --features keychain   # with the Share client
+cargo test -p stagecraft-gdtf
+cargo test -p stagecraft-gdtf --features keychain   # with the Share client
 ```
 
 ## Coordinates and units
@@ -84,7 +84,7 @@ Each model mesh is loaded from `models/gltf/<File>.glb`, else `models/3ds/<File>
 (`Lod::Low/High` try `gltf_low`/`gltf_high` first), and scaled about its origin to
 `Length × Width × Height` as the spec requires. Without a file the
 `PrimitiveType` is generated (Cube, Cylinder, Sphere, Base, Yoke, Head, Scanner,
-Conventional, Pigtail and the `1_1` variants). See `DECISIONS.md` for the
+Conventional, Pigtail and the `1_1` variants). See the GDTF rows in `docs/spec/decisions.md` for the
 exceptions (wrong dimensions, wrong up axis).
 
 ## GDTF Share (`share`, `keychain` features)
