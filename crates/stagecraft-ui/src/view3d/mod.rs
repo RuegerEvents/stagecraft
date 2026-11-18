@@ -299,7 +299,7 @@ fn navigate(ui: &Ui, resp: &egui::Response, cam: &mut Camera3d) {
             }
         }
         // Wheel notches, ⌘-scroll and pinch zoom as in the plan.
-        let zoom = crate::canvas::zoom_factor(&events);
+        let zoom = crate::zoom::zoom_factor(&events);
         if zoom != 1.0 {
             cam.zoom_at(at, zoom);
         }

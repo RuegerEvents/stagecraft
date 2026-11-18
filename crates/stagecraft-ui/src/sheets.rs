@@ -18,12 +18,14 @@ use stagecraft_core::sheet::{LabelField, LabelRotation, Orientation, Paper, Side
 use stagecraft_core::units::{DimFormat, Language};
 use stagecraft_core::{Document, Id};
 use stagecraft_sheet::prim::{ImageData, Page, Pen, Prim, Rgb};
+use std::sync::Arc;
 
 use crate::app::Studio;
 use crate::i18n::{t, tf};
 use crate::lengths::fmt_number;
 use crate::theme;
 use crate::widgets::{self, Icon, button, edit_field, icon_button};
+use crate::zoom;
 
 /// The paper view: paper mm at the canvas centre and screen points per mm.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -113,12 +115,69 @@ pub struct SheetsState {
     pub template: Option<Id>,
     /// The drag preview (see [`Live`]).
     pub live: Option<Live>,
-    cache: Option<((usize, Id), Page)>,
+    cache: Option<((usize, Id), Arc<Composed>)>,
     /// A page being composed on a worker thread (hidden lines can take a moment).
     pending: Option<((usize, Id), PageRx)>,
 }
 
-type PageRx = std::sync::mpsc::Receiver<Option<Page>>;
+type PageRx = std::sync::mpsc::Receiver<Option<Composed>>;
+
+/// A composed page with what painting it needs that does not depend on the view, in
+/// paper mm: fill triangles, text runs, bounds. Made once per page (on the compose
+/// worker); a frame only maps it to the screen, so panning and zooming stay cheap.
+/// Derefs to the [`Page`].
+pub struct Composed {
+    page: Page,
+    prep: Vec<Prep>,
+}
+
+impl Composed {
+    pub fn new(page: Page) -> Self {
+        let prep = prepare(&page.prims);
+        Self { page, prep }
+    }
+}
+
+impl std::ops::Deref for Composed {
+    type Target = Page;
+    fn deref(&self) -> &Page {
+        &self.page
+    }
+}
+
+/// What [`paint`] needs of one primitive besides the primitive, aligned with it.
+enum Prep {
+    Path {
+        /// Points and triangles of the fill.
+        fill: Option<(Vec<P2>, Vec<[usize; 3]>)>,
+        bounds: (P2, P2),
+    },
+    /// Runs of the text: baseline start, text, cap height (mm).
+    Text(Vec<(P2, String, f64)>),
+    Clip(Vec<Prep>),
+    Other,
+}
+
+fn prepare(prims: &[Prim]) -> Vec<Prep> {
+    prims
+        .iter()
+        .map(|p| match p {
+            Prim::Path { rings, fill, .. } => {
+                let fill = fill.filter(|_| !rings.is_empty() && rings[0].len() >= 3).map(|_| triangles(rings));
+                let mut b = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+                for q in rings.iter().flatten() {
+                    b = ([b.0[0].min(q[0]), b.0[1].min(q[1])], [b.1[0].max(q[0]), b.1[1].max(q[1])]);
+                }
+                Prep::Path { fill, bounds: b }
+            }
+            Prim::Text { pos, text, size, angle, h, v, bold, .. } => {
+                Prep::Text(stagecraft_sheet::render::text_runs(*pos, text, *size, *angle, *h, *v, *bold))
+            }
+            Prim::Clip { prims, .. } => Prep::Clip(prepare(prims)),
+            _ => Prep::Other,
+        })
+        .collect()
+}
 
 impl Default for SheetsState {
     fn default() -> Self {
@@ -147,11 +206,16 @@ pub fn current(doc: &Document, st: &SheetsState) -> Option<Id> {
 /// Composing runs on a worker thread with a snapshot of the document. While it runs
 /// the previous page stays on screen (`busy` is set so the caller keeps repainting);
 /// only the very first page of a session, or of another sheet, is waited for.
-pub fn page(s: &mut Studio) -> Option<Page> {
+pub fn page(s: &mut Studio) -> Option<Arc<Composed>> {
     page_busy(s).0
 }
 
-fn page_busy(s: &mut Studio) -> (Option<Page>, bool) {
+/// Whether a page is being composed (or none has been yet).
+pub fn is_composing(s: &Studio) -> bool {
+    s.ui.sheets.pending.is_some() || s.ui.sheets.cache.is_none()
+}
+
+fn page_busy(s: &mut Studio) -> (Option<Arc<Composed>>, bool) {
     let Some(id) = current(s.engine.doc(), &s.ui.sheets) else { return (None, false) };
     let key = (s.engine.journal().len(), id);
     if let Some((k, p)) = &s.ui.sheets.cache
@@ -165,7 +229,7 @@ fn page_busy(s: &mut Studio) -> (Option<Page>, bool) {
         let doc = s.engine.doc().clone();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(stagecraft_sheet::pages(&doc, &[id]).into_iter().next());
+            let _ = tx.send(stagecraft_sheet::pages(&doc, &[id]).into_iter().next().map(Composed::new));
         });
         s.ui.sheets.pending = Some((key, rx));
     }
@@ -180,6 +244,7 @@ fn page_busy(s: &mut Studio) -> (Option<Page>, bool) {
     };
     match got {
         Some(p) => {
+            let p = p.map(Arc::new);
             s.ui.sheets.pending = None;
             if let Some(p) = &p {
                 s.ui.sheets.cache = Some((key, p.clone()));
@@ -198,18 +263,23 @@ fn stroke(cam: &PaperCam, p: &Pen) -> Stroke {
     Stroke::new(((p.width * cam.scale) as f32).max(0.6), colour(p.color))
 }
 
-fn fill_rings(painter: &Painter, cam: &PaperCam, rings: &[Vec<P2>], fill: Color32) {
-    let (pts, tris): (Vec<P2>, Vec<[usize; 3]>) = if rings.len() == 1 {
+/// A fill's points and triangles (even-odd: inner rings are holes).
+fn triangles(rings: &[Vec<P2>]) -> (Vec<P2>, Vec<[usize; 3]>) {
+    if rings.len() == 1 {
         (rings[0].clone(), stagecraft_geom::math::triangulate(&rings[0]))
     } else {
         let poly = stagecraft_geom::section::CutPolygon { outer: rings[0].clone(), holes: rings[1..].to_vec() };
         stagecraft_geom::section::triangulate(&poly)
-    };
+    }
+}
+
+fn fill_mesh(painter: &Painter, cam: &PaperCam, (pts, tris): &(Vec<P2>, Vec<[usize; 3]>), fill: Color32) {
     if pts.len() < 3 {
         return;
     }
     let mut mesh = Mesh::default();
-    for p in &pts {
+    mesh.vertices.reserve(pts.len());
+    for p in pts {
         mesh.vertices.push(Vertex { pos: cam.to_screen(*p), uv: WHITE_UV, color: fill });
     }
     for t in tris {
@@ -280,49 +350,65 @@ pub fn image_quad(painter: &Painter, tex: egui::TextureId, c: [egui::Pos2; 4], o
 }
 
 /// Draw a page; the viewport of `live` where the drag puts it.
-pub fn paint_page(painter: &Painter, cam: &PaperCam, page: &Page, live: Option<&Live>) {
+pub fn paint_page(painter: &Painter, cam: &PaperCam, page: &Composed, live: Option<&Live>) {
+    let (prims, prep) = (&page.page.prims[..], &page.prep[..]);
     let found = live.and_then(|l| page.viewports.iter().find(|h| h.id == l.viewport).map(|h| (l, h)));
     let Some((l, h)) = found else {
-        paint_prims(painter, cam, &page.prims);
+        paint(painter, cam, prims, prep);
         return;
     };
     let [a, b] = h.prims;
-    if a >= b || b > page.prims.len() {
-        paint_prims(painter, cam, &page.prims);
+    if a >= b || b > prims.len() {
+        paint(painter, cam, prims, prep);
         return;
     }
-    paint_prims(painter, cam, &page.prims[..a]);
-    paint_prims(painter, cam, &page.prims[b..]);
+    paint(painter, cam, &prims[..a], &prep[..a]);
+    paint(painter, cam, &prims[b..], &prep[b..]);
     // Moving the content by `off` on the paper = looking from `-off`.
     let off = [l.min[0] - h.min[0], l.min[1] - h.min[1]];
     let shifted = PaperCam { center: [cam.center[0] - off[0], cam.center[1] - off[1]], ..*cam };
-    match (&page.prims[a], l.moved) {
-        (Prim::Clip { prims, .. }, false) => {
+    match (&prims[a], &prep[a], l.moved) {
+        (Prim::Clip { prims: inner, .. }, Prep::Clip(inner_prep), false) => {
             // Cropped: the content stays on the paper, only the clip changes; the title
             // goes with the frame's lower left corner.
             let r = Rect::from_two_pos(cam.to_screen(l.min), cam.to_screen(l.max));
             let clipped = painter.with_clip_rect(r.intersect(painter.clip_rect()));
-            if prims.iter().any(|p| matches!(p, Prim::Image { .. })) {
+            if inner.iter().any(|p| matches!(p, Prim::Image { .. })) {
                 // A rendered view only has the old frame's picture until the new one.
                 clipped.rect_filled(r, 0.0, Color32::from_gray(238));
             }
-            paint_prims(&clipped, cam, prims);
-            paint_prims(painter, &shifted, &page.prims[a + 1..b]);
+            paint(&clipped, cam, inner, inner_prep);
+            paint(painter, &shifted, &prims[a + 1..b], &prep[a + 1..b]);
         }
-        _ => paint_prims(painter, &shifted, &page.prims[a..b]),
+        _ => paint(painter, &shifted, &prims[a..b], &prep[a..b]),
     }
 }
 
-/// Draw composed primitives (paper mm) on screen.
+/// Draw composed primitives (paper mm) on screen, prepared now (for a few; a page keeps
+/// its preparation, see [`Composed`]).
 pub fn paint_prims(painter: &Painter, cam: &PaperCam, prims: &[Prim]) {
-    for p in prims {
-        match p {
-            Prim::Path { rings, closed, pen, fill } => {
-                if let Some(f) = fill
-                    && !rings.is_empty()
-                    && rings[0].len() >= 3
-                {
-                    fill_rings(painter, cam, rings, colour(*f));
+    paint(painter, cam, prims, &prepare(prims));
+}
+
+/// Whether the paper box `min`–`max`, widened by `pad` points, reaches the clip.
+fn box_shows(painter: &Painter, cam: &PaperCam, (min, max): (P2, P2), pad: f32) -> bool {
+    min[0] <= max[0]
+        && Rect::from_two_pos(cam.to_screen(min), cam.to_screen(max)).expand(pad).intersects(painter.clip_rect())
+}
+
+/// Draw primitives with their preparation (the same length): only what reaches the clip,
+/// text through [`zoom::galley`] (few glyph sizes while zooming, capped raster size).
+fn paint(painter: &Painter, cam: &PaperCam, prims: &[Prim], prep: &[Prep]) {
+    let zooming = zoom::zooming(painter.ctx());
+    for (p, pr) in prims.iter().zip(prep) {
+        match (p, pr) {
+            (Prim::Path { rings, closed, pen, fill }, Prep::Path { fill: tris, bounds }) => {
+                let pad = pen.as_ref().map_or(0.0, |p| (p.width * cam.scale) as f32 + 1.0);
+                if !box_shows(painter, cam, *bounds, pad) {
+                    continue;
+                }
+                if let (Some(f), Some(tris)) = (fill, tris) {
+                    fill_mesh(painter, cam, tris, colour(*f));
                 }
                 let Some(pen) = pen else { continue };
                 let st = stroke(cam, pen);
@@ -343,7 +429,12 @@ pub fn paint_prims(painter: &Painter, cam: &PaperCam, prims: &[Prim]) {
                     }
                 }
             }
-            Prim::Circle { center, radius, pen, fill } => {
+            (Prim::Circle { center, radius, pen, fill }, _) => {
+                let bounds = ([center[0] - radius, center[1] - radius], [center[0] + radius, center[1] + radius]);
+                let pad = pen.as_ref().map_or(0.0, |p| (p.width * cam.scale) as f32 + 1.0);
+                if !box_shows(painter, cam, bounds, pad) {
+                    continue;
+                }
                 let c = cam.to_screen(*center);
                 let r = (*radius * cam.scale) as f32;
                 painter.circle(
@@ -353,7 +444,7 @@ pub fn paint_prims(painter: &Painter, cam: &PaperCam, prims: &[Prim]) {
                     pen.as_ref().map_or(Stroke::NONE, |p| stroke(cam, p)),
                 );
             }
-            Prim::Text { pos, text, size, angle, h, v, bold, color } => {
+            (Prim::Text { size, angle, bold, color, .. }, Prep::Text(runs)) => {
                 let px = (*size * cam.scale) as f32;
                 if px < 1.6 {
                     continue;
@@ -362,21 +453,28 @@ pub fn paint_prims(painter: &Painter, cam: &PaperCam, prims: &[Prim]) {
                 // smaller and raised, as in the PDF.
                 let a = -(angle.to_radians()) as f32;
                 let up = vec2(a.sin(), -a.cos());
-                for (o, run, size) in stagecraft_sheet::render::text_runs(*pos, text, *size, *angle, *h, *v, *bold) {
-                    let font_size = (stagecraft_sheet::fonts::em(size) * cam.scale) as f32;
-                    let font = theme::sheet_font(font_size, *bold);
-                    let base = cam.to_screen(o);
-                    let galley = painter.layout_no_wrap(run, font, colour(*color));
+                for (o, run, size) in runs {
+                    let font_size = (stagecraft_sheet::fonts::em(*size) * cam.scale) as f32;
+                    let base = cam.to_screen(*o);
+                    if !zoom::text_may_show(painter.clip_rect(), base, run, font_size) {
+                        continue;
+                    }
+                    let galley = zoom::galley(painter, run.clone(), font_size, colour(*color), zooming, |s| {
+                        theme::sheet_font(s, *bold)
+                    });
                     let asc = font_size * stagecraft_sheet::fonts::ascent_ratio() as f32;
                     let top_left = base + up * asc;
                     painter.add(Shape::Text(TextShape::new(top_left, galley, colour(*color)).with_angle(a)));
                 }
             }
-            Prim::Image { min, max, angle, opacity, data } => {
+            (Prim::Image { min, max, angle, opacity, data }, _) => {
                 let (w, h) = (max[0] - min[0], max[1] - min[1]);
                 let (sn, cs) = angle.to_radians().sin_cos();
                 let at = |u: f64, v: f64| cam.to_screen([min[0] + u * cs - v * sn, min[1] + u * sn + v * cs]);
                 let corners = [at(0.0, 0.0), at(w, 0.0), at(w, h), at(0.0, h)];
+                if !Rect::from_points(&corners).intersects(painter.clip_rect()) {
+                    continue;
+                }
                 match texture(painter.ctx(), data) {
                     Some(t) => image_quad(painter, t.id(), corners, *opacity as f32),
                     None => {
@@ -385,42 +483,40 @@ pub fn paint_prims(painter: &Painter, cam: &PaperCam, prims: &[Prim]) {
                     }
                 }
             }
-            Prim::Clip { min, max, prims } => {
-                let r = Rect::from_two_pos(cam.to_screen(*min), cam.to_screen(*max));
-                let clipped = painter.with_clip_rect(r.intersect(painter.clip_rect()));
-                paint_prims(&clipped, cam, prims);
+            (Prim::Clip { min, max, prims }, Prep::Clip(prep)) => {
+                let r = Rect::from_two_pos(cam.to_screen(*min), cam.to_screen(*max)).intersect(painter.clip_rect());
+                if r.is_positive() {
+                    paint(&painter.with_clip_rect(r), cam, prims, prep);
+                }
             }
+            // A preparation that does not match its primitive (cannot happen: both come
+            // from the same list).
+            _ => {}
         }
     }
 }
 
+/// Scroll and pinch like the plan ([`zoom::zoom_factor`]): wheels, pinch and ⌘-scroll
+/// zoom at the pointer, trackpad scrolling pans; middle, Space or background drags pan.
 fn navigate(ui: &Ui, resp: &egui::Response, cam: &mut PaperCam, panning: bool) {
     let pointer = ui.input(|i| i.pointer.hover_pos());
+    let before = cam.scale;
     if pointer.is_some_and(|p| cam.rect.contains(p)) {
-        let (events, zoom) = ui.input(|i| (i.events.clone(), i.zoom_delta()));
+        let events = ui.input(|i| i.events.clone());
         let at = pointer.unwrap_or(cam.rect.center());
-        let zoom_at = |cam: &mut PaperCam, f: f64| {
-            let before = cam.to_paper(at);
-            cam.scale = (cam.scale * f).clamp(0.2, 40.0);
-            let after = cam.to_paper(at);
-            cam.center = [cam.center[0] + before[0] - after[0], cam.center[1] + before[1] - after[1]];
-        };
-        for e in events {
-            if let Event::MouseWheel { unit, delta, modifiers, .. } = e {
-                if modifiers.command || modifiers.ctrl {
-                    continue;
-                }
-                match unit {
-                    MouseWheelUnit::Line | MouseWheelUnit::Page => zoom_at(cam, 1.15f64.powf(delta.y as f64)),
-                    MouseWheelUnit::Point => {
-                        cam.center =
-                            [cam.center[0] - delta.x as f64 / cam.scale, cam.center[1] + delta.y as f64 / cam.scale]
-                    }
-                }
+        for e in &events {
+            if let Event::MouseWheel { unit: MouseWheelUnit::Point, delta, modifiers, .. } = e
+                && !(modifiers.command || modifiers.ctrl)
+            {
+                cam.center = [cam.center[0] - delta.x as f64 / cam.scale, cam.center[1] + delta.y as f64 / cam.scale];
             }
         }
+        let zoom = zoom::zoom_factor(&events);
         if zoom != 1.0 {
-            zoom_at(cam, zoom as f64);
+            let before = cam.to_paper(at);
+            cam.scale = (cam.scale * zoom).clamp(0.2, 40.0);
+            let after = cam.to_paper(at);
+            cam.center = [cam.center[0] + before[0] - after[0], cam.center[1] + before[1] - after[1]];
         }
     }
     let space = ui.input(|i| i.key_down(egui::Key::Space));
@@ -428,6 +524,7 @@ fn navigate(ui: &Ui, resp: &egui::Response, cam: &mut PaperCam, panning: bool) {
         let d = resp.drag_delta();
         cam.center = [cam.center[0] - d.x as f64 / cam.scale, cam.center[1] + d.y as f64 / cam.scale];
     }
+    zoom::note_zoom(ui.ctx(), before != cam.scale);
 }
 
 fn corners(min: P2, max: P2) -> [P2; 4] {
@@ -634,7 +731,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     }
 }
 
-fn finish_drag(s: &mut Studio, page: &Page, d: SheetDrag, to: P2) {
+fn finish_drag(s: &mut Studio, page: &Composed, d: SheetDrag, to: P2) {
     match d {
         SheetDrag::Move { viewport, from } => {
             let by = [to[0] - from[0], to[1] - from[1]];
@@ -1515,4 +1612,67 @@ fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
             let _ = s.run("label.delete", json!({ "template": cur }));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stagecraft_sheet::prim::{HAlign, VAlign};
+
+    fn page() -> Page {
+        let square = vec![[10.0, 10.0], [60.0, 10.0], [60.0, 60.0], [10.0, 60.0]];
+        let path =
+            Prim::Path { rings: vec![square], closed: true, pen: Some(Pen::solid(0.35)), fill: Some(Rgb(200, 0, 0)) };
+        let text = Prim::Text {
+            pos: [20.0, 30.0],
+            text: "Bühne 1²".into(),
+            size: 3.5,
+            angle: 0.0,
+            h: HAlign::Left,
+            v: VAlign::Baseline,
+            bold: false,
+            color: Rgb::BLACK,
+        };
+        let clip = Prim::Clip { min: [0.0, 0.0], max: [100.0, 100.0], prims: vec![path.clone(), text.clone()] };
+        Page { size: [420.0, 297.0], prims: vec![path, text, clip], viewports: Vec::new(), labels: Vec::new() }
+    }
+
+    fn aligned(prims: &[Prim], prep: &[Prep]) -> bool {
+        prims.len() == prep.len()
+            && prims.iter().zip(prep).all(|(p, q)| match (p, q) {
+                (Prim::Path { .. }, Prep::Path { fill, .. }) => fill.as_ref().is_some_and(|(_, t)| t.len() == 2),
+                (Prim::Text { .. }, Prep::Text(runs)) => runs.len() == 2,
+                (Prim::Clip { prims, .. }, Prep::Clip(prep)) => aligned(prims, prep),
+                _ => false,
+            })
+    }
+
+    /// Shapes painted for the page with the paper's point `center` in the middle.
+    fn shapes(c: &Composed, center: P2, scale: f64, zooming: bool) -> usize {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            if zooming {
+                zoom::note_zoom(ui.ctx(), true);
+            }
+            let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+            let painter = ui.painter_at(rect);
+            let cam = PaperCam { center, scale, rect };
+            paint_page(&painter, &cam, c, None);
+        });
+        out.textures_delta.clear();
+        out.shapes.len()
+    }
+
+    #[test]
+    fn a_composed_page_is_prepared_once_and_painted_from_that() {
+        let c = Composed::new(page());
+        assert!(aligned(&c.prims, &c.prep), "fill triangles and text runs for every primitive");
+        // On screen: fill, outline, two text runs, twice.
+        let near = shapes(&c, [35.0, 35.0], 4.0, false);
+        assert!(near >= 8, "{near} shapes");
+        // Zooming gives the same shapes (glyphs from another size, scaled).
+        assert_eq!(shapes(&c, [35.0, 35.0], 4.3, true), near);
+        // Far away on the paper nothing reaches the screen, so nothing is painted.
+        assert_eq!(shapes(&c, [400.0, 280.0], 40.0, false), 0);
+    }
 }

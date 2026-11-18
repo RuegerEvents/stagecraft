@@ -39,6 +39,7 @@ pub mod toolsets;
 pub mod tutorial;
 pub mod view3d;
 pub mod widgets;
+pub mod zoom;
 
 pub use app::{StageApp, Studio, run};
 pub use state::{ThemePref, Tool, UiState, View};

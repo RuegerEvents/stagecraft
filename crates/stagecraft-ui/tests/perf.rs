@@ -320,3 +320,124 @@ fn hall_a_sketch_solves_are_quick() {
         }
     }
 }
+
+/// Average and worst frame.
+fn stats(frames: &[Frame]) -> (Duration, Duration) {
+    let n = frames.len().max(1) as u32;
+    (frames.iter().map(Frame::total).sum::<Duration>() / n, frames.iter().map(Frame::total).max().unwrap_or_default())
+}
+
+/// The Sheets mode on sheet `number`, fitted, its page composed.
+fn open_sheet(path: &PathBuf, number: &str) -> Window {
+    let mut w = Window::open(path);
+    w.studio.run("ui.set_view", serde_json::json!({ "view": "sheets" })).expect("sheets mode");
+    w.studio.run("ui.sheet", serde_json::json!({ "sheet": number, "fit": true })).expect("the sheet");
+    for _ in 0..6 {
+        w.frame(Vec::new());
+    }
+    // Composing runs on a worker; wait until the page is there and current.
+    let t = Instant::now();
+    while stagecraft_ui::sheets::is_composing(&w.studio) && t.elapsed() < Duration::from_secs(120) {
+        w.frame(Vec::new());
+    }
+    w.pointer = w.studio.ui.sheets.cam.rect.center();
+    w.move_to(w.pointer);
+    w.move_to(w.pointer);
+    w
+}
+
+/// Zooming and panning sheet `number`: at the fit, and close up on its first viewport.
+fn sheet_navigation(number: &str) {
+    let Some(path) = document() else { return };
+    let mut w = open_sheet(&path, number);
+    let page = stagecraft_ui::sheets::page(&mut w.studio).expect("a page");
+    eprintln!("sheet {number}: {} primitives, {} viewports", count_prims(&page.prims), page.viewports.len());
+    let still: Vec<Frame> = (0..20).map(|_| w.frame(Vec::new())).collect();
+    let pan_fit = pan(&mut w);
+    let zoom = pinch(&mut w, 60, 1.03);
+    let wheel: Vec<Frame> = (0..24)
+        .map(|i| w.wheel(MouseWheelUnit::Line, vec2(0.0, if i < 12 { 1.0 } else { -1.0 }), Modifiers::NONE))
+        .collect();
+    // Close up: the middle of the first viewport at 8 points per paper mm.
+    let h = &page.viewports[0];
+    w.studio.ui.sheets.cam.center = [(h.min[0] + h.max[0]) / 2.0, (h.min[1] + h.max[1]) / 2.0];
+    w.studio.ui.sheets.cam.scale = 8.0;
+    w.frame(Vec::new());
+    w.move_to(w.studio.ui.sheets.cam.rect.center());
+    let pan_close = pan(&mut w);
+    let zoom_close = pinch(&mut w, 40, 1.04);
+    let settle: Vec<Frame> = (0..30).map(|_| w.frame(Vec::new())).collect();
+    report("still", &still);
+    let p = report("pan", &pan_fit);
+    let z = report("pinch zoom", &zoom);
+    let m = report("wheel zoom", &wheel);
+    let pc = report("pan, close up", &pan_close);
+    let zc = report("pinch zoom, close up", &zoom_close);
+    report("settle", &settle);
+    if release() {
+        for (name, f) in [
+            ("pan", &pan_fit),
+            ("zoom", &zoom),
+            ("wheel zoom", &wheel),
+            ("close-up pan", &pan_close),
+            ("close-up zoom", &zoom_close),
+        ] {
+            let (avg, max) = stats(f);
+            assert!(avg < Duration::from_millis(16), "{number}: {name} frames take {avg:?}");
+            assert!(max < Duration::from_millis(50), "{number}: a {name} frame took {max:?}");
+        }
+        assert!(z.as_secs_f64() < p.as_secs_f64() * 2.0 + 0.002, "{number}: zoom {z:?} costs much more than pan {p:?}");
+        assert!(
+            m.as_secs_f64() < p.as_secs_f64() * 2.0 + 0.002,
+            "{number}: wheel {m:?} costs much more than pan {p:?}"
+        );
+        assert!(
+            zc.as_secs_f64() < pc.as_secs_f64() * 2.0 + 0.002,
+            "{number}: zoom {zc:?} costs much more than pan {pc:?}"
+        );
+    }
+}
+
+fn count_prims(prims: &[stagecraft_sheet::Prim]) -> usize {
+    prims
+        .iter()
+        .map(|p| if let stagecraft_sheet::Prim::Clip { prims, .. } = p { 1 + count_prims(prims) } else { 1 })
+        .sum()
+}
+
+#[test]
+fn zooming_the_hall_a_sheet_lb1_is_cheap() {
+    sheet_navigation("LB-1");
+}
+
+#[test]
+fn zooming_the_hall_a_sheet_lbr_is_cheap() {
+    sheet_navigation("LB-R");
+}
+
+/// Dragging a viewport on LB-1: the live preview draws it where it goes, every frame.
+#[test]
+fn dragging_a_hall_a_viewport_stays_responsive() {
+    let Some(path) = document() else { return };
+    let mut w = open_sheet(&path, "LB-1");
+    let page = stagecraft_ui::sheets::page(&mut w.studio).expect("a page");
+    let h = page.viewports.iter().max_by(|a, b| {
+        let area = |h: &stagecraft_sheet::prim::ViewportHit| (h.max[0] - h.min[0]) * (h.max[1] - h.min[1]);
+        area(a).total_cmp(&area(b))
+    });
+    let h = h.expect("a viewport").clone();
+    let pos = w.studio.ui.sheets.cam.to_screen([(h.min[0] + h.max[0]) / 2.0, (h.min[1] + h.max[1]) / 2.0]);
+    w.move_to(pos);
+    w.press(pos, true);
+    let frames: Vec<Frame> = (1..=60).map(|i| w.move_to(pos + vec2(i as f32 * 2.0, i as f32))).collect();
+    let live = w.studio.ui.sheets.live.clone().expect("a live preview while dragging");
+    assert_eq!(live.viewport, h.id);
+    assert!(live.moved && live.min[0] > h.min[0], "the preview follows the pointer");
+    w.press(w.pointer, false);
+    let (avg, max) = stats(&frames);
+    report("viewport drag", &frames);
+    if release() {
+        assert!(avg < Duration::from_millis(16), "drag frames take {avg:?}");
+        assert!(max < Duration::from_millis(50), "a drag frame took {max:?}");
+    }
+}
