@@ -494,6 +494,8 @@ pub struct UiState {
     pub sketch: crate::sketch_ui::SketchUi,
     /// The guided tour.
     pub tutorial: crate::tutorial::Tutorial,
+    /// The first-run "Build a basic stage?" offer is open (`onboarding.rs`).
+    pub tutorial_offer: bool,
     /// Tool palette buttons per row (saved per user).
     pub tool_columns: ToolColumns,
     /// Tool palette sections the user folded (catalog keys).
@@ -558,6 +560,7 @@ impl Default for UiState {
             quit_confirmed: false,
             sketch: Default::default(),
             tutorial: Default::default(),
+            tutorial_offer: false,
             tool_columns: ToolColumns::Auto,
             collapsed_sections: BTreeSet::new(),
             model_view: View::Plan,

@@ -345,3 +345,52 @@ fn back_and_skip_move_by_hand_and_ui_tutorial_reports() {
     assert!(!h.state().ui.tutorial.active);
     assert!(h.query_by_label("Tutorial start").is_some());
 }
+
+/// On a fresh profile the app offers the tutorial in a small modal; the answer is kept
+/// in the settings. A plain `Studio` (as in every other test) does not ask.
+#[test]
+fn a_fresh_profile_is_offered_the_tutorial_once() {
+    use stagecraft_ui::onboarding::TutorialOffer;
+    let build = |studio: Studio| {
+        let mut h = Harness::builder()
+            .with_max_steps(8)
+            .with_size(egui::vec2(1400.0, 900.0))
+            .build_ui_state(|ui, s: &mut Studio| s.show(ui), studio);
+        h.run();
+        h
+    };
+    let quiet = build(Studio::new(stagecraft_core::Engine::new()));
+    assert!(quiet.query_by_label("Start tutorial").is_none(), "tests are not asked");
+
+    let mut studio = Studio::new(stagecraft_core::Engine::new());
+    assert_eq!(studio.prefs.get().onboarding.tutorial, TutorialOffer::Ask, "a fresh profile");
+    studio.offer_tutorial();
+    let mut h = build(studio);
+    assert!(h.query_by_label_contains("Build a basic stage?").is_some());
+    assert!(h.query_by_label("Not now").is_some() && h.query_by_label("Don't ask again").is_some());
+    h.get_by_label("Start tutorial").click();
+    h.run();
+    assert!(h.state().ui.tutorial.active, "the tour starts");
+    assert!(!h.state().ui.tutorial_offer);
+    assert_eq!(h.state().prefs.get().onboarding.tutorial, TutorialOffer::Started);
+    // Started once: not asked again.
+    h.state_mut().ui.tutorial.active = false;
+    h.state_mut().offer_tutorial();
+    assert!(!h.state().ui.tutorial_offer);
+
+    // "Not now" asks again next time, "Don't ask again" never.
+    let mut studio = Studio::new(stagecraft_core::Engine::new());
+    studio.offer_tutorial();
+    let mut h = build(studio);
+    h.get_by_label("Not now").click();
+    h.run();
+    assert!(!h.state().ui.tutorial.active && !h.state().ui.tutorial_offer);
+    assert_eq!(h.state().prefs.get().onboarding.tutorial, TutorialOffer::Later);
+    h.state_mut().offer_tutorial();
+    h.run();
+    h.get_by_label("Don't ask again").click();
+    h.run();
+    assert_eq!(h.state().prefs.get().onboarding.tutorial, TutorialOffer::Never);
+    h.state_mut().offer_tutorial();
+    assert!(!h.state().ui.tutorial_offer);
+}

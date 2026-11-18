@@ -203,7 +203,9 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   (`tutorial::reveal`) and entering a step brings its panels to the front of their tab
   group (the Library shares one with Layers). `tests/tutorial.rs` walks all steps through
   the GUI (screens `60-67-tutorial-*` with `STAGECRAFT_SCREENSHOTS`); floors in the
-  GUI are tested in `tests/floor.rs`.
+  GUI are tested in `tests/floor.rs`. On launch the app offers the tour once
+  (`onboarding.rs`: egui modal Start tutorial / Not now / Don't ask again, answer in
+  `Prefs.onboarding`; only `run` calls `Studio::offer_tutorial`, so tests stay quiet).
 
 - The library panel (`src/library.rs`) lists fixture types (pick one for the fixture
   tool, assign a symbol, import files, "Demo fixtures" adds the bundled demo GDTFs);
@@ -218,7 +220,11 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
 
 - Sheets mode (`src/sheets.rs`, ⌘4): the page from `stagecraft_sheet::compose`,
   cached by journal length; drags become `viewport.update` / `label.move` on
-  release; the inspector shows sheet, viewport, title block fields and label
+  release, while dragging the viewport is drawn live from the composed page
+  (`sheets::Live`, `paint_page`: moved = page prims painted with a shifted camera,
+  cropped = same content re-clipped; `ViewportHit.prims` is its range) and stays so
+  until the recomposed page arrives; a new scale keeps the frame (`sheets::set_scale`,
+  core `viewport.update` rescales a crop around its centre); the inspector shows sheet, viewport, title block fields and label
   templates. `ui.sheet` and `ui.set_label_template` drive it; the plan canvas draws
   labels with the same placement code (`canvas::draw_labels`).
 
@@ -279,7 +285,9 @@ split, a rearranged dock layout with a floating panel (`40-dock-float-*`), the
 tutorial panel (`41-43-tutorial-*`), and `50-55-craft-*` at 1200 × 750, the size of the
 Craft suite's reference screenshots, and `70-78-palette-*` (groups, selection, group,
 search, alias, form, objects, `>`), `80-crisp-{1x,1.5x,2x}-*` (plan and palette at those
-pixel densities) and `81-tools-{two,one}-*` (the folded tool palette). kittest's 8 pt margin is cut off and the traffic
+pixel densities) `81-tools-{two,one}-*` (the folded tool palette), `90-92-hud-*` (heads-up dimension
+boxes: live, typed and locked, Shift), `93-viewport-1-{100,50}-*` (same frame, other
+scale), `94-viewport-live-drag-*` and `95-first-run-offer-*`. kittest's 8 pt margin is cut off and the traffic
 lights are painted where AppKit puts them (`chrome::traffic_light_centres`). The overview shots (`53-craft-3d` too) hide the `ceiling` tag, which would cover the house. With
 `testdata/private/vectorworks/sample_show.mvr` present it also renders that
 import in plan and 3D (`26-mvr-*`, `27-mvr-*`).

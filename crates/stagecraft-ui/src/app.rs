@@ -165,6 +165,7 @@ impl Studio {
             .show(ui, |ui| chrome::status_bar(ui, self));
         egui::CentralPanel::no_frame().show(ui, |ui| crate::dock::show(ui, self));
         palette::show(ui.ctx(), self);
+        crate::onboarding::show(ui.ctx(), self);
         crate::tutorial::paint(ui.ctx(), self);
         self.keep_prefs(ui.ctx());
     }
@@ -492,6 +493,8 @@ pub fn run(engine: Engine) -> Result<(), String> {
             }
             let mut studio = Studio::with_prefs(engine, prefs);
             studio.ui.native_dialogs = true;
+            // First launch (or "Not now" last time): offer the tutorial.
+            studio.offer_tutorial();
             let wake = ctx.clone();
             studio.dialogs = craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint()));
             studio.offscreen = cc.wgpu_render_state.as_ref().map(view3d::offscreen::Offscreen::from_render_state);

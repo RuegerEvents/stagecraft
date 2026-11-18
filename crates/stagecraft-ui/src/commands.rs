@@ -212,6 +212,7 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "viewport_editor": ui.sheets.editor,
         "plan_labels": ui.plan_labels,
         "tutorial": tutorial_json(ui),
+        "tutorial_offer": ui.tutorial_offer,
         "sketch": { "show": ui.sketch.show, "colours": ui.sketch.colours, "dimensions": ui.sketch.dimensions,
                     "selected_dimension": ui.sketch.selected.map(crate::sketch_ui::dim_args),
                     "picked_layer": ui.sketch.picked_layer,

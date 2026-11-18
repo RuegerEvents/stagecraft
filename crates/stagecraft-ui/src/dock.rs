@@ -462,6 +462,8 @@ pub struct Prefs {
     pub tools: crate::state::ToolOptions,
     pub palette: PalettePrefs,
     pub tool_palette: ToolPalettePrefs,
+    /// Whether to offer the tutorial on launch.
+    pub onboarding: crate::onboarding::OnboardingPrefs,
 }
 
 /// The tool palette: buttons per row.
@@ -538,6 +540,7 @@ mod tests {
             tools,
             palette: PalettePrefs { recent: vec!["patch.auto".into(), "ui.set_view {\"view\":\"3d\"}".into()] },
             tool_palette: ToolPalettePrefs { columns: crate::state::ToolColumns::Two },
+            onboarding: crate::onboarding::OnboardingPrefs { tutorial: crate::onboarding::TutorialOffer::Never },
         };
         let dir = tempfile::tempdir().unwrap();
         {

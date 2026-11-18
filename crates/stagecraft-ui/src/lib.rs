@@ -23,6 +23,7 @@ pub mod icons;
 pub mod inspector;
 pub mod library;
 pub mod menu;
+pub mod onboarding;
 pub mod palette;
 pub mod panels;
 pub mod schema_form;

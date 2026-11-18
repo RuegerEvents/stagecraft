@@ -715,3 +715,59 @@ fn hud_screens() {
         h.run();
     }
 }
+
+/// Sheets: the front elevation at 1:100 and 1:50 in the same frame (`93-*`), a viewport
+/// mid-drag drawn live where it goes (`94-*`); the first-run tutorial offer (`95-*`).
+#[test]
+fn viewport_and_offer_screens() {
+    let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") else { return };
+    std::fs::create_dir_all(&dir).expect("screenshot dir");
+    for (theme, tn) in [(ThemePref::Light, "light"), (ThemePref::Dark, "dark")] {
+        let mut h = harness(theme);
+        let doc = h.state().engine.doc().clone();
+        let l102 = doc.sheets.values().find(|s| s.number == "L-102").unwrap().clone();
+        let front = l102.viewports[0].id;
+        h.state_mut().run("ui.sheet", json!({ "sheet": "L-102", "viewport": front })).unwrap();
+        for _ in 0..3 {
+            h.run();
+        }
+        save(&mut h, &dir, &format!("93-viewport-1-100-{tn}"));
+        let vp = h.state().engine.doc().sheets[&l102.id].viewport(front).unwrap().clone();
+        stagecraft_ui::sheets::set_scale(h.state_mut(), &vp, 50.0);
+        let page = stagecraft_ui::sheets::page(h.state_mut());
+        assert!(page.is_some());
+        save(&mut h, &dir, &format!("93-viewport-1-50-{tn}"));
+
+        // Halfway through dragging the rendered 3D view down and left.
+        let page = stagecraft_sheet::pages(h.state().engine.doc(), &[l102.id]).remove(0);
+        let hit = page.viewports.iter().find(|v| v.id == l102.viewports[2].id).unwrap().clone();
+        let cam = h.state().ui.sheets.cam;
+        let a = cam.to_screen([(hit.min[0] + hit.max[0]) / 2.0, (hit.min[1] + hit.max[1]) / 2.0]);
+        let b = a + vec2(-60.0, 120.0);
+        h.hover_at(a);
+        h.run();
+        h.event(Event::PointerButton {
+            pos: a,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        });
+        h.run();
+        for i in 1..=6 {
+            h.event(Event::PointerMoved(a + (b - a) * (i as f32 / 6.0)));
+            h.run();
+        }
+        save(&mut h, &dir, &format!("94-viewport-live-drag-{tn}"));
+        h.event(Event::PointerButton {
+            pos: b,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        });
+        h.run();
+
+        let mut h = harness_with(theme, stagecraft_core::Engine::new());
+        h.state_mut().offer_tutorial();
+        save(&mut h, &dir, &format!("95-first-run-offer-{tn}"));
+    }
+}
