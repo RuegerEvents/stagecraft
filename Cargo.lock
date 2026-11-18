@@ -4174,6 +4174,8 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha2",
+ "stagecraft-gdtf",
  "tempfile",
  "thiserror 2.0.21",
  "uuid",

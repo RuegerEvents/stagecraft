@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -60 120 120">
+  <!-- Fresnel: short box, wide stepped lens at the front (top). -->
+  <rect x="-26" y="-18" width="52" height="52" rx="7" fill="#000"/>
+  <rect x="-28" y="-30" width="56" height="12" rx="2" fill="#000"/>
+  <path d="M -28 -30 L 28 -30" class="thick"/>
+  <path d="M -14 -30 L -14 -18 M 0 -30 L 0 -18 M 14 -30 L 14 -18" class="thin"/>
+  <path d="M -8 34 L -8 42 L 8 42 L 8 34" class="thin"/>
+</svg>

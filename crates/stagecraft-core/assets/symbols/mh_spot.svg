@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -60 120 120">
+  <!-- Moving head spot from above: base, yoke arms, a long head with a narrow lens. -->
+  <rect x="-34" y="14" width="68" height="30" rx="5" fill="#000"/>
+  <rect x="-34" y="-26" width="9" height="44" rx="2" fill="#000"/>
+  <rect x="25" y="-26" width="9" height="44" rx="2" fill="#000"/>
+  <path d="M -22 -18 L -14 -46 L 14 -46 L 22 -18 L 22 10 Q 22 18 14 18 L -14 18 Q -22 18 -22 10 Z" fill="#000"/>
+  <path d="M -14 -46 L 14 -46" class="thick"/>
+  <circle cx="0" cy="-30" r="7" class="thin"/>
+</svg>

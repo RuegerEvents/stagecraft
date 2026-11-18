@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -60 120 120">
+  <!-- LED bar / batten: a long narrow housing with a row of cells, front at the top. -->
+  <rect x="-58" y="-11" width="116" height="22" rx="3" fill="#000"/>
+  <path d="M -58 -14 L 58 -14" class="thick"/>
+  <path d="M -43.5 -11 L -43.5 11 M -29 -11 L -29 11 M -14.5 -11 L -14.5 11 M 0 -11 L 0 11 M 14.5 -11 L 14.5 11 M 29 -11 L 29 11 M 43.5 -11 L 43.5 11" class="thin"/>
+</svg>

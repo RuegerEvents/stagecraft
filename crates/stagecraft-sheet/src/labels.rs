@@ -313,7 +313,7 @@ fn leader(f: &FixtureInput, b: &[P2; 2]) -> Option<[P2; 2]> {
 
 /// The text of a label field for an object (empty when it has none).
 pub fn field_value(o: &Object, field: &str) -> String {
-    let ObjectKind::Fixture { fid, cid, gdtf, mode, address, weight_kg } = &o.kind else {
+    let ObjectKind::Fixture { fid, cid, gdtf, mode, address, weight_kg, .. } = &o.kind else {
         return field.strip_prefix("attr:").and_then(|k| o.attrs.get(k)).cloned().unwrap_or_default();
     };
     match field {

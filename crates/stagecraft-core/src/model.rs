@@ -16,7 +16,10 @@ pub type P2 = [f64; 2];
 pub type P3 = [f64; 3];
 
 /// File format version written into every `.stagecraft`.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// 1: block 1–7 documents. 2: embedded assets (`assets/` in the ZIP) and the fixture
+/// type library. Version 1 files load unchanged (both maps start empty).
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Document {
@@ -33,6 +36,12 @@ pub struct Document {
     /// Custom title blocks; sheets without one use [`crate::sheet::TitleBlock::generic`].
     #[serde(default)]
     pub title_blocks: OrdMap<Id, crate::sheet::TitleBlock>,
+    /// Embedded files by SHA-256 (GDTFs). Bytes are shared between undo versions.
+    #[serde(default)]
+    pub assets: OrdMap<String, crate::asset::Asset>,
+    /// Fixture types by key (`Manufacturer@Name`), each backed by a GDTF asset.
+    #[serde(default)]
+    pub fixture_types: OrdMap<String, crate::fixture_type::FixtureType>,
 }
 
 impl Default for Document {
@@ -53,6 +62,8 @@ impl Document {
             sheets: OrdMap::new(),
             label_templates: OrdMap::new(),
             title_blocks: OrdMap::new(),
+            assets: OrdMap::new(),
+            fixture_types: OrdMap::new(),
         };
         let stage = Layer { id: Uuid::new_v4(), name: "Stage".into(), elevation: 0.0, order: 0, visible: true };
         doc.layers.insert(stage.id, stage);
@@ -274,16 +285,21 @@ pub enum ObjectKind {
     Wall { path: Vec<P2>, height: f64, thickness: f64 },
     /// A straight truss piece along local +x, starting at the placement.
     Truss { length: f64, profile: String },
-    /// A lighting fixture. GDTF data arrives in block 5; this holds the patch.
+    /// A lighting fixture. Origin: the hanging point; GDTF geometry hangs below it
+    /// (−z), so a floor fixture is turned over (rotation x 180°).
     Fixture {
         fid: Option<u32>,
         cid: Option<String>,
-        /// Name of the embedded GDTF file.
+        /// Fixture type key in the document library (`Manufacturer@Name`).
         gdtf: Option<String>,
+        /// DMX mode name of the type; `None` = its first mode.
         mode: Option<String>,
-        /// Absolute DMX address, 1-based (universe 2 address 1 = 513).
+        /// Absolute DMX address of the first break, 1-based (universe 2 address 1 = 513).
         address: Option<u32>,
-        /// kg, for load sums. Block 5 fills it from the GDTF.
+        /// Addresses of further DMX breaks of the mode, in break order; 0 = unpatched.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        extra_addresses: Vec<u32>,
+        /// kg, for load sums. Filled from the GDTF; can be overridden.
         #[serde(default)]
         weight_kg: Option<f64>,
     },

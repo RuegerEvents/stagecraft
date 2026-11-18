@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -60 120 120">
+  <!-- Beam moving head from above: small round head with a tight lens, yoke, base. -->
+  <rect x="-30" y="16" width="60" height="28" rx="5" fill="#000"/>
+  <rect x="-30" y="-22" width="8" height="40" rx="2" fill="#000"/>
+  <rect x="22" y="-22" width="8" height="40" rx="2" fill="#000"/>
+  <path d="M -18 -10 L -8 -44 L 8 -44 L 18 -10 Q 18 14 0 14 Q -18 14 -18 -10 Z" fill="#000"/>
+  <path d="M -8 -44 L 8 -44" class="thick"/>
+  <circle cx="0" cy="-36" r="4" class="thin"/>
+  <path d="M -10 -10 L 10 -10" class="thin"/>
+</svg>

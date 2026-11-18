@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -60 120 120">
+  <!-- LED wash / LED PAR: a flat box with an array of emitters, front at the top. -->
+  <rect x="-30" y="-30" width="60" height="58" rx="8" fill="#000"/>
+  <path d="M -30 -34 L 30 -34" class="thick"/>
+  <circle cx="-15" cy="-15" r="6" class="thin"/>
+  <circle cx="0" cy="-15" r="6" class="thin"/>
+  <circle cx="15" cy="-15" r="6" class="thin"/>
+  <circle cx="-15" cy="0" r="6" class="thin"/>
+  <circle cx="0" cy="0" r="6" class="thin"/>
+  <circle cx="15" cy="0" r="6" class="thin"/>
+  <circle cx="-15" cy="15" r="6" class="thin"/>
+  <circle cx="0" cy="15" r="6" class="thin"/>
+  <circle cx="15" cy="15" r="6" class="thin"/>
+  <path d="M -8 28 L -8 36 L 8 36 L 8 28" class="thin"/>
+</svg>

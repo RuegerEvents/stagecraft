@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -60 120 120">
+  <!-- Follow spot from above: a long barrel on a tripod, lens at the top. -->
+  <path d="M 0 0 L -40 30 M 0 0 L 40 30 M 0 0 L 0 -42" class="thin"/>
+  <circle cx="0" cy="0" r="40" class="thin"/>
+  <rect x="-13" y="-56" width="26" height="92" rx="4" fill="#000"/>
+  <rect x="-16" y="-56" width="32" height="14" rx="2" fill="#000"/>
+  <path d="M -16 -56 L 16 -56" class="thick"/>
+  <path d="M -13 30 L 13 30 M 13 -10 L 22 -10 L 22 6 L 13 6" class="thin"/>
+</svg>

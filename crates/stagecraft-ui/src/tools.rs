@@ -763,8 +763,15 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
         }
         (Tool::Fixture, Some(c)) => {
             let placement = Placement { position: [c[0], c[1], 0.0], rotation: [0.0; 3] };
-            let kind =
-                ObjectKind::Fixture { fid: None, cid: None, gdtf: None, mode: None, address: None, weight_kg: None };
+            let kind = ObjectKind::Fixture {
+                fid: None,
+                cid: None,
+                gdtf: None,
+                mode: None,
+                address: None,
+                extra_addresses: Vec::new(),
+                weight_kg: None,
+            };
             ghosts(ghost(kind, placement, style));
         }
         _ => {}

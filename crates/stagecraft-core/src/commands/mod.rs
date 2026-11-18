@@ -5,6 +5,7 @@
 
 mod create;
 mod doc;
+mod fixture;
 mod history;
 mod layer;
 mod object;
@@ -27,6 +28,7 @@ pub(crate) fn register(r: &mut Registry) {
     tag::register(r);
     object::register(r);
     create::register(r);
+    fixture::register(r);
     stage::register(r);
     rigging::register(r);
     selection::register(r);
