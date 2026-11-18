@@ -183,3 +183,61 @@ fn angle_dimension_keeps_orientation() {
     assert!((pc.angle().to_degrees() + 45.0).abs() < 1e-6, "{pc:?}");
     assert_eq!(out.status.unwrap().dof, 0);
 }
+
+#[test]
+fn free_geometry_stays_where_the_user_sees_it() {
+    let (mut s, p, _, w, h) = rect();
+    s.remove_constraint(h);
+    let s = s.solve(&SolveOptions::default()).unwrap().sketch;
+    let height = s.pos(p[3]).y;
+    let out = s.apply(&Edit::SetDimension { id: w, value: 5000.0 }, &SolveOptions::default()).unwrap();
+    // the height is free; it must not drift
+    assert!((out.sketch.pos(p[3]).y - height).abs() < 1e-6);
+    assert!((out.sketch.pos(p[2]).y - height).abs() < 1e-6);
+}
+
+#[test]
+fn large_dimension_changes() {
+    let (s, p, _, w, h) = rect();
+    let s = s.solve(&SolveOptions::default()).unwrap().sketch;
+    for value in [40000.0, 10.0, 123456.0] {
+        let out = s.apply(&Edit::SetDimension { id: w, value }, &SolveOptions::default()).unwrap();
+        assert!(near(out.sketch.pos(p[2]), v(value, 3000.0)), "{value}: {:?}", out.sketch.pos(p[2]));
+    }
+    // both at once in a batch
+    let out = s
+        .apply(
+            &Edit::Batch {
+                edits: vec![Edit::SetDimension { id: w, value: 20000.0 }, Edit::SetDimension { id: h, value: 500.0 }],
+            },
+            &SolveOptions::default(),
+        )
+        .unwrap();
+    assert!(near(out.sketch.pos(p[2]), v(20000.0, 500.0)));
+    // negative values are refused
+    assert!(matches!(
+        s.apply(&Edit::SetDimension { id: w, value: -1.0 }, &SolveOptions::default()),
+        Err(SolveError::BadValue { .. })
+    ));
+}
+
+#[test]
+fn triangle_with_large_change_keeps_its_orientation() {
+    // A triangle hanging off a fixed base; growing a side by 3× must not flip the apex
+    // below the base.
+    let mut s = Sketch::new();
+    let (p, e) = s.add_polyline(&[v(0.0, 0.0), v(4000.0, 0.0), v(1500.0, 2500.0)], true);
+    s.fix(p[0]);
+    s.fix(p[1]);
+    let a = s.add_dimension(Measure::Length { line: e[1] }, 3000.0);
+    s.add_dimension(Measure::Length { line: e[2] }, 2500.0);
+    let s = s.solve(&SolveOptions::default()).unwrap().sketch;
+    assert!(s.pos(p[2]).y > 0.0);
+    let out = s.apply(&Edit::SetDimension { id: a, value: 6000.0 }, &SolveOptions::default()).unwrap();
+    let apex = out.sketch.pos(p[2]);
+    assert!(apex.y > 0.0, "{apex:?}");
+    assert!((apex.distance(v(4000.0, 0.0)) - 6000.0).abs() < 1e-6);
+    // impossible triangle: 1000 + 2500 < 4000
+    let err = s.apply(&Edit::SetDimension { id: a, value: 1000.0 }, &SolveOptions::default());
+    assert!(matches!(err, Err(SolveError::Conflict { .. })), "{err:?}");
+}
