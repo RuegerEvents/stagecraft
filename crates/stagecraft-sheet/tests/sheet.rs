@@ -173,3 +173,48 @@ fn tempdir() -> String {
     let d = std::env::temp_dir().join(format!("stagecraft-sheet-{}", std::process::id()));
     d.to_string_lossy().into_owned()
 }
+
+/// GDTF types: label fields type/mode/footprint, legend rows per type, fixture
+/// list with channels and per-break addresses.
+#[test]
+fn gdtf_types_in_labels_legend_and_list() {
+    let (mut e, s) = rig();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/gdtf");
+    for n in ["Spot 300", "Pixel Bar 8"] {
+        run(&mut e, "gdtf.import", json!({ "path": dir.join(format!("StageCraft Demo@{n}.gdtf")) }));
+    }
+    let fixtures: Vec<Id> = e
+        .doc()
+        .objects
+        .values()
+        .filter(|o| matches!(o.kind, stagecraft_core::ObjectKind::Fixture { fid: Some(f), .. } if f < 200))
+        .map(|o| o.id)
+        .collect();
+    run(&mut e, "fixture.set_type", json!({ "ids": fixtures[..4], "gdtf_type": "StageCraft Demo@Spot 300" }));
+    run(
+        &mut e,
+        "fixture.set_type",
+        json!({ "ids": fixtures[4..], "gdtf_type": "StageCraft Demo@Pixel Bar 8", "mode": "Split" }),
+    );
+    run(&mut e, "patch.auto", json!({ "ids": fixtures, "start": "2.001" }));
+    let o = &e.doc().objects[&fixtures[4]];
+    assert_eq!(stagecraft_sheet::labels::field_value(e.doc(), o, "type"), "StageCraft Demo Pixel Bar 8");
+    assert_eq!(stagecraft_sheet::labels::field_value(e.doc(), o, "mode"), "Split");
+    assert_eq!(stagecraft_sheet::labels::field_value(e.doc(), o, "footprint"), "2+24 ch");
+    assert_eq!(stagecraft_sheet::labels::field_value(e.doc(), o, "address"), "2.065 / 2.067");
+    let rasters = Default::default();
+    let page = compose(e.doc(), s, &Inputs { source: &stagecraft_sheet::FallbackSource, rasters: &rasters }).unwrap();
+    let mut t = Vec::new();
+    texts(&page.prims, &mut t);
+    for want in [
+        "StageCraft Demo Spot 300  (16 ch)",
+        "StageCraft Demo Pixel Bar 8  (2+24 ch)",
+        "Generic fixture",
+        "× 4",
+        "× 2",
+        "2+24",
+        "2.065 / 2.067",
+    ] {
+        assert!(t.iter().any(|x| x == want), "missing `{want}` in {t:?}");
+    }
+}

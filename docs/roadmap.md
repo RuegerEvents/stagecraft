@@ -8,7 +8,7 @@ Estimate from 2026-11-17: 14–21 active days for the whole MVP.
 | 2 | 2D drawing: canvas, snapping, polylines, walls, floors, dimensions, layers/tags, palette, inspector | 3–4 | done 2026-11-17 (geom crate, GUI, 14 ui.* commands, first table) |
 | 3 | 3D view (wgpu): extrusions, camera, section planes with filled cuts | 2–3 | done 2026-11-18 (meshes for all kinds, section cuts, wgpu view, plan/3D/split, `ui.camera`, `ui.section`) |
 | 4 | Stage objects: portal, curtains, fly system, platforms, truss, base plates, ceiling, catalogues | 2–3 | done 2026-11-18 (11 kinds, 22 commands incl. `truss.run`, `load.report`, `batten.list`; 9 tools; fly bar list; user catalogues) |
-| 5 | GDTF: parse, 3D models, modes, patch, FID/CID, GDTF Share, symbols, load sums | 3–4 | |
+| 5 | GDTF: parse, 3D models, modes, patch, FID/CID, GDTF Share, symbols, load sums | 3–4 | done 2026-11-18 (gdtf crate in the workspace, assets embedded in format 2, 11 commands `gdtf.*`/`patch.*`/`symbol.*`/`fixture.set_type`, GDTF meshes and symbols cached per type, 11 built-in SVG symbols, multi-break patch with conflicts, library panel with GDTF Share off the UI thread, demo on synthetic GDTFs) |
 | 6 | Vector views from 3D: hidden lines, section hatching; rendered viewports | 2–3 | |
 | 7 | Sheets: viewports, title block, labels (three modes), PDF | 2–3 | done 2026-11-18 (`stagecraft-sheet`, 20 commands `sheet.*`/`viewport.*`/`label.*`/`titleblock.*`/`object.set_attrs`, krilla PDF + SVG, Sheets mode, plan labels; elevations/sections use a mesh-outline fallback until HLR is wired in) |
 | 8 | MVR import/export, DXF/PDF/image underlays, glTF/OBJ/3DS | 1–2 | |

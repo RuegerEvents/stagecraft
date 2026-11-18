@@ -16,7 +16,7 @@ UX. Commits are GPG-signed.
 
 - `stagecraft-core` holds the document and every command. No UI, no sockets, no clock.
   It must keep building for `wasm32-unknown-unknown`
-  (`cargo check -p stagecraft-core -p stagecraft-geom -p stagecraft-sheet --target wasm32-unknown-unknown`).
+  (`cargo check -p stagecraft-core -p stagecraft-geom -p stagecraft-sheet -p stagecraft-gdtf --target wasm32-unknown-unknown`).
 - **Every action is a command** registered in `crates/stagecraft-core/src/commands/`.
   The GUI never mutates the document directly. A new feature without a command is not
   done.
@@ -39,6 +39,31 @@ UX. Commits are GPG-signed.
   `crates/stagecraft-core/catalog/`, embedded; `catalog::extend`/`load_dir` merge
   user files (the app reads `<data dir>/StageCraft/catalog/*.json`). Load sums
   (`load.rs`, `load.report`) need them, which is why they live in core.
+
+## Fixtures and GDTF
+
+`stagecraft-gdtf` (workspace member, no StageCraft deps; see its README) parses
+GDTF; core depends on it. The document holds `assets` (embedded files by SHA-256,
+bytes in a shared `Arc` so undo never copies them; `asset.rs`) and `fixture_types`
+(library entries keyed `Manufacturer@Name` with modes, footprints, weight, size,
+symbol; `fixture_type.rs`). `.stagecraft` format 2 stores assets as
+`assets/<sha256>.<ext>` next to `document.json`; format 1 files load unchanged.
+A fixture's `gdtf` is a library key, `mode` a mode name, `address` the first
+break and `extra_addresses` further breaks. `patch.rs` has footprints, ranges,
+conflicts and free-range search. Commands in `commands/fixture.rs`:
+`gdtf.import/library/remove`, `fixture.create/update/set_type/number`,
+`symbol.assign/list`, `patch.auto/check`. Weight comes from the GDTF unless set by
+hand, so load sums include it. Built-in plan symbols are SVGs in
+`crates/stagecraft-core/assets/symbols/` (front of the fixture at the top).
+
+`stagecraft-geom::gdtf` builds what views draw from the embedded GDTF and caches it
+per asset hash + mode (+ `Lod`): the mesh (hanging from the origin, pan/tilt
+neutral), the plan symbol (assigned built-in symbol → the GDTF's top-view SVG →
+silhouette; generic box without a type) and outline points that make the
+silhouette follow the fixture's tilt. `svg.rs` is a small SVG reader. The demo's
+three GDTFs are synthetic (`testdata/gdtf/`, made by `make_demo_gdtf.py` there,
+run with `python3 -I`); the real GDTF Share downloads in `testdata/private/gdtf/`
+are used by tests that skip without them.
 
 ## Geometry
 
@@ -93,6 +118,15 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   render state (see `tests/screens.rs`), otherwise the 3D view stays empty.
   `ui.set_view` switches plan / 3d / split (⌘1/⌘2/⌘3); `ui.camera` and
   `ui.section` drive the rest. ⌘4 is the Sheets mode.
+
+- The library panel (`src/library.rs`, left side) lists fixture types (pick one for
+  the fixture tool, assign a symbol, import files) and searches GDTF Share.
+  Requests run on worker threads behind the `ShareBackend` trait; the UI polls a
+  channel in `Studio::show`, so the network never blocks a frame. Tests swap in a
+  mock (`ui.library.set_backend`). On this Mac LuLu holds new binaries' connections
+  until a human allows them, so live Share calls cannot be tested unattended.
+  `ui.share_search` / `ui.share_add` drive it. Patch problems show in the table's
+  Patch column, the inspector, and as red rings in the plan.
 
 - Sheets mode (`src/sheets.rs`, ⌘4): the page from `stagecraft_sheet::compose`,
   cached by journal length; drags become `viewport.update` / `label.move` on
