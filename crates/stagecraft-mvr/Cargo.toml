@@ -12,6 +12,10 @@ quick-xml.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 zip.workspace = true
+craft-zip.workspace = true
+
+[dev-dependencies]
+craft-zip = { workspace = true, features = ["test-support"] }
 
 # The workspace's uuid has v4 on, which needs a JS randomness source in the browser.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]

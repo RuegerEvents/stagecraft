@@ -372,3 +372,42 @@ fn symbol_cycles_terminate() {
     s.layers.push(l);
     assert!(s.geometry_instances().is_empty());
 }
+
+/// An MVR whose `name` entry claims `claimed` bytes but inflates to `real`.
+fn lying_entry(name: &str, real: usize, claimed: u32) -> Vec<u8> {
+    let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    z.start_file(SCENE_FILE, opts).unwrap();
+    z.write_all(b"<GeneralSceneDescription verMajor=\"1\" verMinor=\"6\"><Scene/></GeneralSceneDescription>").unwrap();
+    z.start_file(name, opts).unwrap();
+    z.write_all(&vec![0u8; real]).unwrap();
+    let mut bytes = z.finish().unwrap().into_inner();
+    // The uncompressed size: local header offset 22 (name at 30), central header offset 24
+    // (name at 46).
+    for (sig, size_at, name_at) in [(b"PK\x03\x04", 22, 30), (b"PK\x01\x02", 24, 46)] {
+        let hits: Vec<usize> = bytes.windows(4).enumerate().filter(|(_, w)| w == sig).map(|(i, _)| i).collect();
+        for at in hits {
+            if bytes[at + name_at..].starts_with(name.as_bytes()) {
+                bytes[at + size_at..at + size_at + 4].copy_from_slice(&claimed.to_le_bytes());
+            }
+        }
+    }
+    bytes
+}
+
+#[test]
+fn archive_reads_are_bounded() {
+    // An entry that inflates past what it declares is refused, not read to the end.
+    let imp = read_mvr(&lying_entry("model.glb", 1 << 20, 10)).unwrap();
+    assert!(!imp.mvr.resources.files.contains_key("model.glb"));
+    assert!(imp.warnings.iter().any(|w| w.to_string().contains("model.glb")), "{:#?}", imp.warnings);
+
+    // A directory that declares more entries than the limit is refused before it is indexed.
+    let mut eocd = vec![0u8; 22];
+    eocd[..4].copy_from_slice(b"PK\x05\x06");
+    eocd[8..10].copy_from_slice(&u16::MAX.to_le_bytes());
+    eocd[10..12].copy_from_slice(&u16::MAX.to_le_bytes());
+    assert!(read_mvr(&eocd).is_err());
+    let many = craft_zip::zip64_entry_count_sample(10_000_000);
+    assert!(matches!(read_mvr(&many), Err(MvrError::Zip(m)) if m.contains("entries")));
+}

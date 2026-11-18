@@ -4,7 +4,7 @@
 //! Format 1 files have no assets and load as they are.
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 
 use zip::write::SimpleFileOptions;
@@ -53,15 +53,29 @@ pub fn write_atomic_with(path: &Path, write: impl FnOnce(&mut File) -> std::io::
     out.map_err(|e| CmdError::io(format!("{}: {e}", path.display())))
 }
 
+/// What a `.stagecraft` may hold. Every entry is read through craft-zip within these numbers,
+/// whatever its headers declare.
+const ZIP_LIMITS: craft_zip::Limits = craft_zip::Limits { max_entries: 100_000, max_total_bytes: 16 << 30 };
+/// Largest `document.json`.
+const MAX_DOCUMENT: u64 = 1 << 30;
+/// Largest embedded asset.
+const MAX_ASSET: u64 = 2 << 30;
+
 pub fn load(path: &Path) -> Result<Document, CmdError> {
     let io = |e: std::io::Error| CmdError::io(format!("{}: {e}", path.display()));
-    let zerr = |e: zip::result::ZipError| CmdError::io(format!("{}: {e}", path.display()));
-    let file = File::open(path).map_err(io)?;
-    let mut zip = zip::ZipArchive::new(file).map_err(zerr)?;
-    let mut buf = Vec::new();
-    zip.by_name(DOCUMENT_ENTRY).map_err(zerr)?.read_to_end(&mut buf).map_err(io)?;
+    let zerr = |e: craft_zip::Error| CmdError::io(format!("{}: {e}", path.display()));
+    let bytes = std::fs::read(path).map_err(io)?;
+    let mut zip = craft_zip::Archive::open(&bytes, ZIP_LIMITS).map_err(zerr)?;
+    if zip.has_duplicate_names() {
+        return Err(CmdError::io(format!("{}: two entries share a name; refusing to guess", path.display())));
+    }
+    let buf = zip
+        .read(DOCUMENT_ENTRY, MAX_DOCUMENT)
+        .map_err(zerr)?
+        .ok_or_else(|| CmdError::io(format!("{}: no {DOCUMENT_ENTRY} in the file", path.display())))?;
     let mut doc: Document =
         serde_json::from_slice(&buf).map_err(|e| CmdError::io(format!("{}: {e}", path.display())))?;
+    drop(buf);
     if doc.format > FORMAT_VERSION {
         return Err(CmdError::io(format!(
             "{} was written by a newer StageCraft (format {}, this one reads up to {})",
@@ -73,11 +87,9 @@ pub fn load(path: &Path) -> Result<Document, CmdError> {
     let keys: Vec<String> = doc.assets.keys().cloned().collect();
     for k in keys {
         let a = doc.assets.get_mut(&k).expect("listed");
-        let mut data = Vec::new();
-        zip.by_name(&a.zip_path())
-            .map_err(|_| CmdError::io(format!("{}: asset {} ({}) is missing", path.display(), a.file_name, a.hash)))?
-            .read_to_end(&mut data)
-            .map_err(io)?;
+        let data = zip.read(&a.zip_path(), MAX_ASSET).map_err(zerr)?.ok_or_else(|| {
+            CmdError::io(format!("{}: asset {} ({}) is missing", path.display(), a.file_name, a.hash))
+        })?;
         if hash_hex(&data) != a.hash {
             return Err(CmdError::io(format!("{}: asset {} is damaged (hash mismatch)", path.display(), a.file_name)));
         }

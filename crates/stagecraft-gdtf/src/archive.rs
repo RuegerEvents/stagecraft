@@ -1,12 +1,15 @@
 //! The files of a GDTF zip, held in memory.
 
 use std::collections::BTreeMap;
-use std::io::{Cursor, Read};
 
 use crate::{GdtfError, Warning};
 
 /// Largest entry read (decompressed).
-const MAX_ENTRY: u64 = 256 << 20;
+pub const MAX_ENTRY: u64 = 256 << 20;
+/// Most bytes all entries of one GDTF may inflate to.
+pub const MAX_TOTAL: u64 = 1 << 30;
+/// Most entries one GDTF may declare.
+pub const MAX_ENTRIES: u64 = 20_000;
 
 /// All entries of the archive by path (as stored, `/` separated, no leading `./`).
 #[derive(Debug, Clone, Default)]
@@ -15,40 +18,33 @@ pub struct Archive {
 }
 
 impl Archive {
-    /// Reads every file entry. Entries that fail to decompress become warnings.
+    /// Reads every file entry with craft-zip: the entry count is checked before indexing, and
+    /// no entry inflates past [`MAX_ENTRY`] or the archive past [`MAX_TOTAL`], whatever its
+    /// headers say. Entries that fail to decompress or are too large become warnings.
     pub fn read(bytes: &[u8], warnings: &mut Vec<Warning>) -> Result<Self, GdtfError> {
-        let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| GdtfError::Zip(e.to_string()))?;
+        let limits = craft_zip::Limits { max_entries: MAX_ENTRIES, max_total_bytes: MAX_TOTAL };
+        let mut zip = craft_zip::Archive::open(bytes, limits).map_err(|e| GdtfError::Zip(e.to_string()))?;
+        if zip.has_duplicate_names() {
+            warnings.push(Warning::new("archive", "two entries share a name; one of each kept"));
+        }
+        let names: Vec<String> = zip.names().map(|n| n.into_owned()).collect();
         let mut files = BTreeMap::new();
-        for i in 0..zip.len() {
-            let mut entry = match zip.by_index(i) {
-                Ok(e) => e,
-                Err(e) => {
-                    warnings.push(Warning::new("archive", format!("entry {i}: {e}")));
-                    continue;
+        for raw in names {
+            if raw.ends_with('/') {
+                continue;
+            }
+            let name = normalize(&raw);
+            match zip.read(&raw, MAX_ENTRY) {
+                Ok(Some(data)) => {
+                    files.insert(name, data);
                 }
-            };
-            if entry.is_dir() {
-                continue;
+                Ok(None) => {}
+                Err(e @ craft_zip::Error::BudgetSpent { .. }) => return Err(GdtfError::Zip(e.to_string())),
+                Err(craft_zip::Error::EntryTooLarge { .. }) => {
+                    warnings.push(Warning::new("archive", format!("{name}: larger than 256 MB; skipped")))
+                }
+                Err(e) => warnings.push(Warning::new("archive", format!("{name}: {e}"))),
             }
-            let name = match entry.name() {
-                Ok(n) => normalize(&n),
-                Err(_) => normalize(&String::from_utf8_lossy(entry.name_raw())),
-            };
-            if entry.size() > MAX_ENTRY {
-                warnings.push(Warning::new("archive", format!("{name}: larger than 256 MB; skipped")));
-                continue;
-            }
-            let mut data = Vec::with_capacity(entry.size() as usize);
-            // The header size can lie; never inflate more than the cap.
-            if let Err(e) = (&mut entry).take(MAX_ENTRY + 1).read_to_end(&mut data) {
-                warnings.push(Warning::new("archive", format!("{name}: {e}")));
-                continue;
-            }
-            if data.len() as u64 > MAX_ENTRY {
-                warnings.push(Warning::new("archive", format!("{name}: larger than 256 MB; skipped")));
-                continue;
-            }
-            files.insert(name, data);
         }
         Ok(Self { files })
     }

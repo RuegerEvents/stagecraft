@@ -4,9 +4,9 @@ use crate::model::{Header, Scene};
 use crate::warning::Warning;
 use crate::{check, read, write};
 use std::collections::BTreeMap;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
+use zip::{CompressionMethod, DateTime, ZipWriter};
 
 /// Name of the scene file inside the archive.
 pub const SCENE_FILE: &str = "GeneralSceneDescription.xml";
@@ -130,37 +130,44 @@ pub enum MvrError {
     Io(#[from] std::io::Error),
 }
 
+/// What an `.mvr` may hold: entries, and bytes all of them expand to together. The archive is
+/// read with craft-zip, which checks the entry count before indexing and never inflates past
+/// these numbers, whatever the headers declare.
+pub const ZIP_LIMITS: craft_zip::Limits = craft_zip::Limits { max_entries: 100_000, max_total_bytes: 8 << 30 };
+
+/// Largest single entry (decompressed). Bigger entries are skipped with a warning.
+pub const MAX_ENTRY: u64 = 2 << 30;
+
 /// Read an `.mvr` archive from bytes. Fails only when the bytes are not a zip or
 /// hold no scene file; the scene XML itself is read tolerantly.
 pub fn read_mvr(bytes: &[u8]) -> Result<Import, MvrError> {
-    let mut zip = ZipArchive::new(Cursor::new(bytes)).map_err(|e| MvrError::NotZip(e.to_string()))?;
+    let mut zip = craft_zip::Archive::open(bytes, ZIP_LIMITS).map_err(|e| match e {
+        e if e.is_limit() => MvrError::Zip(e.to_string()),
+        e => MvrError::NotZip(e.to_string()),
+    })?;
     let mut warnings = Vec::new();
     let mut scene_xml: Option<Vec<u8>> = None;
     let mut resources = Resources::default();
+    if zip.has_duplicate_names() {
+        warnings.push(Warning::new("archive", "two entries share a name; one of each kept"));
+    }
 
-    for i in 0..zip.len() {
-        let mut f = match zip.by_index(i) {
-            Ok(f) => f,
+    // The zip crate reads names as UTF-8 first (Vectorworks writes UTF-8 names without the
+    // UTF-8 flag), CP437 otherwise.
+    let names: Vec<String> = zip.names().map(|n| n.into_owned()).collect();
+    for name in names {
+        if name.ends_with('/') {
+            continue;
+        }
+        let data = match zip.read(&name, MAX_ENTRY) {
+            Ok(Some(data)) => data,
+            Ok(None) => continue,
+            Err(e @ craft_zip::Error::BudgetSpent { .. }) => return Err(MvrError::Zip(e.to_string())),
             Err(e) => {
-                warnings.push(Warning::new("archive", format!("entry {i} unreadable: {e}")));
+                warnings.push(Warning::new("archive", format!("{name:?} unreadable: {e}")));
                 continue;
             }
         };
-        if f.is_dir() {
-            continue;
-        }
-        // Vectorworks writes UTF-8 names without the zip UTF-8 flag, so the zip
-        // crate decodes them as CP437. Prefer the raw bytes when they are UTF-8.
-        let name = match std::str::from_utf8(f.name_raw()) {
-            Ok(s) => s.to_string(),
-            Err(_) => f.name().map(|n| n.into_owned()).unwrap_or_else(|_| format!("entry-{i}")),
-        };
-        let mut data = Vec::with_capacity(f.size() as usize);
-        if let Err(e) = f.read_to_end(&mut data) {
-            warnings.push(Warning::new("archive", format!("{name:?} unreadable: {e}")));
-            continue;
-        }
-        drop(f);
         // Spec: files live at the root. Tolerate folders, but match the scene
         // file by its base name.
         let base = name.rsplit('/').next().unwrap_or(&name);
@@ -174,9 +181,7 @@ pub fn read_mvr(bytes: &[u8]) -> Result<Import, MvrError> {
         if name.contains('/') {
             warnings.push(Warning::new("archive", format!("{name:?} is in a folder; spec wants files at the root")));
         }
-        if resources.files.insert(name.clone(), data).is_some() {
-            warnings.push(Warning::new("archive", format!("duplicate entry {name:?}; last one kept")));
-        }
+        resources.files.insert(name, data);
     }
     let xml_bytes = scene_xml.ok_or(MvrError::NoSceneFile)?;
     let text = decode_xml(&xml_bytes, &mut warnings);

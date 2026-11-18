@@ -19,6 +19,7 @@ keychain = ["share", "dep:security-framework"]
 glam.workspace = true
 roxmltree.workspace = true
 zip.workspace = true
+craft-zip.workspace = true
 gltf.workspace = true
 ureq = { workspace = true, optional = true }
 craft-atomic = { workspace = true, optional = true }
@@ -29,3 +30,4 @@ serde_json = { workspace = true, optional = true }
 security-framework = { workspace = true, optional = true }
 
 [dev-dependencies]
+craft-zip = { workspace = true, features = ["test-support"] }

@@ -172,4 +172,7 @@ fn fatal_errors() {
     assert!(matches!(Gdtf::from_bytes(&z), Err(GdtfError::Xml(_))));
     let z = common::zip(&[("description.xml", b"<GDTF/>")]);
     assert_eq!(Gdtf::from_bytes(&z).unwrap_err(), GdtfError::NoFixtureType);
+    // An archive that declares millions of entries is refused before it is indexed.
+    let many = craft_zip::zip64_entry_count_sample(10_000_000);
+    assert!(matches!(Gdtf::from_bytes(&many), Err(GdtfError::Zip(m)) if m.contains("entries")));
 }
