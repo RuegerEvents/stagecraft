@@ -4202,9 +4202,11 @@ version = "0.1.0"
 dependencies = [
  "earcutr",
  "glam",
+ "roxmltree",
  "serde",
  "serde_json",
  "stagecraft-core",
+ "stagecraft-gdtf",
  "uuid",
 ]
 

@@ -14,7 +14,7 @@
 //! fixture; failing that, the least overlap. Fields moved further than
 //! [`LEADER_DISTANCE`] get a leader line back to their fixture.
 
-use stagecraft_core::model::{Document, Object, ObjectKind, format_address};
+use stagecraft_core::model::{Document, Object, ObjectKind};
 use stagecraft_core::sheet::{LabelRotation, LabelTemplate};
 use stagecraft_core::{Id, geom};
 
@@ -312,16 +312,17 @@ fn leader(f: &FixtureInput, b: &[P2; 2]) -> Option<[P2; 2]> {
 }
 
 /// The text of a label field for an object (empty when it has none).
-pub fn field_value(o: &Object, field: &str) -> String {
-    let ObjectKind::Fixture { fid, cid, gdtf, mode, address, weight_kg, .. } = &o.kind else {
+pub fn field_value(doc: &Document, o: &Object, field: &str) -> String {
+    let ObjectKind::Fixture { fid, cid, weight_kg, .. } = &o.kind else {
         return field.strip_prefix("attr:").and_then(|k| o.attrs.get(k)).cloned().unwrap_or_default();
     };
     match field {
         "fid" => fid.map(|f| f.to_string()).unwrap_or_default(),
         "cid" => cid.clone().unwrap_or_default(),
-        "address" => address.map(format_address).unwrap_or_default(),
-        "mode" => mode.clone().unwrap_or_default(),
-        "type" => gdtf.as_deref().map(type_name).unwrap_or_default(),
+        "address" => stagecraft_core::patch::address_text(o),
+        "mode" => mode_name(doc, o),
+        "type" => type_name(doc, o),
+        "footprint" => footprint_text(doc, o),
         "weight" => weight_kg.map(|w| format!("{w:.1} kg")).unwrap_or_default(),
         "name" => o.name.clone(),
         "gel" | "circuit" | "focus" | "note" => o.attrs.get(field).cloned().unwrap_or_default(),
@@ -329,10 +330,35 @@ pub fn field_value(o: &Object, field: &str) -> String {
     }
 }
 
-/// A fixture type's display name from its GDTF file name.
-pub fn type_name(gdtf: &str) -> String {
-    let base = gdtf.rsplit('/').next().unwrap_or(gdtf);
-    base.strip_suffix(".gdtf").unwrap_or(base).replace('_', " ")
+/// A fixture's type for labels, legends and lists: the library's `Manufacturer
+/// Name`, else the stored key, else "Generic fixture".
+pub fn type_name(doc: &Document, o: &Object) -> String {
+    match &o.kind {
+        ObjectKind::Fixture { gdtf: Some(g), .. } => match doc.fixture_types.get(g) {
+            Some(t) => t.display_name(),
+            None => {
+                let base = g.rsplit('/').next().unwrap_or(g);
+                base.strip_suffix(".gdtf").unwrap_or(base).replace(['_', '@'], " ")
+            }
+        },
+        _ => "Generic fixture".into(),
+    }
+}
+
+/// The mode as set, or the type's first mode.
+pub fn mode_name(doc: &Document, o: &Object) -> String {
+    match stagecraft_core::patch::mode(doc, o) {
+        Some(m) => m.name.clone(),
+        None => match &o.kind {
+            ObjectKind::Fixture { mode, .. } => mode.clone().unwrap_or_default(),
+            _ => String::new(),
+        },
+    }
+}
+
+/// `16 ch`, `2+24 ch`; empty without a type.
+pub fn footprint_text(doc: &Document, o: &Object) -> String {
+    stagecraft_core::patch::mode(doc, o).map(|m| format!("{} ch", m.footprint_text())).unwrap_or_default()
 }
 
 /// The label input for a fixture. `to_paper` maps world plan mm to paper mm;
@@ -358,13 +384,12 @@ pub fn fixture_input(
     let x_axis = axis(glam::DVec3::X, [paper_per_mm, 0.0]);
     let y_axis = axis(glam::DVec3::Y, [-x_axis[1], x_axis[0]]);
     let center = to_paper([origin.x, origin.y]);
-    let (hw, hd) =
-        (stagecraft_geom::kinds::fixture::BODY_WIDTH / 2.0, stagecraft_geom::kinds::fixture::BODY_DEPTH / 2.0);
-    let corners: Vec<P2> = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]]
+    let (lo, hi) = stagecraft_geom::gdtf::plan_bounds(doc, o);
+    let corners: Vec<P2> = [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]]
         .iter()
         .map(|[x, y]| [center[0] + x * x_axis[0] + y * y_axis[0], center[1] + x * x_axis[1] + y * y_axis[1]])
         .collect();
-    let values = t.fields.iter().map(|f| field_value(o, &f.field)).collect();
+    let values = t.fields.iter().map(|f| field_value(doc, o, &f.field)).collect();
     Some(FixtureInput { id: o.id, center, x_axis, y_axis, body: bounds_of(&corners), values, manual })
 }
 

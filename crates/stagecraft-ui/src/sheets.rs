@@ -934,8 +934,8 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
     });
 }
 
-const FIELDS: [&str; 11] =
-    ["fid", "cid", "address", "mode", "gel", "circuit", "focus", "note", "name", "type", "weight"];
+const FIELDS: [&str; 12] =
+    ["fid", "cid", "address", "mode", "gel", "circuit", "focus", "note", "name", "type", "weight", "footprint"];
 
 fn label_templates(ui: &mut Ui, s: &mut Studio, doc: &Document) {
     ui.horizontal(|ui| {

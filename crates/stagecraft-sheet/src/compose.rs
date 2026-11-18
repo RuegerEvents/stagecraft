@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use glam::DVec3;
-use stagecraft_core::model::{Document, Object, ObjectKind, format_address};
+use stagecraft_core::model::{Document, Object, ObjectKind};
 use stagecraft_core::sheet::{
     LabelTemplate, Sheet, Side, TextAlign, TitleBlock, TitleItem, ViewKind, Viewport, base64_decode,
 };
@@ -455,26 +455,24 @@ fn fixtures_of<'a>(doc: &'a Document, vp: &Viewport) -> Vec<&'a Object> {
 }
 
 /// A fixture's type for legends and lists.
-pub fn fixture_type(o: &Object) -> String {
-    match &o.kind {
-        ObjectKind::Fixture { gdtf: Some(g), .. } => labels::type_name(g),
-        _ => "Generic fixture".into(),
-    }
+pub fn fixture_type(doc: &Document, o: &Object) -> String {
+    labels::type_name(doc, o)
 }
 
 fn fixture_table(doc: &Document, vp: &Viewport) -> (Vec<Prim>, [P2; 2]) {
-    let cols = ["FID", "Name", "Type", "Mode", "Address", "Gel", "Circuit", "Note"];
-    let rows: Vec<[String; 8]> = fixtures_of(doc, vp)
+    let cols = ["FID", "Name", "Type", "Mode", "Ch", "Address", "Gel", "Circuit", "Note"];
+    let rows: Vec<[String; 9]> = fixtures_of(doc, vp)
         .into_iter()
         .map(|o| {
-            let ObjectKind::Fixture { fid, mode, address, .. } = &o.kind else { unreachable!() };
+            let ObjectKind::Fixture { fid, .. } = &o.kind else { unreachable!() };
             let a = |k: &str| o.attrs.get(k).cloned().unwrap_or_default();
             [
                 fid.map(|f| f.to_string()).unwrap_or_default(),
                 o.name.clone(),
-                fixture_type(o),
-                mode.clone().unwrap_or_default(),
-                address.map(format_address).unwrap_or_default(),
+                fixture_type(doc, o),
+                labels::mode_name(doc, o),
+                stagecraft_core::patch::mode(doc, o).map(|m| m.footprint_text()).unwrap_or_default(),
+                stagecraft_core::patch::address_text(o),
                 a("gel"),
                 a("circuit"),
                 a("note"),
@@ -619,20 +617,21 @@ fn title_block(doc: &Document, sheet: &Sheet, tb: &TitleBlock, origin: P2, out: 
 }
 
 fn legend(doc: &Document, sheet: &Sheet, right: f64, bottom: f64, width: f64, out: &mut Vec<Prim>) {
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    // Type name → (count, a fixture of that type for its symbol).
+    let mut counts: BTreeMap<String, (usize, Id)> = BTreeMap::new();
     let mut seen: Vec<Id> = Vec::new();
     for vp in sheet.viewports.iter().filter(|v| v.view == ViewKind::Plan) {
         for o in fixtures_of(doc, vp) {
             if !seen.contains(&o.id) {
                 seen.push(o.id);
-                *counts.entry(fixture_type(o)).or_default() += 1;
+                counts.entry(fixture_type(doc, o)).or_insert((0, o.id)).0 += 1;
             }
         }
     }
     if counts.is_empty() {
         return;
     }
-    let row = 7.0;
+    let row = 8.0;
     let h = row * (counts.len() as f64 + 1.0) + 2.0;
     let min = [right - width, bottom];
     let max = [right, bottom + h];
@@ -642,24 +641,68 @@ fn legend(doc: &Document, sheet: &Sheet, right: f64, bottom: f64, width: f64, ou
         *bold = true;
     }
     out.push(t);
-    let total: usize = counts.values().sum();
+    let total: usize = counts.values().map(|c| c.0).sum();
     let mut tt = Prim::text([max[0] - 3.0, max[1] - 5.5], format!("{total} fixtures"), 1.8);
     if let Prim::Text { h, .. } = &mut tt {
         *h = HAlign::Right;
     }
     out.push(tt);
-    for (i, (name, n)) in counts.iter().enumerate() {
+    for (i, (name, (n, example))) in counts.iter().enumerate() {
         let y = max[1] - row * (i as f64 + 2.0) - 0.5;
-        // The generic plan symbol, about 1:50.
-        let (sx, sy) = (min[0] + 6.0, y + 2.6);
-        out.push(Prim::rect([sx - 2.6, sy - 3.4], [sx + 2.6, sy + 3.4], Some(Pen::solid(0.35)), Some(Rgb::WHITE)));
-        out.push(Prim::line([sx - 2.6, sy + 2.6], [sx + 2.6, sy + 2.6], Pen::solid(0.5)));
-        out.push(Prim::text([min[0] + 12.0, y + 1.6], name.clone(), 2.2));
+        legend_symbol(doc, *example, [min[0] + 6.5, y + 2.4], out);
+        let mut label = name.clone();
+        if let Some(m) = doc.objects.get(example).and_then(|o| stagecraft_core::patch::mode(doc, o)) {
+            label = format!("{label}  ({} ch)", m.footprint_text());
+        }
+        out.push(Prim::text([min[0] + 13.0, y + 1.6], label, 2.2));
         let mut c = Prim::text([max[0] - 3.0, y + 1.6], format!("× {n}"), 2.2);
         if let Prim::Text { h, .. } = &mut c {
             *h = HAlign::Right;
         }
         out.push(c);
+    }
+}
+
+/// A fixture type's plan symbol fitted into a 9 × 7 mm box at `c` (paper mm), front up.
+fn legend_symbol(doc: &Document, fixture: Id, c: P2, out: &mut Vec<Prim>) {
+    let Some(o) = doc.objects.get(&fixture) else { return };
+    let Some(sym) = stagecraft_geom::gdtf::symbol(doc, o) else {
+        // The generic box.
+        out.push(Prim::rect(
+            [c[0] - 2.6, c[1] - 3.4],
+            [c[0] + 2.6, c[1] + 3.4],
+            Some(Pen::solid(0.35)),
+            Some(Rgb::WHITE),
+        ));
+        out.push(Prim::line([c[0] - 2.6, c[1] + 2.6], [c[0] + 2.6, c[1] + 2.6], Pen::solid(0.5)));
+        return;
+    };
+    let (lo, hi) = sym.bounds;
+    let k = (9.0 / (hi[0] - lo[0]).max(1e-6)).min(7.0 / (hi[1] - lo[1]).max(1e-6));
+    let mid = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
+    let map = |p: &P2| [c[0] + (p[0] - mid[0]) * k, c[1] + (p[1] - mid[1]) * k];
+    let pen = |l: LineClass| {
+        Pen::solid(match l {
+            LineClass::Thick => 0.35,
+            LineClass::Medium => 0.25,
+            _ => 0.13,
+        })
+    };
+    for p in &sym.prims {
+        match p {
+            stagecraft_geom::gdtf::LocalPrim::Polygon { points, fill, line } => out.push(Prim::Path {
+                rings: vec![points.iter().map(map).collect()],
+                closed: true,
+                pen: line.map(pen),
+                fill: Some(fill_for(*fill)),
+            }),
+            stagecraft_geom::gdtf::LocalPrim::Polyline { points, closed, line } => out.push(Prim::Path {
+                rings: vec![points.iter().map(map).collect()],
+                closed: *closed,
+                pen: Some(pen(*line)),
+                fill: None,
+            }),
+        }
     }
 }
 

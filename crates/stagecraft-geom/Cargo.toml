@@ -9,6 +9,8 @@ license.workspace = true
 # Builds for wasm32-unknown-unknown: no files, no clock. Catalogues are embedded.
 [dependencies]
 stagecraft-core.workspace = true
+stagecraft-gdtf.workspace = true
+roxmltree.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -42,12 +42,12 @@ pub fn line_class(name: &str) -> Option<LineClass> {
 }
 
 /// The plan of one object at world transform `w`, before per-object overrides.
-pub fn plan_at(w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
+pub fn plan_at(doc: &Document, w: &DAffine3, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
     match &obj.kind {
         ObjectKind::Floor { .. } => floor::plan(w, obj, style),
         ObjectKind::Wall { .. } => wall::plan(w, obj, style),
         ObjectKind::Truss { .. } => truss::plan(w, obj, style),
-        ObjectKind::Fixture { .. } => fixture::plan(w, obj, style),
+        ObjectKind::Fixture { .. } => fixture::plan(doc, w, obj, style),
         ObjectKind::Proscenium { .. } => stage::proscenium_plan(w, obj, style),
         ObjectKind::Curtain { .. } => stage::curtain_plan(w, obj, style),
         ObjectKind::Masking { .. } => stage::masking_plan(w, obj, style),
@@ -66,7 +66,7 @@ pub fn plan(doc: &Document, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
         return Vec::new();
     }
     let Some(w) = stagecraft_core::geom::world(doc, obj.id) else { return Vec::new() };
-    let mut prims = plan_at(&w, obj, &effective_style(obj, style));
+    let mut prims = plan_at(doc, &w, obj, &effective_style(obj, style));
     if let Some(l) = obj.style.line.as_deref().and_then(line_class) {
         for p in &mut prims {
             match p {
@@ -85,12 +85,12 @@ pub fn plan(doc: &Document, obj: &Object, style: &PlanStyle) -> Vec<PlanPrim> {
 
 /// The object's mesh in its local space. Meshes depend on the kind's parameters and the
 /// level of detail only, never on the placement, so views can cache them per object.
-pub fn mesh(_doc: &Document, obj: &Object, lod: Lod) -> Mesh {
+pub fn mesh(doc: &Document, obj: &Object, lod: Lod) -> Mesh {
     match &obj.kind {
         ObjectKind::Floor { .. } => floor::mesh(obj, lod),
         ObjectKind::Wall { .. } => wall::mesh(obj, lod),
         ObjectKind::Truss { .. } => truss::mesh(obj, lod),
-        ObjectKind::Fixture { .. } => fixture::mesh(obj, lod),
+        ObjectKind::Fixture { .. } => fixture::mesh(doc, obj, lod),
         ObjectKind::Proscenium { .. } => stage::proscenium_mesh(obj),
         ObjectKind::Curtain { .. } | ObjectKind::Masking { .. } => stage::cloth_mesh(obj, lod),
         ObjectKind::Batten { .. } => stage::batten_mesh(obj, lod),
@@ -113,6 +113,8 @@ pub fn detail_size(obj: &Object) -> Option<f64> {
             stage::drape(&obj.kind).map(|d| stage::pleat_depth(&d)).filter(|d| *d > 0.0)
         }
         ObjectKind::Batten { .. } => Some(stage::PIPE * 3.0),
+        // GDTF models can be heavy; far away a low-poly model or a box will do.
+        ObjectKind::Fixture { gdtf: Some(_), .. } => Some(120.0),
         ObjectKind::Platform { .. } | ObjectKind::Support { .. } | ObjectKind::Hoist { .. } => Some(60.0),
         _ => None,
     }

@@ -625,7 +625,7 @@ fn ghost(kind: ObjectKind, placement: Placement, style: &PlanStyle) -> Vec<stage
         attrs: Default::default(),
     };
     let w = stagecraft_core::geom::placement_to_affine(&obj.placement);
-    stagecraft_geom::kinds::plan_at(&w, &obj, style)
+    stagecraft_geom::kinds::plan_at(&stagecraft_core::Document::default(), &w, &obj, style)
 }
 
 /// Previews, the snap marker, the selection box and the typed-dimension box.

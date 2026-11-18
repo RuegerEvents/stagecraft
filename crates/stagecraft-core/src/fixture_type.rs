@@ -191,7 +191,11 @@ fn suggest_symbol(g: &stagecraft_gdtf::Gdtf, mesh: &stagecraft_gdtf::FixtureMesh
         })
         .unwrap_or_default();
     let beams = mesh.beams().len();
-    let moving = mesh.axes().len() >= 2 || has(&["moving head", "movinghead"]);
+    let pan_tilt = g
+        .resolve_modes()
+        .first()
+        .is_some_and(|m| m.channels.iter().any(|c| c.attribute == "Pan" || c.attribute == "Tilt"));
+    let moving = pan_tilt || mesh.axes().len() >= 2 || has(&["moving head", "movinghead"]);
     Some(if has(&["follow"]) {
         "followspot"
     } else if has(&["strobe", "atomic"]) {

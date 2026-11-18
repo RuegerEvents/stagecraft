@@ -12,6 +12,7 @@
 //! functions on top of the plan primitives, in [`pick`] and [`snap`].
 
 pub mod catalog;
+pub mod gdtf;
 pub mod kinds;
 pub mod math;
 pub mod mesh;
@@ -19,6 +20,7 @@ pub mod pick;
 pub mod prim;
 pub mod section;
 pub mod snap;
+pub mod svg;
 
 pub use catalog::{
     PlatformSystem, SupportPreset, TrussProfile, platform_system, platform_systems, support, supports, truss_profile,

@@ -616,8 +616,8 @@ fn label_list(ctx: &mut Ctx, _: NoArgs) -> CmdResult {
     Ok(json!(v))
 }
 
-const LABEL_FIELDS: [&str; 11] =
-    ["fid", "cid", "address", "mode", "gel", "circuit", "focus", "note", "name", "type", "weight"];
+const LABEL_FIELDS: [&str; 12] =
+    ["fid", "cid", "address", "mode", "gel", "circuit", "focus", "note", "name", "type", "weight", "footprint"];
 
 fn check_fields(fields: &[LabelField]) -> Result<(), CmdError> {
     for f in fields {
