@@ -46,3 +46,15 @@ pub fn world_mesh(doc: &Document, obj: &Object, lod: Lod) -> Mesh {
     let w = stagecraft_core::geom::world(doc, obj.id).unwrap_or(glam::DAffine3::IDENTITY);
     kinds::mesh(doc, obj, lod).transformed(&w)
 }
+
+/// Give `stagecraft-core` what it cannot do itself: meshes for `mvr.export`.
+/// Safe to call more than once.
+pub fn install() {
+    stagecraft_core::mvr::install_mesher(Box::new(|doc, obj| {
+        let m = kinds::mesh(doc, obj, Lod::Full);
+        if m.is_empty() {
+            return None;
+        }
+        Some(stagecraft_core::mvr::ExportMesh { positions: m.positions, normals: m.normals, indices: m.indices })
+    }));
+}

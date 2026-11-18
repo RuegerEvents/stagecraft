@@ -22,7 +22,7 @@ pub(super) fn register(r: &mut Registry) {
 
 /// Fields every create command takes.
 #[derive(Deserialize, JsonSchema, Default)]
-pub(super) struct Common {
+pub(crate) struct Common {
     pub name: Option<String>,
     /// Layer id or name. Default: the first layer.
     pub layer: Option<String>,
@@ -33,7 +33,7 @@ pub(super) struct Common {
     pub parent: Option<Id>,
 }
 
-pub(super) fn insert(
+pub(crate) fn insert(
     ctx: &mut Ctx,
     c: Common,
     default_name: &str,

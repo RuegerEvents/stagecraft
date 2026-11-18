@@ -4191,6 +4191,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "stagecraft-gdtf",
+ "stagecraft-mvr",
  "tempfile",
  "thiserror 2.0.21",
  "uuid",
@@ -4222,6 +4223,9 @@ dependencies = [
  "serde_json",
  "stagecraft-core",
  "stagecraft-gdtf",
+ "stagecraft-hlr",
+ "stagecraft-mvr",
+ "tempfile",
  "uuid",
 ]
 

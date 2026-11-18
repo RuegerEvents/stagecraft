@@ -85,7 +85,9 @@ impl stagecraft_core::sheet::SheetExporter for Exporter {
     }
 }
 
-/// Make `sheet.export_pdf` / `sheet.export_svg` work. Safe to call more than once.
+/// Make `sheet.export_pdf` / `sheet.export_svg` work, and `mvr.export` write
+/// geometry ([`stagecraft_geom::install`]). Safe to call more than once.
 pub fn install() {
+    stagecraft_geom::install();
     stagecraft_core::sheet::install_exporter(Box::new(Exporter));
 }

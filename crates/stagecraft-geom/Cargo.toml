@@ -10,6 +10,7 @@ license.workspace = true
 [dependencies]
 stagecraft-core.workspace = true
 stagecraft-gdtf.workspace = true
+stagecraft-hlr.workspace = true
 roxmltree.workspace = true
 glam.workspace = true
 serde.workspace = true
@@ -18,3 +19,5 @@ uuid.workspace = true
 earcutr.workspace = true
 
 [dev-dependencies]
+stagecraft-mvr.workspace = true
+tempfile.workspace = true

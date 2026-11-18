@@ -12,6 +12,7 @@
 
 mod archive;
 mod check;
+pub mod glb;
 mod matrix;
 mod model;
 mod read;

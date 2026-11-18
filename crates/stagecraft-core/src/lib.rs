@@ -13,6 +13,8 @@ pub mod fixture_type;
 pub mod geom;
 pub mod load;
 pub mod model;
+pub mod model_file;
+pub mod mvr;
 pub mod patch;
 pub mod sheet;
 

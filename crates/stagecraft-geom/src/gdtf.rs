@@ -60,7 +60,7 @@ fn cache() -> &'static Mutex<Cache> {
     C.get_or_init(Default::default)
 }
 
-const MAX_ENTRIES: usize = 512;
+pub(crate) const MAX_ENTRIES: usize = 512;
 
 /// The type and the resolved mode name of a fixture.
 pub fn type_of<'d>(doc: &'d Document, obj: &Object) -> Option<(&'d FixtureType, String)> {
@@ -135,7 +135,7 @@ fn build_mesh(g: &Gdtf, mode: &str, lod: Lod) -> Mesh {
     out
 }
 
-fn append(out: &mut Mesh, m: &stagecraft_gdtf::Mesh, t: Mat4) {
+pub(crate) fn append(out: &mut Mesh, m: &stagecraft_gdtf::Mesh, t: Mat4) {
     let base = out.positions.len() as u32;
     let nm = glam::Mat3::from_mat4(t).inverse().transpose();
     out.positions.extend(m.positions.iter().map(|p| t.transform_point3(Vec3::from_array(*p)).to_array()));
@@ -320,7 +320,7 @@ pub fn outline_points(doc: &Document, obj: &Object) -> Option<Outline> {
 
 /// 66 unit directions: the 26 of a cube's faces, edges and corners plus 40 on a
 /// Fibonacci sphere.
-fn directions() -> Vec<Vec3> {
+pub(crate) fn directions() -> Vec<Vec3> {
     let mut v = Vec::new();
     for x in -1..=1 {
         for y in -1..=1 {

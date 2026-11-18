@@ -393,6 +393,36 @@ pub enum ObjectKind {
     /// A ceiling: a closed outline at the placement's z (its underside), `thickness`
     /// up from there.
     Ceiling { outline: Vec<P2>, thickness: f64, show_in_plan: bool },
+    /// A plain group: holds children, draws nothing (MVR group objects).
+    Group {},
+    /// Imported 3D geometry (glTF/GLB, OBJ, 3DS, or MVR scene objects): mesh files
+    /// embedded as assets, placed in the object's local space.
+    Model {
+        parts: Vec<ModelPart>,
+        /// Local bounding box `[min, max]`, mm, measured at import.
+        bounds: [P3; 2],
+    },
+}
+
+/// One mesh file of a model object.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct ModelPart {
+    /// SHA-256 of the file in the document's assets (`glb`, `gltf`, `obj` or `3ds`).
+    pub asset: String,
+    /// The file's frame in the object's local space as an MVR-style 4×3 matrix:
+    /// columns u, v, w (unit axes) then the origin o, mm. Applied after `scale` and
+    /// the up-axis turn.
+    pub matrix: [f64; 12],
+    /// File units to mm: 1000 for metres (glTF), 1 for mm.
+    pub scale: f64,
+    /// The file is y-up and is turned to z-up first (OBJ). glTF is always turned.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub y_up: bool,
+}
+
+impl ModelPart {
+    /// The identity placement.
+    pub const IDENTITY: [f64; 12] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
 }
 
 impl ObjectKind {
@@ -413,11 +443,13 @@ impl ObjectKind {
             ObjectKind::Support { .. } => "support",
             ObjectKind::Hoist { .. } => "hoist",
             ObjectKind::Ceiling { .. } => "ceiling",
+            ObjectKind::Group { .. } => "group",
+            ObjectKind::Model { .. } => "model",
         }
     }
 
     /// Every type name, for docs and filters.
-    pub const TYPE_NAMES: [&'static str; 15] = [
+    pub const TYPE_NAMES: [&'static str; 17] = [
         "floor",
         "wall",
         "truss",
@@ -433,11 +465,13 @@ impl ObjectKind {
         "support",
         "hoist",
         "ceiling",
+        "group",
+        "model",
     ];
 
     /// Groups hold children and draw nothing.
     pub fn is_group(&self) -> bool {
-        matches!(self, ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. })
+        matches!(self, ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } | ObjectKind::Group { .. })
     }
 }
 

@@ -2,6 +2,7 @@
 //! spec's rule that every mesh is scaled to the model's Length × Width × Height.
 
 pub mod gltf;
+pub mod obj;
 pub mod primitives;
 pub mod three_ds;
 

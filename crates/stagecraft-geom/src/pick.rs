@@ -35,10 +35,10 @@ pub fn rank(kind: &ObjectKind) -> u8 {
         | ObjectKind::Curtain { .. }
         | ObjectKind::Masking { .. }
         | ObjectKind::Proscenium { .. } => 2,
-        ObjectKind::Platform { .. } => 3,
+        ObjectKind::Platform { .. } | ObjectKind::Model { .. } => 3,
         ObjectKind::Floor { .. } => 4,
         ObjectKind::Ceiling { .. } => 5,
-        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } => 6,
+        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } | ObjectKind::Group { .. } => 6,
     }
 }
 

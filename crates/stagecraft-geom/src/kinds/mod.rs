@@ -4,6 +4,7 @@
 pub mod fabric;
 pub mod fixture;
 pub mod floor;
+pub mod model;
 pub mod node;
 pub mod stage;
 pub mod truss;
@@ -57,7 +58,8 @@ pub fn plan_at(doc: &Document, w: &DAffine3, obj: &Object, style: &PlanStyle) ->
         ObjectKind::Support { .. } => stage::support_plan(w, obj, style),
         ObjectKind::Hoist { .. } => stage::hoist_plan(w, obj, style),
         ObjectKind::Ceiling { .. } => stage::ceiling_plan(w, obj, style),
-        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } => Vec::new(),
+        ObjectKind::Model { .. } => model::plan(doc, w, obj, style),
+        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } | ObjectKind::Group { .. } => Vec::new(),
     }
 }
 
@@ -99,7 +101,8 @@ pub fn mesh(doc: &Document, obj: &Object, lod: Lod) -> Mesh {
         ObjectKind::Support { .. } => stage::support_mesh(obj, lod),
         ObjectKind::Hoist { .. } => stage::hoist_mesh(obj, lod),
         ObjectKind::Ceiling { .. } => stage::ceiling_mesh(obj),
-        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } => Mesh::empty(),
+        ObjectKind::Model { .. } => model::mesh(doc, obj),
+        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } | ObjectKind::Group { .. } => Mesh::empty(),
     }
 }
 
@@ -168,6 +171,10 @@ pub fn snap_geometry(doc: &Document, obj: &Object) -> (Vec<P2>, Vec<[P2; 2]>) {
         | ObjectKind::TrussNode { .. }
         | ObjectKind::Support { .. }
         | ObjectKind::Hoist { .. } => (vec![to_plan(&w, [0.0; 3])], Vec::new()),
-        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } => Default::default(),
+        ObjectKind::Model { bounds, .. } => {
+            let [lo, hi] = bounds;
+            closed_ring(vec![p2(lo[0], lo[1]), p2(hi[0], lo[1]), p2(hi[0], hi[1]), p2(lo[0], hi[1])])
+        }
+        ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } | ObjectKind::Group { .. } => Default::default(),
     }
 }

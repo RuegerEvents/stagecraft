@@ -26,8 +26,54 @@ pub fn load(bytes: &[u8]) -> Result<RawMesh, String> {
     read(&g)
 }
 
+/// Buffer contents by index: the GLB blob or a base64 `data:` URI. External files are
+/// not read here (callers inline them first).
+fn buffers(g: &gltf::Gltf) -> Vec<Option<Vec<u8>>> {
+    g.buffers()
+        .map(|b| match b.source() {
+            gltf::buffer::Source::Bin => g.blob.clone(),
+            gltf::buffer::Source::Uri(uri) => data_uri(uri),
+        })
+        .collect()
+}
+
+/// The bytes of a base64 `data:` URI.
+pub fn data_uri(uri: &str) -> Option<Vec<u8>> {
+    let rest = uri.strip_prefix("data:")?;
+    let (head, data) = rest.split_once(',')?;
+    if !head.ends_with(";base64") {
+        return None;
+    }
+    base64(data)
+}
+
+fn base64(s: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let bytes: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace() && *b != b'=').collect();
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    for c in bytes.chunks(4) {
+        let mut n = 0u32;
+        for (i, &b) in c.iter().enumerate() {
+            n |= val(b)? << (18 - 6 * i);
+        }
+        let got = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
+        out.extend_from_slice(&got[..c.len().saturating_sub(1)]);
+    }
+    Some(out)
+}
+
 fn read(g: &gltf::Gltf) -> Result<RawMesh, String> {
-    let blob = g.blob.as_deref();
+    let data = buffers(g);
+    let blob = &data;
     let mut out = RawMesh::default();
     let mut warnings = 0usize;
     let scene = g.default_scene().or_else(|| g.scenes().next());
@@ -55,7 +101,14 @@ fn read(g: &gltf::Gltf) -> Result<RawMesh, String> {
     Ok(out)
 }
 
-fn visit(n: &gltf::Node, parent: Mat4, blob: Option<&[u8]>, out: &mut RawMesh, warnings: &mut usize, depth: usize) {
+fn visit(
+    n: &gltf::Node,
+    parent: Mat4,
+    blob: &[Option<Vec<u8>>],
+    out: &mut RawMesh,
+    warnings: &mut usize,
+    depth: usize,
+) {
     if depth > 64 {
         return;
     }
@@ -69,14 +122,11 @@ fn visit(n: &gltf::Node, parent: Mat4, blob: Option<&[u8]>, out: &mut RawMesh, w
     }
 }
 
-fn add_mesh(m: &gltf::Mesh, world: Mat4, blob: Option<&[u8]>, out: &mut RawMesh, warnings: &mut usize) {
+fn add_mesh(m: &gltf::Mesh, world: Mat4, blob: &[Option<Vec<u8>>], out: &mut RawMesh, warnings: &mut usize) {
     let normal_m = glam::Mat3::from_mat4(world).inverse().transpose();
     let name = m.name().unwrap_or("mesh").to_string();
     for p in m.primitives() {
-        let reader = p.reader(|b| match b.source() {
-            gltf::buffer::Source::Bin => blob,
-            gltf::buffer::Source::Uri(_) => None,
-        });
+        let reader = p.reader(|b| blob.get(b.index()).and_then(|d| d.as_deref()));
         let Some(pos) = reader.read_positions() else {
             *warnings += 1;
             continue;
