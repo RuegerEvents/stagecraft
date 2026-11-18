@@ -23,6 +23,8 @@ pub enum Tool {
     Rotate,
     Floor,
     Wall,
+    /// Dimensions between points: driving in a sketch, reference between objects.
+    Dimension,
     Truss,
     Fixture,
     /// A run of truss along clicked points, corners at the bends.
@@ -40,8 +42,8 @@ pub enum Tool {
 
 impl Tool {
     /// Drawing tools, then stage objects (the toolbar's two groups).
-    pub const DRAW: [Tool; 7] =
-        [Tool::Select, Tool::Move, Tool::Rotate, Tool::Floor, Tool::Wall, Tool::Truss, Tool::Fixture];
+    pub const DRAW: [Tool; 8] =
+        [Tool::Select, Tool::Move, Tool::Rotate, Tool::Floor, Tool::Wall, Tool::Dimension, Tool::Truss, Tool::Fixture];
     pub const STAGE: [Tool; 9] = [
         Tool::Run,
         Tool::Batten,
@@ -53,12 +55,13 @@ impl Tool {
         Tool::Hoist,
         Tool::Ceiling,
     ];
-    pub const ALL: [Tool; 16] = [
+    pub const ALL: [Tool; 17] = [
         Tool::Select,
         Tool::Move,
         Tool::Rotate,
         Tool::Floor,
         Tool::Wall,
+        Tool::Dimension,
         Tool::Truss,
         Tool::Fixture,
         Tool::Run,
@@ -80,6 +83,7 @@ impl Tool {
             Tool::Rotate => "tool.rotate",
             Tool::Floor => "tool.floor",
             Tool::Wall => "tool.wall",
+            Tool::Dimension => "tool.dimension",
             Tool::Truss => "tool.truss",
             Tool::Fixture => "tool.fixture",
             Tool::Run => "tool.run",
@@ -103,6 +107,7 @@ impl Tool {
             Tool::Rotate => Key::R,
             Tool::Floor => Key::F,
             Tool::Wall => Key::W,
+            Tool::Dimension => Key::D,
             Tool::Truss => Key::T,
             Tool::Fixture => Key::L,
             Tool::Run => Key::U,
@@ -275,6 +280,18 @@ pub enum Drag {
     Box { from: P2 },
     /// Moving the selection; `from` is the snapped grab point.
     Move { from: P2, ids: Vec<Id> },
+    /// Dragging a sketch point; the sketch is solved for every frame's preview.
+    SketchPoint { layer: Id, point: stagecraft_core::sketch::PointId },
+    /// Moving a dimension's label from this world point.
+    Label { source: stagecraft_geom::dims::DimSource, from: P2 },
+}
+
+/// How one segment of a wall or floor was drawn: Shift and typed length become
+/// constraints in the sketch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct SegHint {
+    pub axis_lock: bool,
+    pub length: Option<f64>,
 }
 
 /// The drawing gesture in progress.
@@ -284,6 +301,12 @@ pub struct Gesture {
     /// and reference).
     pub points: Vec<P2>,
     pub dim: Option<DimInput>,
+    /// Per segment of `points` (segment i ends at point i + 1): Shift, typed length.
+    pub segs: Vec<SegHint>,
+    /// Shift held in the last frame.
+    pub shift: bool,
+    /// The dimension tool's picks so far.
+    pub picks: Vec<crate::sketch_ui::Pick>,
     /// The snapped pointer, world mm.
     pub cursor: Option<Snapped>,
     pub drag: Option<Drag>,
@@ -394,6 +417,8 @@ pub struct UiState {
     pub file_request: Option<FileRequest>,
     /// Native file and message dialogs (off in headless tests).
     pub native_dialogs: bool,
+    /// Sketch overlay, dimension selection and editing, drag preview.
+    pub sketch: crate::sketch_ui::SketchUi,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -438,6 +463,7 @@ impl Default for UiState {
             shots: Vec::new(),
             file_request: None,
             native_dialogs: false,
+            sketch: Default::default(),
         }
     }
 }

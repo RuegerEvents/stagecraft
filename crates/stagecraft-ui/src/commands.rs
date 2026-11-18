@@ -132,6 +132,16 @@ fn register(r: &mut UiRegistry) {
         "Options for new objects: fixture type, truss, wall, batten, curtain, proscenium, wings, platform, support, hoist, ceiling",
         set_options,
     );
+    r.add(
+        "ui.sketch",
+        "Sketch overlay in the plan: show lines/points, FreeCAD colours (green = fully constrained, red = conflicting), dimensions",
+        sketch,
+    );
+    r.add(
+        "ui.dimension",
+        "Select a dimension in the plan (id, UUID or name) and optionally open its value editor; null clears",
+        dimension,
+    );
     r.add("ui.palette", "Open or close the command palette", palette);
     r.add(
         "ui.file_dialog",
@@ -170,7 +180,104 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "sheet_viewport": ui.sheets.viewport,
         "viewport_editor": ui.sheets.editor,
         "plan_labels": ui.plan_labels,
+        "sketch": { "show": ui.sketch.show, "colours": ui.sketch.colours, "dimensions": ui.sketch.dimensions,
+                    "selected_dimension": ui.sketch.selected.map(crate::sketch_ui::dim_args),
+                    "editing": ui.sketch.editing.as_ref().map(|e| json!({ "dimension": crate::sketch_ui::dim_args(e.source), "text": e.text })) },
     }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SketchViewArgs {
+    /// Draw sketch lines, points and dimensions over the plan.
+    show: Option<bool>,
+    /// Colour by constraint state: fully constrained green, conflicting red.
+    colours: Option<bool>,
+    /// Draw dimensions (sketch and reference).
+    dimensions: Option<bool>,
+}
+
+fn sketch(c: &mut UiCtx, a: SketchViewArgs) -> CmdResult {
+    let v = &mut c.ui.sketch;
+    if let Some(b) = a.show {
+        v.show = b;
+    }
+    if let Some(b) = a.colours {
+        v.colours = b;
+    }
+    if let Some(b) = a.dimensions {
+        v.dimensions = b;
+    }
+    Ok(json!({ "show": v.show, "colours": v.colours, "dimensions": v.dimensions }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct DimensionArgs {
+    /// Sketch dimension id (number), reference dimension UUID, or a dimension's name;
+    /// null clears the selection.
+    id: Option<Value>,
+    /// Layer id or name, for sketch dimension ids that exist on several layers.
+    layer: Option<String>,
+    /// Open the value editor (driving dimensions), as a double-click does.
+    #[serde(default)]
+    edit: bool,
+}
+
+fn dimension(c: &mut UiCtx, a: DimensionArgs) -> CmdResult {
+    use stagecraft_geom::dims::DimSource;
+    let Some(id) = a.id.filter(|v| !v.is_null()) else {
+        c.ui.sketch.selected = None;
+        c.ui.sketch.editing = None;
+        return Ok(json!({}));
+    };
+    let doc = c.engine.doc();
+    let only = match &a.layer {
+        Some(l) => Some(
+            doc.layers
+                .values()
+                .find(|x| x.name == *l || x.id.to_string() == *l)
+                .map(|x| x.id)
+                .ok_or_else(|| CmdError::not_found("layer", l))?,
+        ),
+        None => None,
+    };
+    let mut found: Vec<DimSource> = Vec::new();
+    for (layer, s) in doc.sketches.iter().filter(|(l, _)| only.is_none_or(|o| o == **l)) {
+        for d in &s.dimensions {
+            let hit = match &id {
+                Value::Number(n) => n.as_u64() == Some(d.id.0 as u64),
+                Value::String(t) => d.name.as_deref() == Some(t.as_str()),
+                _ => false,
+            };
+            if hit {
+                found.push(DimSource::Sketch { layer: *layer, id: d.id });
+            }
+        }
+    }
+    if let Value::String(t) = &id {
+        for d in doc.dimensions.values() {
+            if d.id.to_string() == *t || d.name.as_deref() == Some(t.as_str()) {
+                found.push(DimSource::Reference(d.id));
+            }
+        }
+    }
+    let src = match found.as_slice() {
+        [one] => *one,
+        [] => return Err(CmdError::not_found("dimension", &id)),
+        _ => return Err(CmdError::invalid("several dimensions match; pass layer")),
+    };
+    c.ui.sketch.selected = Some(src);
+    if a.edit {
+        let DimSource::Sketch { layer, id } = src else {
+            return Err(CmdError::invalid("reference dimensions have no value to edit"));
+        };
+        let d = c.engine.doc().sketches[&layer].dimension(id).cloned().expect("found");
+        if !d.driving {
+            return Err(CmdError::invalid("reference dimensions have no value to edit; make it driving first"));
+        }
+        let text = if d.measure.is_angle() { format!("{:.1}", d.value) } else { format!("{}", d.value / 1000.0) };
+        c.ui.sketch.editing = Some(crate::sketch_ui::DimEdit { source: src, text, focus: true });
+    }
+    Ok(json!({ "selected": crate::sketch_ui::dim_args(src) }))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -331,7 +438,10 @@ fn zoom_to_fit(c: &mut UiCtx, a: FitArgs) -> CmdResult {
         c.ui.sheets.fit_pending = true;
     }
     if c.ui.view.shows_plan() {
-        let b = stagecraft_geom::pick::objects_bounds(c.engine.doc(), ids.clone(), &Default::default());
+        let mut b = stagecraft_geom::pick::objects_bounds(c.engine.doc(), ids.clone(), &Default::default());
+        if !a.selection {
+            b = b.union(&crate::sketch_ui::bounds(c.engine.doc()));
+        }
         c.ui.camera.fit(b);
         c.ui.fit_pending = false;
         out["center"] = json!(c.ui.camera.center);

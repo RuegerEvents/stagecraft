@@ -224,6 +224,49 @@ pub fn reference_dims(doc: &Document, st: &DimStyle, keep: impl Fn(&RefDimension
     out
 }
 
+/// The axis a dimension between `a` and `b` takes when its label is put at `label`,
+/// as AutoCAD's linear dimension does: above or below the span → horizontal, beside it
+/// → vertical, otherwise (or when the points line up with an axis) aligned.
+pub fn auto_axis(a: P2, b: P2, label: P2) -> DimAxis {
+    let (dx, dy) = ((b[0] - a[0]).abs(), (b[1] - a[1]).abs());
+    if dx < 1.0 || dy < 1.0 {
+        return DimAxis::Aligned;
+    }
+    let within = |v: f64, p: f64, q: f64| v >= p.min(q) && v <= p.max(q);
+    match (within(label[0], a[0], b[0]), within(label[1], a[1], b[1])) {
+        (true, false) => DimAxis::Horizontal,
+        (false, true) => DimAxis::Vertical,
+        _ => DimAxis::Aligned,
+    }
+}
+
+/// A dimension that does not exist yet (tool preview).
+pub fn preview(a: P2, b: P2, axis: DimAxis, label: P2, st: &DimStyle) -> Option<DimDraw> {
+    let u = match axis {
+        DimAxis::Aligned => unit(math::sub(b, a))?,
+        DimAxis::Horizontal => [1.0, 0.0],
+        DimAxis::Vertical => [0.0, 1.0],
+    };
+    let value = match axis {
+        DimAxis::Aligned => math::dist(a, b),
+        DimAxis::Horizontal => (b[0] - a[0]).abs(),
+        DimAxis::Vertical => (b[1] - a[1]).abs(),
+    };
+    let (lines, label, up, rotation) = linear(a, b, u, label, st);
+    Some(DimDraw {
+        source: DimSource::Reference(Id::nil()),
+        driving: true,
+        value,
+        angle: false,
+        text: format_value(value, false),
+        name: None,
+        label,
+        up,
+        rotation,
+        lines,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

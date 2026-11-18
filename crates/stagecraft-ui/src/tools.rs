@@ -13,7 +13,7 @@ use stagecraft_geom::{Bounds, PlanStyle};
 use crate::app::Studio;
 use crate::canvas::{draw_prims, screen_rect, tolerance};
 use crate::i18n::{t, tf};
-use crate::state::{DimInput, Drag, Gesture, Tool};
+use crate::state::{DimInput, Drag, Gesture, SegHint, Tool};
 use crate::theme::Palette;
 
 /// A typed length in mm. Plain numbers are metres ("4.5" = 4500 mm); `mm`, `cm` and
@@ -77,16 +77,22 @@ pub fn interact(ui: &mut Ui, resp: &Response, s: &mut Studio, ids: &[Id], style:
     // Snapping: not onto what is being moved.
     let moving: Vec<Id> = match (&s.ui.gesture.drag, s.ui.tool) {
         (Some(Drag::Move { ids, .. }), _) => ids.clone(),
+        // A dragged sketch point must not snap to what follows it.
+        (Some(Drag::SketchPoint { layer, .. }), _) => stagecraft_core::sketch::linked_on(s.engine.doc(), *layer),
         (_, Tool::Move | Tool::Rotate) if !s.ui.gesture.points.is_empty() => s.engine.selection().to_vec(),
         _ => Vec::new(),
     };
-    let features = Features::collect(s.engine.doc(), ids.iter().copied(), &moving);
+    let mut features = Features::collect(s.engine.doc(), ids.iter().copied(), &moving);
+    if !matches!(s.ui.gesture.drag, Some(Drag::SketchPoint { .. })) {
+        features.endpoints.extend(crate::sketch_ui::snap_points(s.engine.doc()));
+    }
     let from = match &s.ui.gesture.drag {
         Some(Drag::Move { from, .. }) => Some(*from),
         _ => s.ui.gesture.points.last().copied(),
     };
     let ortho = shift && (s.ui.tool.draws() || s.ui.gesture.drag.is_some());
     s.ui.gesture.cursor = raw.map(|p| snap(p, from, ortho, &features, &s.ui.snap, tol));
+    s.ui.gesture.shift = shift;
 
     if resp.clicked() || resp.drag_started() {
         s.ui.table.focused = false;
@@ -109,18 +115,33 @@ pub fn interact(ui: &mut Ui, resp: &Response, s: &mut Studio, ids: &[Id], style:
     let p = cursor.point;
     match s.ui.tool {
         Tool::Select => unreachable!(),
-        Tool::Wall => s.ui.gesture.points.push(p),
-        Tool::Floor | Tool::Ceiling | Tool::Run => {
+        Tool::Wall | Tool::Floor | Tool::Ceiling | Tool::Run => {
             let pts = &s.ui.gesture.points;
             if pts.len() >= 3 && math::dist(pts[0], p) <= tol {
-                // A run clicked shut closes into a ring.
-                if s.ui.tool == Tool::Run {
+                // A run or wall clicked shut closes into a ring.
+                if matches!(s.ui.tool, Tool::Run | Tool::Wall) {
                     let first = pts[0];
                     s.ui.gesture.points.push(first);
+                    s.ui.gesture.segs.push(SegHint { axis_lock: shift, length: None });
                 }
                 finish(s);
             } else {
+                if !s.ui.gesture.points.is_empty() {
+                    s.ui.gesture.segs.push(SegHint { axis_lock: shift, length: None });
+                }
                 s.ui.gesture.points.push(p);
+            }
+        }
+        Tool::Dimension => {
+            let pick = crate::sketch_ui::pick(s, raw, &cursor, tol);
+            let picks = s.ui.gesture.picks.clone();
+            match picks.as_slice() {
+                [a, b] => {
+                    s.ui.gesture = Gesture::default();
+                    crate::sketch_ui::commit(s, *a, *b, raw);
+                }
+                [a] if math::dist(a.at(), pick.at()) < 1e-6 => {}
+                _ => s.ui.gesture.picks.push(pick),
             }
         }
         Tool::Curtain => {
@@ -184,6 +205,20 @@ fn select_tool(
     if resp.drag_started_by(PointerButton::Primary) {
         let press = ui.input(|i| i.pointer.press_origin()).map(|p| cam.to_world(p)).or(raw);
         let Some(press) = press else { return };
+        if s.ui.sketch.show {
+            let press_screen = cam.to_screen(press);
+            if s.ui.sketch.dimensions
+                && let Some(d) = crate::sketch_ui::dim_at(s.engine.doc(), &cam, press_screen)
+            {
+                s.ui.sketch.selected = Some(d.source);
+                s.ui.gesture.drag = Some(Drag::Label { source: d.source, from: press });
+                return;
+            }
+            if let Some((layer, point, _)) = crate::sketch_ui::point_at(s.engine.doc(), press, tol) {
+                s.ui.gesture.drag = Some(Drag::SketchPoint { layer, point });
+                return;
+            }
+        }
         match pick(s.engine.doc(), ids.iter().copied(), press, tol, style) {
             Some(hit) => {
                 if !s.engine.selection().contains(&hit) {
@@ -223,12 +258,53 @@ fn select_tool(
                     let _ = s.run("object.move", json!({ "ids": moved, "delta": [d[0], d[1], 0.0] }));
                 }
             }
+            Some(Drag::SketchPoint { layer, point }) => {
+                let to = s.ui.gesture.cursor.map_or(raw, |c| c.point);
+                let args = json!({ "layer": layer, "targets": [{ "point": point, "to": { "x": to[0], "y": to[1] } }] });
+                let _ = s.run("sketch.drag", args);
+            }
+            Some(Drag::Label { source, from }) => {
+                let d = math::sub(raw, from);
+                if math::length(d) > 1e-6 {
+                    move_label(s, source, d);
+                }
+            }
             None => {}
+        }
+        return;
+    }
+    // Double (or quicker triple) click on a dimension edits its value; a click
+    // selects it. A double click on a sketch corner locks or unlocks it.
+    let double = resp.double_clicked() || resp.triple_clicked();
+    if double
+        && s.ui.sketch.show
+        && let Some(raw) = raw
+        && crate::sketch_ui::dim_at(s.engine.doc(), &cam, cam.to_screen(raw)).is_none()
+        && let Some((layer, point, at)) = crate::sketch_ui::point_at(s.engine.doc(), raw, tol)
+    {
+        crate::sketch_ui::toggle_lock(s, layer, point, at);
+        return;
+    }
+    if s.ui.sketch.show
+        && s.ui.sketch.dimensions
+        && (resp.clicked_by(PointerButton::Primary) || double)
+        && let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos())
+        && let Some(d) = crate::sketch_ui::dim_at(s.engine.doc(), &cam, pos)
+    {
+        if double {
+            crate::sketch_ui::open_editor(s, d.source);
+        } else {
+            s.ui.sketch.selected = Some(d.source);
+            if !s.engine.selection().is_empty() {
+                let _ = s.run("selection.clear", Value::Null);
+            }
         }
         return;
     }
     if resp.clicked_by(PointerButton::Primary) {
         let Some(raw) = raw else { return };
+        s.ui.sketch.selected = None;
+        s.ui.sketch.editing = None;
         let hit = pick(s.engine.doc(), ids.iter().copied(), raw, tol, style);
         let sel = s.engine.selection().to_vec();
         let ids = match (hit, shift) {
@@ -240,6 +316,22 @@ fn select_tool(
         };
         let _ = s.run("selection.set", json!({ "ids": ids }));
     }
+}
+
+/// Moves a dimension's label (and its line) by `d` world mm.
+fn move_label(s: &mut Studio, src: stagecraft_geom::dims::DimSource, d: P2) {
+    use stagecraft_geom::dims::DimSource;
+    let doc = s.engine.doc();
+    let old = match src {
+        DimSource::Sketch { layer, id } => {
+            doc.sketches.get(&layer).and_then(|k| k.dimension(id)).map(|x| [x.label_offset.x, x.label_offset.y])
+        }
+        DimSource::Reference(id) => doc.dimensions.get(&id).map(|x| x.label_offset),
+    };
+    let Some(old) = old else { return };
+    let mut args = crate::sketch_ui::dim_args(src);
+    args["offset"] = json!(math::add(old, d));
+    let _ = s.run("dimension.move_label", args);
 }
 
 fn add_to(sel: &[Id], id: Id) -> Vec<Id> {
@@ -329,7 +421,13 @@ fn enter(s: &mut Studio) {
     };
     s.ui.gesture.dim = None;
     match s.ui.tool {
-        Tool::Wall | Tool::Floor | Tool::Run | Tool::Ceiling => s.ui.gesture.points.push(p),
+        Tool::Wall | Tool::Floor => {
+            let len = parse_length(&dim.length).filter(|l| *l > 0.0);
+            let hint = SegHint { axis_lock: s.ui.gesture.shift, length: len };
+            s.ui.gesture.segs.push(hint);
+            s.ui.gesture.points.push(p);
+        }
+        Tool::Run | Tool::Ceiling => s.ui.gesture.points.push(p),
         Tool::Truss => create_truss(s, last, p),
         Tool::Curtain => {
             let ids = crate::canvas::visible_ids(s.engine.doc(), &s.ui);
@@ -343,18 +441,39 @@ fn enter(s: &mut Studio) {
 
 /// End the polyline or polygon being drawn.
 fn finish(s: &mut Studio) {
-    let mut pts = std::mem::take(&mut s.ui.gesture.points);
-    pts.dedup_by(|a, b| math::dist(*a, *b) < 1e-6);
+    let raw_pts = std::mem::take(&mut s.ui.gesture.points);
+    let raw_segs = std::mem::take(&mut s.ui.gesture.segs);
+    // Drop zero-length segments (a double click lands twice on one spot).
+    let mut pts: Vec<P2> = Vec::new();
+    let mut segs: Vec<SegHint> = Vec::new();
+    for (i, p) in raw_pts.iter().enumerate() {
+        if pts.last().is_some_and(|q| math::dist(*q, *p) < 1e-6) {
+            continue;
+        }
+        if i > 0 {
+            segs.push(raw_segs.get(i - 1).copied().unwrap_or_default());
+        }
+        pts.push(*p);
+    }
     s.ui.gesture = Gesture::default();
     let layer = s.active_layer_arg();
+    let tol = tolerance(&s.ui.camera);
     match s.ui.tool {
         Tool::Wall if pts.len() >= 2 => {
             let o = &s.ui.options;
-            let args = json!({ "path": pts, "height": o.wall_height, "thickness": o.wall_thickness, "layer": layer });
-            created(s, "wall.create", args, "tool.wall");
+            let closed = pts.len() >= 4 && math::dist(pts[0], pts[pts.len() - 1]) < 1e-6;
+            if closed {
+                pts.pop();
+            }
+            let args = json!({ "points": pts, "segments": segs, "closed": closed, "make": "wall",
+                               "height": o.wall_height, "thickness": o.wall_thickness, "layer": layer,
+                               "snap_radius": tol });
+            created(s, "sketch.draw", args, "tool.wall");
         }
         Tool::Floor if pts.len() >= 3 => {
-            created(s, "floor.create", json!({ "outline": pts, "layer": layer }), "tool.floor");
+            let args = json!({ "points": pts, "segments": segs, "closed": true, "make": "floor", "layer": layer,
+                               "snap_radius": tol });
+            created(s, "sketch.draw", args, "tool.floor");
         }
         Tool::Ceiling if pts.len() >= 3 => {
             let h = s.ui.options.ceiling_height;
@@ -693,6 +812,18 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
         _ => {}
     }
 
+    if let (Some(Drag::Label { from, .. }), Some(raw)) =
+        (&g.drag, ui.input(|i| i.pointer.hover_pos()).map(|q| cam.to_world(q)))
+    {
+        p.line_segment([cam.to_screen(*from), cam.to_screen(raw)], thin);
+    }
+    if s.ui.tool == Tool::Dimension
+        && let Some(c) = g.cursor
+    {
+        let raw = ui.input(|i| i.pointer.hover_pos()).map_or(c.point, |q| cam.to_world(q));
+        let at = if g.picks.len() == 2 { raw } else { c.point };
+        crate::sketch_ui::tool_preview(p, cam, pal, &g.picks, at);
+    }
     let pts = &g.points;
     let o = &s.ui.options;
     match (s.ui.tool, cursor) {

@@ -45,7 +45,8 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     s.ui.camera.rect = rect;
     if s.ui.fit_pending {
         let ids = visible_ids(s.engine.doc(), &s.ui);
-        s.ui.camera.fit(stagecraft_geom::pick::objects_bounds(s.engine.doc(), ids, &PlanStyle::default()));
+        let b = stagecraft_geom::pick::objects_bounds(s.engine.doc(), ids, &PlanStyle::default());
+        s.ui.camera.fit(b.union(&crate::sketch_ui::bounds(s.engine.doc())));
         s.ui.fit_pending = false;
     }
     navigate(ui, &resp, &mut s.ui.camera);
@@ -62,7 +63,15 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         style.labels = false;
     }
     let hover = crate::tools::hovered(ui, &resp, s, &ids, &style);
-    let doc = s.engine.doc();
+    // While a sketch point is dragged, draw the document as the drag would leave it.
+    let drag = match &s.ui.gesture.drag {
+        Some(crate::state::Drag::SketchPoint { layer, point }) => {
+            s.ui.gesture.cursor.map(|c| (*layer, *point, c.point))
+        }
+        _ => None,
+    };
+    let preview = s.ui.sketch.preview_doc(s.engine.doc(), drag).cloned();
+    let doc = preview.as_ref().unwrap_or(s.engine.doc());
     let sel = s.engine.selection();
     for id in &ids {
         let o = &doc.objects[id];
@@ -78,6 +87,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     }
 
     draw_conflicts(&painter, &s.ui.camera, doc, &ids);
+    crate::sketch_ui::draw(&painter, &s.ui.camera, &pal, doc, &mut s.ui.sketch);
 
     if let Some(t) = &template {
         draw_labels(&painter, &s.ui.camera, &pal, doc, &ids, t);
@@ -85,6 +95,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
 
     crate::tools::interact(ui, &resp, s, &ids, &style);
     crate::tools::draw_overlay(ui, &painter, s, &pal, &style);
+    crate::sketch_ui::editor(ui, s);
 }
 
 /// A warning ring around every fixture whose patch overlaps another or runs past

@@ -1,0 +1,671 @@
+//! The layer sketches in the plan: lines and points in FreeCAD colours (fully
+//! constrained green, free in the normal colour, conflicting red), dimensions whose
+//! values open an editor on double-click, live dragging of sketch points (solved for
+//! the preview every frame, one `sketch.drag` on release) and the sketch section of
+//! the inspector. Every change goes through `sketch.*` / `dimension.*` commands.
+
+use std::collections::HashMap;
+
+use egui::epaint::TextShape;
+use egui::{Color32, Pos2, RichText, Stroke, Ui, vec2};
+use serde_json::{Value, json};
+use stagecraft_core::model::P2;
+use stagecraft_core::sketch::{
+    self as sk, Anchor, ConstraintState, EntityState, PointId, Sketch, SolveOptions, Status, constraint_edges,
+    constraint_points, measure_edges, measure_points,
+};
+use stagecraft_core::{Document, Id};
+use stagecraft_geom::dims::{self, DimDraw, DimSource, DimStyle};
+
+use crate::app::Studio;
+use crate::i18n::{t, tf};
+use crate::state::Camera;
+use crate::theme::{self, Palette};
+use crate::widgets;
+
+/// What the dimension tool clicked: a sketch point, a point of an object, or a free
+/// position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Pick {
+    Sketch { layer: Id, point: PointId, at: P2 },
+    Object { id: Id, local: [f64; 3], at: P2 },
+    Free { at: P2, z: f64 },
+}
+
+impl Pick {
+    pub fn at(&self) -> P2 {
+        match *self {
+            Pick::Sketch { at, .. } | Pick::Object { at, .. } | Pick::Free { at, .. } => at,
+        }
+    }
+
+    pub fn anchor(&self) -> Anchor {
+        match *self {
+            Pick::Sketch { layer, point, .. } => Anchor::SketchPoint { layer, point },
+            Pick::Object { id, local, .. } => Anchor::Object { object: id, local },
+            Pick::Free { at, z } => Anchor::Point { at: [at[0], at[1], z] },
+        }
+    }
+}
+
+/// The value editor opened by double-clicking a dimension.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DimEdit {
+    pub source: DimSource,
+    pub text: String,
+    /// Focus the field on the next frame.
+    pub focus: bool,
+}
+
+struct Preview {
+    key: (Id, PointId, [u64; 2]),
+    doc: Document,
+}
+
+/// Sketch view state.
+pub struct SketchUi {
+    /// Draw sketch lines, points and dimensions over the plan.
+    pub show: bool,
+    /// FreeCAD colours by constraint state.
+    pub colours: bool,
+    /// Draw dimensions.
+    pub dimensions: bool,
+    /// The dimension selected in the plan (shown in the inspector).
+    pub selected: Option<DimSource>,
+    pub editing: Option<DimEdit>,
+    cache: HashMap<Id, (Sketch, Option<Status>)>,
+    preview: Option<Preview>,
+}
+
+impl Default for SketchUi {
+    fn default() -> Self {
+        Self {
+            show: true,
+            colours: true,
+            dimensions: true,
+            selected: None,
+            editing: None,
+            cache: HashMap::new(),
+            preview: None,
+        }
+    }
+}
+
+impl SketchUi {
+    /// The analysis of a layer's sketch, cached until the sketch changes. With `live`
+    /// (a drag preview), only a change of structure (points, edges, constraints,
+    /// dimensions; not positions) runs it again: degrees of freedom do not change
+    /// while dragging, and the analysis costs tens of milliseconds on big sketches.
+    pub fn status(&mut self, layer: Id, s: &Sketch, live: bool) -> Option<&Status> {
+        let same = |c: &Sketch| {
+            if !live {
+                return c == s;
+            }
+            c.edges == s.edges
+                && c.constraints == s.constraints
+                && c.points.len() == s.points.len()
+                && c.points.iter().zip(&s.points).all(|(a, b)| a.id == b.id)
+                && c.dimensions.len() == s.dimensions.len()
+                && c.dimensions.iter().zip(&s.dimensions).all(|(a, b)| a.id == b.id && a.driving == b.driving)
+        };
+        let fresh = self.cache.get(&layer).is_some_and(|(c, _)| same(c));
+        if !fresh {
+            self.cache.insert(layer, (s.clone(), s.analyse().ok()));
+        }
+        self.cache.get(&layer).and_then(|(_, st)| st.as_ref())
+    }
+
+    /// The document with a sketch point dragged to `to` (solved, walls and floors
+    /// following), for drawing while the drag lasts. `None` when nothing is dragged
+    /// or the drag cannot be solved.
+    pub fn preview_doc(&mut self, doc: &Document, drag: Option<(Id, PointId, P2)>) -> Option<&Document> {
+        let Some((layer, point, to)) = drag else {
+            self.preview = None;
+            return None;
+        };
+        let key = (layer, point, [to[0].to_bits(), to[1].to_bits()]);
+        if self.preview.as_ref().is_none_or(|p| p.key != key) {
+            let s = doc.sketches.get(&layer)?;
+            if let Ok(solved) = s.drag(point, sk::v2(to), &SolveOptions::drag()) {
+                let mut d = doc.clone();
+                sk::store(&mut d, layer, solved.sketch);
+                self.preview = Some(Preview { key, doc: d });
+            }
+        }
+        self.preview.as_ref().map(|p| &p.doc)
+    }
+}
+
+/// Layers whose sketch is drawn: the visible ones.
+pub fn visible_layers(doc: &Document) -> Vec<Id> {
+    doc.layers.values().filter(|l| l.visible).map(|l| l.id).collect()
+}
+
+/// Every dimension drawn in the plan, in world mm, sized for the zoom.
+pub fn plan_dims(doc: &Document, cam: &Camera) -> Vec<DimDraw> {
+    let st = DimStyle::for_scale(cam.scale, 5.0);
+    let layers = visible_layers(doc);
+    let mut out = Vec::new();
+    for l in &layers {
+        if let Some(s) = doc.sketches.get(l) {
+            out.extend(dims::sketch_dims(*l, s, &st));
+        }
+    }
+    out.extend(dims::reference_dims(doc, &st, |d| layers.contains(&d.layer)));
+    out
+}
+
+const LABEL_PX: f32 = 12.0;
+
+/// Centre of a dimension's value on screen.
+pub fn label_center(cam: &Camera, d: &DimDraw) -> Pos2 {
+    cam.to_screen(d.label) + vec2(d.up[0] as f32, -d.up[1] as f32) * (LABEL_PX * 0.75)
+}
+
+/// The dimension whose value is under `pos` (screen).
+pub fn dim_at(doc: &Document, cam: &Camera, pos: Pos2) -> Option<DimDraw> {
+    plan_dims(doc, cam)
+        .into_iter()
+        .map(|d| {
+            let c = label_center(cam, &d);
+            let r = (d.text.chars().count() as f32 * LABEL_PX * 0.3).max(LABEL_PX * 0.8);
+            ((c - pos).length() / r, d)
+        })
+        .filter(|(k, _)| *k <= 1.0)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|x| x.1)
+}
+
+/// The sketch point near `p` (world mm) on a visible layer.
+pub fn point_at(doc: &Document, p: P2, tol: f64) -> Option<(Id, PointId, P2)> {
+    let mut best: Option<(Id, PointId, P2, f64)> = None;
+    for l in visible_layers(doc) {
+        let Some(s) = doc.sketches.get(&l) else { continue };
+        for q in &s.points {
+            let d = (q.pos.x - p[0]).hypot(q.pos.y - p[1]);
+            if d <= tol && best.is_none_or(|b| d < b.3) {
+                best = Some((l, q.id, sk::p2(q.pos), d));
+            }
+        }
+    }
+    best.map(|b| (b.0, b.1, b.2))
+}
+
+/// The box around every sketch point of the visible layers (for zoom to fit).
+pub fn bounds(doc: &Document) -> stagecraft_geom::Bounds {
+    let mut b = stagecraft_geom::Bounds::EMPTY;
+    for (p, _) in snap_points(doc) {
+        b.add(p);
+    }
+    b
+}
+
+/// Sketch points of the visible layers, for snapping.
+pub fn snap_points(doc: &Document) -> Vec<(P2, Id)> {
+    visible_layers(doc)
+        .into_iter()
+        .filter_map(|l| doc.sketches.get(&l).map(|s| (l, s)))
+        .flat_map(|(l, s)| s.points.iter().map(move |p| (sk::p2(p.pos), l)))
+        .collect()
+}
+
+fn state_colour(pal: &Palette, colours: bool, conflict: bool, full: bool) -> Color32 {
+    if !colours {
+        return pal.sketch;
+    }
+    if conflict {
+        pal.conflict
+    } else if full {
+        pal.constrained
+    } else {
+        pal.sketch
+    }
+}
+
+/// Lines, points and dimensions of the sketches, over the objects.
+pub fn draw(p: &egui::Painter, cam: &Camera, pal: &Palette, doc: &Document, sui: &mut SketchUi) {
+    if !sui.show {
+        return;
+    }
+    for l in visible_layers(doc) {
+        let Some(s) = doc.sketches.get(&l) else { continue };
+        let colours = sui.colours;
+        let live = sui.preview.is_some();
+        let status = if colours { sui.status(l, s, live).cloned() } else { None };
+        // Edges and points touched by a conflicting constraint.
+        let mut bad_edges = Vec::new();
+        let mut bad_points = Vec::new();
+        if let Some(st) = &status {
+            for id in &st.conflicting {
+                if let Some(c) = s.constraint(*id) {
+                    bad_edges.extend(constraint_edges(&c.kind));
+                    bad_points.extend(constraint_points(&c.kind));
+                }
+                if let Some(d) = s.dimension(*id) {
+                    bad_edges.extend(measure_edges(&d.measure));
+                    bad_points.extend(measure_points(&d.measure));
+                }
+            }
+        }
+        let full_point =
+            |id: PointId| status.as_ref().is_some_and(|st| st.point_state(id) == EntityState::FullyConstrained);
+        for e in &s.edges {
+            let full = status.as_ref().is_some_and(|st| st.edge_state(s, e.id) == EntityState::FullyConstrained);
+            let bad = bad_edges.contains(&e.id) || e.geom.points().iter().any(|q| bad_points.contains(q));
+            let colour = state_colour(pal, colours, bad, full);
+            let Some((pts, _)) = sk::chain(s, &[e.id]) else { continue };
+            let sp: Vec<Pos2> = pts.iter().map(|q| cam.to_screen(*q)).collect();
+            let stroke = Stroke::new(1.4, colour);
+            if e.construction {
+                p.extend(egui::Shape::dashed_line(&sp, Stroke::new(1.0, colour), 8.0, 4.0));
+            } else {
+                p.add(egui::Shape::line(sp, stroke));
+            }
+        }
+        for q in &s.points {
+            let bad = bad_points.contains(&q.id);
+            let colour = state_colour(pal, colours, bad, full_point(q.id));
+            let at = cam.to_screen(sk::p2(q.pos));
+            p.circle_filled(at, 2.6, colour);
+            if !locks(s, q.id).is_empty() {
+                let r = egui::Rect::from_center_size(at, vec2(9.0, 9.0));
+                p.rect_stroke(r, 1.0, Stroke::new(1.3, colour), egui::StrokeKind::Middle);
+            }
+        }
+    }
+    if !sui.dimensions {
+        return;
+    }
+    let conflicting: Vec<DimSource> = sui
+        .cache
+        .iter()
+        .flat_map(|(l, (_, st))| {
+            st.iter().flat_map(move |st| st.conflicting.iter().map(move |id| DimSource::Sketch { layer: *l, id: *id }))
+        })
+        .collect();
+    for d in plan_dims(doc, cam) {
+        let colour = if sui.selected == Some(d.source) {
+            pal.selected
+        } else if sui.colours && conflicting.contains(&d.source) {
+            pal.conflict
+        } else if d.driving {
+            pal.dim
+        } else {
+            pal.dim_reference
+        };
+        draw_dim(p, cam, pal, &d, colour, sui.editing.as_ref().is_some_and(|e| e.source == d.source));
+    }
+}
+
+/// One dimension: lines, then the value on a small backdrop so it reads over hatching.
+pub fn draw_dim(p: &egui::Painter, cam: &Camera, pal: &Palette, d: &DimDraw, colour: Color32, hide_text: bool) {
+    let stroke = Stroke::new(0.9, colour);
+    for l in &d.lines {
+        let sp: Vec<Pos2> = l.iter().map(|q| cam.to_screen(*q)).collect();
+        p.add(egui::Shape::line(sp, stroke));
+    }
+    if hide_text {
+        return;
+    }
+    let galley = p.layout_no_wrap(d.text.clone(), theme::proportional(LABEL_PX), colour);
+    let c = label_center(cam, d);
+    let angle = -(d.rotation.to_radians()) as f32;
+    let size = galley.size();
+    let (s, co) = angle.sin_cos();
+    let half = vec2(-size.x / 2.0, -size.y / 2.0);
+    let rotated = vec2(half.x * co - half.y * s, half.x * s + half.y * co);
+    if angle.abs() < 1e-3 {
+        let r = egui::Rect::from_center_size(c, size).expand(1.5);
+        p.rect_filled(r, 2.0, pal.canvas.gamma_multiply(0.85));
+    }
+    p.add(TextShape::new(c + rotated, galley, colour).with_angle(angle));
+}
+
+/// The `fixed` constraints on a point.
+pub fn locks(s: &Sketch, point: PointId) -> Vec<sk::ConstraintId> {
+    s.constraints
+        .iter()
+        .filter(|c| matches!(c.kind, sk::ConstraintKind::Fixed { point: p, .. } if p == point))
+        .map(|c| c.id)
+        .collect()
+}
+
+/// Locks a sketch point where it is (a `fixed` constraint), or unlocks it.
+pub fn toggle_lock(s: &mut Studio, layer: Id, point: PointId, at: P2) {
+    let Some(sketch) = s.engine.doc().sketches.get(&layer) else { return };
+    let locks = locks(sketch, point);
+    if locks.is_empty() {
+        let c = json!({ "type": "fixed", "point": point, "at": { "x": at[0], "y": at[1] } });
+        if s.run("sketch.add_constraint", json!({ "layer": layer, "constraint": c })).is_ok() {
+            s.ui.info(t("sketch.locked"));
+        }
+    } else if s.run("sketch.remove_constraint", json!({ "layer": layer, "ids": locks })).is_ok() {
+        s.ui.info(t("sketch.unlocked"));
+    }
+}
+
+/// The arguments naming a dimension in `dimension.*` commands.
+pub fn dim_args(src: DimSource) -> Value {
+    match src {
+        DimSource::Sketch { layer, id } => json!({ "id": id.0, "layer": layer }),
+        DimSource::Reference(id) => json!({ "id": id }),
+    }
+}
+
+/// Opens the value editor of a dimension (driving sketch dimensions only).
+pub fn open_editor(s: &mut Studio, src: DimSource) {
+    s.ui.sketch.selected = Some(src);
+    let DimSource::Sketch { layer, id } = src else {
+        s.ui.info(t("sketch.reference_only"));
+        return;
+    };
+    let Some(d) = s.engine.doc().sketches.get(&layer).and_then(|sk| sk.dimension(id)).cloned() else { return };
+    if !d.driving {
+        s.ui.info(t("sketch.reference_only"));
+        return;
+    }
+    let text = if d.measure.is_angle() { format!("{:.1}", d.value) } else { trim_metres(d.value) };
+    s.ui.sketch.editing = Some(DimEdit { source: src, text, focus: true });
+}
+
+/// mm as metres for typing ("6.5", "13", "1.805").
+fn trim_metres(mm: f64) -> String {
+    let s = format!("{:.3}", mm / 1000.0);
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    s.to_owned()
+}
+
+/// The inline editor over a dimension's value: type, Enter applies, Escape cancels.
+pub fn editor(ui: &Ui, s: &mut Studio) {
+    let Some(edit) = s.ui.sketch.editing.clone() else { return };
+    let cam = s.ui.camera;
+    let Some(d) = plan_dims(s.engine.doc(), &cam).into_iter().find(|d| d.source == edit.source) else {
+        s.ui.sketch.editing = None;
+        return;
+    };
+    let at = label_center(&cam, &d);
+    let mut text = edit.text.clone();
+    let mut apply = false;
+    let mut cancel = false;
+    let mut focused = false;
+    egui::Area::new(egui::Id::new("dimension_editor"))
+        .fixed_pos(at - vec2(42.0, 11.0))
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).inner_margin(2.0).show(ui, |ui| {
+                let r =
+                    ui.add(egui::TextEdit::singleline(&mut text).desired_width(76.0).font(theme::proportional(13.0)));
+                widgets::name(&r, egui::WidgetType::TextEdit, "Dimension value");
+                if edit.focus && !r.has_focus() {
+                    r.request_focus();
+                }
+                // Enter applies, Escape cancels; a click elsewhere in the plan closes it
+                // (in the select tool).
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) && (r.has_focus() || r.lost_focus()) {
+                    apply = true;
+                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    cancel = true;
+                }
+                focused = r.has_focus();
+            });
+        });
+    if apply {
+        s.ui.sketch.editing = None;
+        let value = if d.angle { crate::tools::parse_angle(&text) } else { crate::tools::parse_length(&text) };
+        match value {
+            Some(v) => {
+                let mut args = dim_args(edit.source);
+                args["value"] = json!(v);
+                if s.run("dimension.set_value", args).is_ok() {
+                    s.ui.info(tf("sketch.value_set", &[("value", &dims::format_value(v, d.angle))]));
+                }
+            }
+            None => s.ui.error(tf("status.bad_length", &[("text", &text)])),
+        }
+    } else if cancel {
+        s.ui.sketch.editing = None;
+    } else if let Some(e) = &mut s.ui.sketch.editing {
+        e.text = text;
+        if focused {
+            e.focus = false;
+        }
+    }
+}
+
+/// The sketch section of the inspector: the selected dimension, or the active layer's
+/// sketch status (degrees of freedom, conflicts).
+pub fn inspector(ui: &mut Ui, s: &mut Studio) {
+    if let Some(src) = s.ui.sketch.selected {
+        dimension_fields(ui, s, src);
+        ui.add_space(8.0);
+    }
+    let doc = s.engine.doc();
+    let layer =
+        s.ui.active_layer.filter(|l| doc.layers.contains_key(l)).or_else(|| doc.layers_sorted().first().map(|l| l.id));
+    let Some(layer) = layer else { return };
+    let Some(sketch) = doc.sketches.get(&layer).cloned() else { return };
+    let name = doc.layers[&layer].name.clone();
+    ui.label(RichText::new(tf("sketch.title", &[("layer", &name)])).strong());
+    let st = s.ui.sketch.status(layer, &sketch, false).cloned();
+    let Some(st) = st else {
+        ui.label(RichText::new(t("sketch.no_status")).weak());
+        return;
+    };
+    let (text, colour) = if !st.conflicting.is_empty() {
+        (tf("sketch.conflicts", &[("n", &st.conflicting.len())]), theme::WARNING)
+    } else if st.dof == 0 {
+        (t("sketch.fully_constrained").to_owned(), theme::palette(ui.visuals().dark_mode).constrained)
+    } else {
+        (tf("sketch.dof", &[("n", &st.dof)]), ui.visuals().text_color())
+    };
+    ui.label(RichText::new(text).color(colour));
+    ui.label(
+        RichText::new(tf(
+            "sketch.counts",
+            &[
+                ("points", &sketch.points.len()),
+                ("edges", &sketch.edges.len()),
+                ("constraints", &sketch.constraints.len()),
+                ("dimensions", &sketch.dimensions.len()),
+            ],
+        ))
+        .weak(),
+    );
+    for id in &st.conflicting {
+        ui.label(RichText::new(sk::describe(&sketch, *id)).color(theme::WARNING));
+    }
+    if !st.redundant.is_empty() {
+        ui.label(RichText::new(tf("sketch.redundant", &[("n", &st.redundant.len())])).weak());
+    }
+    ui.horizontal(|ui| {
+        let mut colours = s.ui.sketch.colours;
+        if ui.checkbox(&mut colours, t("sketch.colours")).changed() {
+            let _ = s.run("ui.sketch", json!({ "colours": colours }));
+        }
+        let mut show = s.ui.sketch.show;
+        if ui.checkbox(&mut show, t("sketch.show")).changed() {
+            let _ = s.run("ui.sketch", json!({ "show": show }));
+        }
+    });
+}
+
+fn dimension_fields(ui: &mut Ui, s: &mut Studio, src: DimSource) {
+    let doc = s.engine.doc();
+    let (value, angle, driving, name) = match src {
+        DimSource::Sketch { layer, id } => {
+            let Some(sketch) = doc.sketches.get(&layer) else { return };
+            let Some(d) = sketch.dimension(id) else {
+                s.ui.sketch.selected = None;
+                return;
+            };
+            (sketch.measure(&d.measure).unwrap_or(d.value), d.measure.is_angle(), Some(d.driving), d.name.clone())
+        }
+        DimSource::Reference(id) => {
+            let Some(d) = doc.dimensions.get(&id) else {
+                s.ui.sketch.selected = None;
+                return;
+            };
+            (d.measure(doc).map_or(0.0, |m| m.2), false, None, d.name.clone())
+        }
+    };
+    let title = if driving == Some(true) { t("sketch.driving_dimension") } else { t("sketch.reference_dimension") };
+    ui.label(RichText::new(title).strong());
+    egui::Grid::new("inspector_dimension").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+        ui.label(t("sketch.value"));
+        let shown = dims::format_value(value, angle);
+        if driving == Some(true) {
+            let id = egui::Id::new(("inspector", "dimension_value"));
+            if let Some(v) = widgets::edit_field(ui, id, &shown, 90.0, "Inspector Dimension value") {
+                let parsed = if angle { crate::tools::parse_angle(&v) } else { crate::tools::parse_length(&v) };
+                match parsed {
+                    Some(mm) => {
+                        let mut args = dim_args(src);
+                        args["value"] = json!(mm);
+                        let _ = s.run("dimension.set_value", args);
+                    }
+                    None => s.ui.error(tf("status.bad_length", &[("text", &v)])),
+                }
+            }
+        } else {
+            ui.label(shown);
+        }
+        ui.end_row();
+        if let Some(d) = driving {
+            ui.label(t("sketch.driving"));
+            let mut on = d;
+            let r = ui.checkbox(&mut on, "");
+            widgets::name(&r, egui::WidgetType::Checkbox, "Inspector Driving");
+            if r.changed() {
+                let mut args = dim_args(src);
+                args["driving"] = json!(on);
+                let _ = s.run("dimension.set_driving", args);
+            }
+            ui.end_row();
+        }
+        ui.label(t("sketch.name"));
+        let id = egui::Id::new(("inspector", "dimension_name"));
+        if let Some(v) = widgets::edit_field(ui, id, name.as_deref().unwrap_or(""), 140.0, "Inspector Dimension name") {
+            let mut args = dim_args(src);
+            args["name"] = json!(v);
+            let _ = s.run("dimension.name", args);
+        }
+        ui.end_row();
+    });
+    if widgets::button(ui, t("sketch.remove_dimension"), "Remove dimension").clicked() {
+        let mut args = dim_args(src);
+        let id = args["id"].take();
+        args["ids"] = json!([id]);
+        if s.run("dimension.remove", args).is_ok() {
+            s.ui.sketch.selected = None;
+        }
+    }
+}
+
+/// Inspector rows for walls and floors: follows the sketch (unlink) or free (adopt).
+pub fn link_row(ui: &mut Ui, s: &mut Studio, ids: &[Id]) {
+    let doc = s.engine.doc();
+    let linked: Vec<Id> =
+        ids.iter().copied().filter(|id| doc.objects.get(id).is_some_and(|o| o.sketch.is_some())).collect();
+    let free: Vec<Id> = ids.iter().copied().filter(|id| !linked.contains(id)).collect();
+    ui.label(t("sketch.geometry"));
+    ui.horizontal(|ui| {
+        if !linked.is_empty() {
+            ui.label(RichText::new(t("sketch.follows")).weak());
+            if widgets::button(ui, t("sketch.unlink"), "Unlink from sketch").clicked() {
+                let _ = s.run("sketch.unlink", json!({ "ids": linked }));
+            }
+        }
+        if !free.is_empty() {
+            if linked.is_empty() {
+                ui.label(RichText::new(t("sketch.free")).weak());
+            }
+            if widgets::button(ui, t("sketch.adopt"), "Adopt into sketch").clicked() {
+                let _ = s.run("sketch.adopt", json!({ "ids": free }));
+            }
+        }
+    });
+    ui.end_row();
+}
+
+/// The dimension tool's preview: from the picks so far to the pointer.
+pub fn tool_preview(p: &egui::Painter, cam: &Camera, pal: &Palette, picks: &[Pick], cursor: P2) {
+    match picks {
+        [a] => {
+            p.line_segment([cam.to_screen(a.at()), cam.to_screen(cursor)], Stroke::new(1.0, pal.preview));
+        }
+        [a, b] => {
+            let axis = dims::auto_axis(a.at(), b.at(), cursor);
+            let st = DimStyle::for_scale(cam.scale, 5.0);
+            if let Some(d) = dims::preview(a.at(), b.at(), axis, cursor, &st) {
+                draw_dim(p, cam, pal, &d, pal.preview, false);
+            }
+        }
+        _ => {}
+    }
+    for pk in picks {
+        p.circle_stroke(cam.to_screen(pk.at()), 4.0, Stroke::new(1.5, pal.preview));
+    }
+}
+
+/// What a click with the dimension tool picks at `raw` (snapped to `snapped`).
+pub fn pick(s: &Studio, raw: P2, snapped: &stagecraft_geom::snap::Snapped, tol: f64) -> Pick {
+    let doc = s.engine.doc();
+    if let Some((layer, point, at)) = point_at(doc, raw, tol) {
+        return Pick::Sketch { layer, point, at };
+    }
+    use stagecraft_geom::snap::SnapKind;
+    if matches!(snapped.kind, SnapKind::Endpoint | SnapKind::Midpoint | SnapKind::Truss)
+        && let Some(id) = snapped.source.filter(|id| doc.objects.contains_key(id))
+        && let Some(w) = stagecraft_core::geom::world(doc, id)
+    {
+        let p = snapped.point;
+        let local = w.inverse().transform_point3(glam::DVec3::new(p[0], p[1], w.translation.z));
+        return Pick::Object { id, local: local.to_array(), at: p };
+    }
+    let z = s.ui.active_layer.and_then(|l| doc.layers.get(&l)).map_or(0.0, |l| l.elevation);
+    Pick::Free { at: snapped.point, z }
+}
+
+/// Creates the dimension the tool's picks and the label position describe. Between
+/// two points of one sketch it is a sketch dimension (driving unless that
+/// over-constrains, then the value editor opens); otherwise a reference dimension.
+pub fn commit(s: &mut Studio, a: Pick, b: Pick, label: P2) {
+    let axis = dims::auto_axis(a.at(), b.at(), label);
+    let mid = [(a.at()[0] + b.at()[0]) / 2.0, (a.at()[1] + b.at()[1]) / 2.0];
+    let offset = [label[0] - mid[0], label[1] - mid[1]];
+    if let (Pick::Sketch { layer: la, point: pa, .. }, Pick::Sketch { layer: lb, point: pb, .. }) = (a, b)
+        && la == lb
+    {
+        let ty = match axis {
+            sk::DimAxis::Aligned => "distance",
+            sk::DimAxis::Horizontal => "horizontal_distance",
+            sk::DimAxis::Vertical => "vertical_distance",
+        };
+        let args = json!({ "layer": la, "measure": { "type": ty, "a": pa, "b": pb }, "label_offset": offset });
+        if let Ok(v) = s.run("dimension.add", args) {
+            let id = sk::ConstraintId(v["id"].as_u64().unwrap_or_default() as u32);
+            let src = DimSource::Sketch { layer: la, id };
+            s.ui.sketch.selected = Some(src);
+            if v["driving"] == json!(true) {
+                open_editor(s, src);
+            } else {
+                s.ui.info(t("sketch.became_reference"));
+            }
+        }
+        return;
+    }
+    let args = json!({ "from": a.anchor(), "to": b.anchor(), "axis": axis, "label_offset": offset,
+                       "layer": s.active_layer_arg() });
+    if let Ok(v) = s.run("dimension.add_reference", args)
+        && let Some(id) = v["id"].as_str().and_then(|x| x.parse().ok())
+    {
+        s.ui.sketch.selected = Some(DimSource::Reference(id));
+    }
+}
+
+/// Constraint state of a sketch dimension, for tests and tools.
+pub fn dimension_state(sui: &mut SketchUi, doc: &Document, src: DimSource) -> Option<ConstraintState> {
+    let DimSource::Sketch { layer, id } = src else { return None };
+    let s = doc.sketches.get(&layer)?;
+    sui.status(layer, s, false).map(|st| st.constraint_state(id))
+}

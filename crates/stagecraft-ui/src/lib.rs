@@ -20,6 +20,7 @@ pub mod palette;
 pub mod panels;
 pub mod schema_form;
 pub mod sheets;
+pub mod sketch_ui;
 pub mod state;
 pub mod table;
 pub mod theme;

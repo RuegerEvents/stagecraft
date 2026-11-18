@@ -58,7 +58,11 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let doc = s.engine.doc().clone();
     let objs: Vec<&Object> = sel.iter().filter_map(|id| doc.objects.get(id)).collect();
     if objs.is_empty() {
-        ui.label(RichText::new(t("inspector.nothing")).weak());
+        if s.ui.sketch.selected.is_none() {
+            ui.label(RichText::new(t("inspector.nothing")).weak());
+            ui.add_space(8.0);
+        }
+        crate::sketch_ui::inspector(ui, s);
         ui.add_space(8.0);
         document_fields(ui, s);
         return;
@@ -186,6 +190,7 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             {
                 batch(s, each("floor.update", &|id| json!({ "id": id, "thickness": mm })));
             }
+            crate::sketch_ui::link_row(ui, s, sel);
         }
         "wall" => {
             let get = |f: fn(&ObjectKind) -> f64| common(objs.iter().map(|o| fmt_mm(f(&o.kind))));
@@ -201,6 +206,7 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             {
                 batch(s, each("wall.update", &|id| json!({ "id": id, "thickness": mm })));
             }
+            crate::sketch_ui::link_row(ui, s, sel);
         }
         "truss" => {
             let profile = common(objs.iter().map(|o| match &o.kind {

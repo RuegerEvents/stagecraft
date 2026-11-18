@@ -39,6 +39,7 @@ impl Studio {
             None => self.engine.execute(name, args),
         };
         match &out {
+            Err(e) if e.code == "conflict" => self.ui.error(tf("status.rejected", &[("message", &e.message)])),
             Err(e) => self.ui.error(e.message.clone()),
             Ok(_) => self.after(name),
         }
@@ -224,6 +225,13 @@ fn shortcuts(ui: &mut Ui, s: &mut Studio) {
         if del && !s.engine.selection().is_empty() {
             let ids = s.engine.selection().to_vec();
             let _ = s.run("object.delete", json!({ "ids": ids }));
+        } else if del && let Some(src) = s.ui.sketch.selected {
+            let mut args = crate::sketch_ui::dim_args(src);
+            let id = args["id"].take();
+            args["ids"] = json!([id]);
+            if s.run("dimension.remove", args).is_ok() {
+                s.ui.sketch.selected = None;
+            }
         }
     }
 }

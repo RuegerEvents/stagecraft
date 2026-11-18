@@ -31,6 +31,16 @@ pub struct Palette {
     pub snap: Color32,
     pub box_window: Color32,
     pub box_crossing: Color32,
+    /// Sketch lines and points that can still move.
+    pub sketch: Color32,
+    /// Fully constrained sketch geometry (FreeCAD green).
+    pub constrained: Color32,
+    /// Conflicting constraints (red).
+    pub conflict: Color32,
+    /// Driving dimensions.
+    pub dim: Color32,
+    /// Reference dimensions.
+    pub dim_reference: Color32,
 }
 
 pub fn palette(dark: bool) -> Palette {
@@ -53,6 +63,11 @@ pub fn palette(dark: bool) -> Palette {
             snap: Color32::from_rgb(0x3d, 0xd6, 0x8c),
             box_window: Color32::from_rgba_unmultiplied(0x4d, 0x97, 0xff, 40),
             box_crossing: Color32::from_rgba_unmultiplied(0x3d, 0xd6, 0x8c, 40),
+            sketch: Color32::from_rgb(0xc8, 0xd2, 0xe2),
+            constrained: Color32::from_rgb(0x4c, 0xd0, 0x7d),
+            conflict: Color32::from_rgb(0xff, 0x5a, 0x4a),
+            dim: Color32::from_rgb(0x8a, 0xb6, 0xff),
+            dim_reference: Color32::from_rgb(0x9a, 0x9e, 0xa8),
         }
     } else {
         Palette {
@@ -73,6 +88,11 @@ pub fn palette(dark: bool) -> Palette {
             snap: Color32::from_rgb(0x12, 0xa1, 0x5c),
             box_window: Color32::from_rgba_unmultiplied(0x2f, 0x7c, 0xf6, 30),
             box_crossing: Color32::from_rgba_unmultiplied(0x12, 0xa1, 0x5c, 30),
+            sketch: Color32::from_rgb(0x3a, 0x48, 0x60),
+            constrained: Color32::from_rgb(0x12, 0x9a, 0x4a),
+            conflict: Color32::from_rgb(0xd9, 0x2d, 0x20),
+            dim: Color32::from_rgb(0x1f, 0x5f, 0xc8),
+            dim_reference: Color32::from_rgb(0x6e, 0x73, 0x7d),
         }
     }
 }

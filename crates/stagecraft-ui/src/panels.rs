@@ -254,7 +254,7 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
         Tool::Ceiling => mm_option(ui, s, "option.height", "ceiling_height", o.ceiling_height),
         _ => {}
     }
-    if !matches!(s.ui.tool, Tool::Select | Tool::Move | Tool::Rotate | Tool::Floor | Tool::Fixture) {
+    if !matches!(s.ui.tool, Tool::Select | Tool::Move | Tool::Rotate | Tool::Floor | Tool::Fixture | Tool::Dimension) {
         ui.separator();
     }
     ui.label(RichText::new(t(hint_key(s.ui.tool))).weak());
@@ -278,6 +278,7 @@ fn hint_key(tool: Tool) -> &'static str {
         Tool::Rotate => "hint.rotate",
         Tool::Floor => "hint.floor",
         Tool::Wall => "hint.wall",
+        Tool::Dimension => "hint.dimension",
         Tool::Truss => "hint.truss",
         Tool::Fixture => "hint.fixture",
         Tool::Run => "hint.run",
