@@ -313,14 +313,21 @@ pub struct PendingShot {
     pub reply: Option<stagecraft_control::Call>,
 }
 
-/// Options of the drawing tools.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+/// Options of the drawing tools. Heights are above the active layer (its elevation is the
+/// datum), as everywhere in the UI. Saved per user (`dock::Prefs`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ToolOptions {
     pub truss_profile: String,
     /// Height of new truss above the layer, mm.
     pub truss_height: f64,
     pub wall_height: f64,
     pub wall_thickness: f64,
+    /// Bottom of new walls above the layer, mm.
+    pub wall_base: f64,
+    /// Top surface of new floors above the layer, mm.
+    pub floor_z: f64,
+    pub floor_thickness: f64,
     /// Trim height of new battens, mm.
     pub batten_trim: f64,
     pub batten_length: f64,
@@ -360,6 +367,9 @@ impl Default for ToolOptions {
             truss_height: 6000.0,
             wall_height: 3000.0,
             wall_thickness: 150.0,
+            wall_base: 0.0,
+            floor_z: 0.0,
+            floor_thickness: 20.0,
             batten_trim: 8000.0,
             batten_length: 14000.0,
             curtain_trim: 8000.0,

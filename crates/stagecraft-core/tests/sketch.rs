@@ -162,6 +162,23 @@ fn moving_a_linked_wall_drags_its_points() {
 }
 
 #[test]
+fn moving_a_linked_floor_up_changes_its_height_only() {
+    let mut e = Engine::new();
+    let pts = json!([[0, 0], [4000, 0], [4000, 3000], [0, 3000]]);
+    let floor = id(&run(&mut e, "sketch.draw", json!({ "points": pts, "make": "floor", "thickness": 200 })));
+    let before = kind(&e, floor);
+    // What the inspector's height fields send: a vertical move.
+    run(&mut e, "object.move", json!({ "ids": [floor], "delta": [0, 0, 1000] }));
+    assert_eq!(e.doc().objects[&floor].placement.position, [0.0, 0.0, 1000.0]);
+    assert_eq!(kind(&e, floor), before, "the outline stays");
+    // A diagonal move does both: points dragged, height raised.
+    run(&mut e, "object.move", json!({ "ids": [floor], "delta": [500, 0, -200] }));
+    assert_eq!(e.doc().objects[&floor].placement.position[2], 800.0);
+    let ObjectKind::Floor { outline, .. } = kind(&e, floor) else { panic!() };
+    assert!((xs(&outline).0 - 500.0).abs() < 1e-6, "{outline:?}");
+}
+
+#[test]
 fn free_walls_and_floors_can_be_adopted() {
     let mut e = Engine::new();
     let w = id(&run(&mut e, "wall.create", json!({ "path": [[0, 0], [5000, 0], [5000, 3000]] })));

@@ -69,6 +69,11 @@ pub struct View3d {
     pub grid: bool,
     /// Fit the model on the next frame (after the view knows its size).
     pub fit_pending: bool,
+    /// Refit whenever the model's bounds change, until the user moves the camera: a
+    /// camera fitted to an empty document would otherwise miss what is drawn next.
+    pub follow: bool,
+    /// The bounds the last fit framed.
+    pub fitted: Option<(DVec3, DVec3)>,
     pub scene: Scene,
 }
 
@@ -80,6 +85,8 @@ impl Default for View3d {
             hatch: true,
             grid: true,
             fit_pending: true,
+            follow: true,
+            fitted: None,
             scene: Scene::default(),
         }
     }
@@ -89,6 +96,7 @@ impl View3d {
     /// Fit everything drawn, or `ids` when given (ignored if none of them is drawn).
     pub fn fit(&mut self, ids: Option<&[stagecraft_core::Id]>) {
         let b = ids.and_then(|ids| self.scene.bounds_of(ids)).or_else(|| self.scene.bounds());
+        self.fitted = self.scene.bounds();
         match b {
             Some((lo, hi)) => self.camera.fit(lo, hi),
             None => self.camera.fit(DVec3::ONE, DVec3::ZERO),
@@ -243,11 +251,15 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let selection = s.engine.selection().to_vec();
     let v = &mut s.ui.view3d;
     v.scene.sync(s.engine.doc(), &ids, &selection, &v.camera);
-    if v.fit_pending {
+    if v.fit_pending || (v.follow && bounds_changed(v.fitted, v.scene.bounds())) {
         v.fit(None);
         v.scene.sync(s.engine.doc(), &ids, &selection, &v.camera);
     }
+    let before = v.camera;
     navigate(ui, &resp, &mut v.camera);
+    if v.camera != before {
+        v.follow = false;
+    }
     // Detail levels follow the camera.
     v.scene.sync(s.engine.doc(), &ids, &selection, &v.camera);
     let planes = v.section.planes();
@@ -280,6 +292,19 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     painter.rect_filled(rect, 0.0, pal.background);
     painter.add(egui_wgpu::Callback::new_paint_callback(rect, frame));
     overlay(ui, s, rect);
+}
+
+/// Whether the model's box moved by more than a few percent of its size (detail levels
+/// change bounds a little; that must not refit).
+fn bounds_changed(old: Option<(DVec3, DVec3)>, new: Option<(DVec3, DVec3)>) -> bool {
+    match (old, new) {
+        (None, None) => false,
+        (Some((a0, a1)), Some((b0, b1))) => {
+            let tol = ((b1 - b0).length() * 0.02).max(50.0);
+            (a0 - b0).abs().max_element() > tol || (a1 - b1).abs().max_element() > tol
+        }
+        _ => true,
+    }
 }
 
 /// Bring the mesh cache up to date outside a frame (commands that fit or pick).
@@ -368,6 +393,7 @@ fn overlay(ui: &mut Ui, s: &mut Studio, rect: egui::Rect) {
     widgets::name(&r, Role::Button, t("menu.zoom_fit"));
     if r.clicked() {
         s.ui.view3d.fit(None);
+        s.ui.view3d.follow = true;
     }
     child.separator();
     section_controls(&mut child, s);

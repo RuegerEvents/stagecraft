@@ -524,13 +524,14 @@ fn finish(s: &mut Studio) {
                 pts.pop();
             }
             let args = json!({ "points": pts, "segments": segs, "closed": closed, "make": "wall",
-                               "height": o.wall_height, "thickness": o.wall_thickness, "layer": layer,
+                               "height": o.wall_height, "thickness": o.wall_thickness, "z": o.wall_base, "layer": layer,
                                "snap_radius": tol });
             created(s, "sketch.draw", args, "tool.wall");
         }
         Tool::Floor if pts.len() >= 3 => {
+            let o = &s.ui.options;
             let args = json!({ "points": pts, "segments": segs, "closed": true, "make": "floor", "layer": layer,
-                               "snap_radius": tol });
+                               "z": o.floor_z, "thickness": o.floor_thickness, "snap_radius": tol });
             created(s, "sketch.draw", args, "tool.floor");
         }
         Tool::Ceiling if pts.len() >= 3 => {
@@ -561,7 +562,18 @@ fn created(s: &mut Studio, cmd: &str, args: Value, what: &str) {
         if let Some(id) = v.get("id") {
             let _ = s.run("selection.set", json!({ "ids": [id] }));
         }
-        s.ui.info(tf("status.created", &[("what", &t(what))]));
+        s.ui.info(created_message(what));
+    }
+}
+
+/// "Floor created — …": what to do next with the new object, if there is a hint for it.
+pub fn created_message(what: &str) -> String {
+    let name = t(what);
+    let next = format!("next.{}", what.trim_start_matches("tool."));
+    if crate::i18n::has(&next) {
+        tf("status.created_next", &[("what", &name), ("next", &t(&next))])
+    } else {
+        tf("status.created", &[("what", &name)])
     }
 }
 
@@ -996,6 +1008,16 @@ pub fn draw_overlay(ui: &Ui, p: &egui::Painter, s: &Studio, pal: &Palette, style
         _ => {}
     }
 
+    // Where a click closes the outline: a ring on the first corner, filled when the
+    // pointer is on it.
+    if matches!(s.ui.tool, Tool::Wall | Tool::Floor | Tool::Ceiling | Tool::Run) && pts.len() >= 3 {
+        let at = cam.to_screen(pts[0]);
+        let on = g.cursor.is_some_and(|c| math::dist(c.point, pts[0]) <= tolerance(cam));
+        if on {
+            p.circle_filled(at, 7.0, crate::theme::ACCENT.gamma_multiply(0.35));
+        }
+        p.circle_stroke(at, 7.0, Stroke::new(1.5, crate::theme::ACCENT));
+    }
     if let Some(c) = g.cursor
         && s.ui.tool != Tool::Select
     {

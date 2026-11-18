@@ -227,6 +227,11 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
         Tool::Wall => {
             mm_option(ui, s, "option.height", "wall_height", o.wall_height);
             mm_option(ui, s, "option.thickness", "wall_thickness", o.wall_thickness);
+            mm_option(ui, s, "option.base", "wall_base", o.wall_base);
+        }
+        Tool::Floor => {
+            mm_option(ui, s, "option.top_height", "floor_z", o.floor_z);
+            mm_option(ui, s, "option.thickness", "floor_thickness", o.floor_thickness);
         }
         Tool::Batten => {
             mm_option(ui, s, "option.trim", "batten_trim", o.batten_trim);
@@ -291,22 +296,40 @@ fn tool_options(ui: &mut Ui, s: &mut Studio) {
             widgets::name(&r.response, egui::Role::ComboBox, format!("Option {}", t("option.preset")));
         }
         Tool::Hoist => mm_option(ui, s, "option.height", "hoist_height", o.hoist_height),
-        Tool::Ceiling => mm_option(ui, s, "option.height", "ceiling_height", o.ceiling_height),
+        Tool::Ceiling => mm_option(ui, s, "option.underside", "ceiling_height", o.ceiling_height),
         _ => {}
     }
     if !matches!(
         s.ui.tool,
-        Tool::Select | Tool::Move | Tool::Rotate | Tool::Floor | Tool::Fixture | Tool::Dimension | Tool::Calibrate
+        Tool::Select | Tool::Move | Tool::Rotate | Tool::Fixture | Tool::Dimension | Tool::Calibrate
     ) {
         ui.separator();
     }
-    ui.label(RichText::new(t(hint_key(s.ui.tool))).color(crate::theme::chrome(ui.visuals().dark_mode).text2));
+    ui.label(RichText::new(hint(s)).color(crate::theme::chrome(ui.visuals().dark_mode).text2));
+}
+
+/// What the tool expects next. Outline tools say how to close once they can.
+pub fn hint(s: &Studio) -> String {
+    let n = s.ui.gesture.points.len();
+    let key = match (s.ui.tool, n) {
+        (Tool::Floor | Tool::Ceiling, 0) => "hint.outline.start",
+        (Tool::Floor | Tool::Ceiling, 1 | 2) => "hint.outline.next",
+        (Tool::Floor, _) => "hint.floor.close",
+        (Tool::Ceiling, _) => "hint.ceiling.close",
+        (Tool::Wall, 1 | 2) => "hint.wall.next",
+        (Tool::Wall, n) if n >= 3 => "hint.wall.close",
+        (tool, _) => hint_key(tool),
+    };
+    t(key).to_owned()
 }
 
 fn mm_option(ui: &mut Ui, s: &mut Studio, label: &str, field: &str, value: f64) {
-    ui.label(t(label));
+    let r = ui.label(t(label));
+    if field.ends_with("_z") || field.ends_with("_base") || field.ends_with("height") || field.ends_with("trim") {
+        r.on_hover_text(t("option.above_layer"));
+    }
     let id = egui::Id::unique(("tool_option", field));
-    if let Some(v) = edit_field(ui, id, &fmt_mm(value), 56.0, t(label))
+    if let Some(v) = edit_field(ui, id, &fmt_mm(value), 56.0, &format!("Option {}", t(label)))
         && let Some(mm) = parse_mm(&v)
     {
         let _ = s.run("ui.set_tool_options", json!({ field: mm }));

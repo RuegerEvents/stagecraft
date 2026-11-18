@@ -23,7 +23,7 @@ pub struct Studio {
     pub offscreen: Option<view3d::offscreen::Offscreen>,
     /// File and message dialogs: queued during the frame, answered on a later one.
     pub dialogs: craft_dialogs::Dialogs<crate::dialogs::Then>,
-    /// Per-user settings: panel layout and theme. In memory unless [`Studio::with_prefs`]
+    /// Per-user settings: panel layout, theme and tool options. In memory unless [`Studio::with_prefs`]
     /// got a store on disk.
     pub prefs: craft_settings::SettingsStore<crate::dock::Prefs>,
 }
@@ -39,6 +39,7 @@ impl Studio {
         let ui = UiState {
             layout: crate::dock::load(prefs.get().layout.workspace.clone()),
             theme: prefs.get().appearance.theme,
+            options: prefs.get().tools.clone(),
             ..Default::default()
         };
         Self { engine, ui, offscreen: None, dialogs: crate::dialogs::queue(), prefs }
@@ -78,6 +79,7 @@ impl Studio {
         if matches!(name, "doc.open" | "doc.new") {
             self.ui.fit_pending = true;
             self.ui.view3d.fit_pending = true;
+            self.ui.view3d.follow = true;
             self.ui.hidden_tags.clear();
             self.ui.active_layer = None;
             self.ui.gesture = Default::default();
@@ -140,15 +142,21 @@ impl Studio {
         self.keep_prefs(ui.ctx());
     }
 
-    /// Hand layout and theme changes to the settings store, which saves them shortly after.
+    /// Hand layout, theme and tool option changes to the settings store, which saves them shortly after.
     fn keep_prefs(&mut self, ctx: &egui::Context) {
         let (layout, theme) = (&self.ui.layout, self.ui.theme);
+        let tools = crate::state::ToolOptions {
+            fixture_type: String::new(),
+            fixture_mode: String::new(),
+            ..self.ui.options.clone()
+        };
         let p = self.prefs.get();
-        if p.layout.workspace.as_ref() != Some(layout) || p.appearance.theme != theme {
+        if p.layout.workspace.as_ref() != Some(layout) || p.appearance.theme != theme || p.tools != tools {
             let layout = layout.clone();
             self.prefs.update(|p| {
                 p.layout.workspace = Some(layout);
                 p.appearance.theme = theme;
+                p.tools = tools;
             });
         }
         let tick = self.prefs.tick(std::time::Instant::now());

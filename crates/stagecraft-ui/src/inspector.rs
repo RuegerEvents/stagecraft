@@ -101,8 +101,17 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
         widgets::name(&r.response, egui::Role::ComboBox, format!("Inspector {}", t("inspector.layer")));
         ui.end_row();
 
+        // Floors, walls and ceilings name their height themselves ("Top height" …) below.
+        let own_height = ty.is_some_and(|t| matches!(t, "floor" | "wall" | "ceiling"));
         for (axis, key) in [(0usize, "inspector.x"), (1, "inspector.y"), (2, "inspector.z")] {
-            let cur = common(worlds.iter().map(|(_, w)| fmt_mm(w.position[axis])));
+            if axis == 2 && own_height {
+                continue;
+            }
+            // Heights are above the object's layer, as in the tool options.
+            let shown = |id: &Id, w: &stagecraft_core::Placement| {
+                if axis == 2 { w.position[2] - layer_elevation(&doc, *id) } else { w.position[axis] }
+            };
+            let cur = common(worlds.iter().map(|(id, w)| fmt_mm(shown(id, w))));
             let cur = cur.or_else(|| (worlds.is_empty()).then(String::new));
             if let Some(v) = field(ui, key, key, cur) {
                 let Some(mm) = parse_mm(&v) else {
@@ -113,7 +122,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
                     .iter()
                     .filter_map(|(id, w)| {
                         let mut d = [0.0; 3];
-                        d[axis] = mm - w.position[axis];
+                        d[axis] = mm - shown(id, w);
                         (d[axis].abs() > 1e-9).then(|| step("object.move", json!({ "ids": [id], "delta": d })))
                     })
                     .collect();
@@ -176,10 +185,52 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     }
 }
 
+/// Elevation of the object's layer: the datum its heights are measured from.
+fn layer_elevation(doc: &stagecraft_core::Document, id: Id) -> f64 {
+    doc.objects.get(&id).and_then(|o| doc.layers.get(&o.layer)).map_or(0.0, |l| l.elevation)
+}
+
+/// A height above the layer (world z minus the layer's elevation) of the selected
+/// objects, edited as a vertical move: a floor's top, a wall's base.
+fn height_row(ui: &mut Ui, s: &mut Studio, sel: &[Id], key: &str, salt: &str) {
+    let doc = s.engine.doc();
+    let above =
+        |id: &Id| stagecraft_core::geom::world_placement(doc, *id).map(|w| w.position[2] - layer_elevation(doc, *id));
+    let heights: Vec<(Id, f64)> = sel.iter().filter_map(|id| above(id).map(|z| (*id, z))).collect();
+    let cur = common(heights.iter().map(|(_, z)| fmt_mm(*z)));
+    if let Some(v) = field(ui, key, salt, cur)
+        && let Some(mm) = mm_or_error(s, &v)
+    {
+        let steps = heights
+            .iter()
+            .filter(|(_, z)| (mm - z).abs() > 1e-9)
+            .map(|(id, z)| step("object.move", json!({ "ids": [id], "delta": [0.0, 0.0, mm - z] })))
+            .collect();
+        batch(s, steps);
+    }
+}
+
+/// Under a height row: where that is in the world when the layer is raised or lowered.
+fn world_note(ui: &mut Ui, s: &Studio, objs: &[&Object]) {
+    let doc = s.engine.doc();
+    let Some(layer) = common(objs.iter().map(|o| o.layer)).and_then(|l| doc.layers.get(&l)) else { return };
+    if layer.elevation == 0.0 {
+        return;
+    }
+    let world = |o: &&Object| stagecraft_core::geom::world_placement(doc, o.id).map_or(0.0, |w| w.position[2]);
+    let Some(z) = common(objs.iter().map(|o| fmt_mm(world(o)))) else { return };
+    ui.label("");
+    let note = tf("inspector.world_height", &[("z", &z), ("layer", &layer.name), ("e", &fmt_mm(layer.elevation))]);
+    ui.label(RichText::new(note).weak().small());
+    ui.end_row();
+}
+
 fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[Id]) {
     let each = |cmd: &str, f: &dyn Fn(Id) -> Value| sel.iter().map(|id| step(cmd, f(*id))).collect::<Vec<_>>();
     match ty {
         "floor" => {
+            height_row(ui, s, sel, "inspector.top_height", "floor_top");
+            world_note(ui, s, objs);
             let th = common(objs.iter().map(|o| match &o.kind {
                 ObjectKind::Floor { thickness, .. } => fmt_mm(*thickness),
                 _ => String::new(),
@@ -195,6 +246,8 @@ fn kind_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Object], sel: &[I
             let get = |f: fn(&ObjectKind) -> f64| common(objs.iter().map(|o| fmt_mm(f(&o.kind))));
             let h = get(|k| if let ObjectKind::Wall { height, .. } = k { *height } else { 0.0 });
             let th = get(|k| if let ObjectKind::Wall { thickness, .. } = k { *thickness } else { 0.0 });
+            height_row(ui, s, sel, "inspector.base_height", "wall_base");
+            world_note(ui, s, objs);
             if let Some(v) = field(ui, "inspector.height", "wall_height", h)
                 && let Some(mm) = mm_or_error(s, &v)
             {
@@ -756,7 +809,7 @@ pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Objec
                 s,
                 objs,
                 sel,
-                "inspector.height",
+                "inspector.underside",
                 "ce_h",
                 |o| matches!(o.kind, ObjectKind::Ceiling { .. }).then_some(o.placement.position[2]),
                 c,

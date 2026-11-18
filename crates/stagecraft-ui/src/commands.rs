@@ -144,7 +144,7 @@ fn register(r: &mut UiRegistry) {
     r.add("ui.set_snap", "Turn snaps on or off and set the grid", set_snap);
     r.add(
         "ui.set_tool_options",
-        "Options for new objects: fixture type, truss, wall, batten, curtain, proscenium, wings, platform, support, hoist, ceiling",
+        "Options for new objects: fixture type, truss, wall, floor, batten, curtain, proscenium, wings, platform, support, hoist, ceiling",
         set_options,
     );
     r.add(
@@ -599,6 +599,12 @@ fn camera(c: &mut UiCtx, a: CameraArgs) -> CmdResult {
         cam.zoom_at(at, z);
     }
     let fit = a.fit.unwrap_or(a.view.is_some() && !placed);
+    // A camera placed by hand stays; a standard view keeps following the model.
+    if placed || a.orbit.is_some() || a.zoom.is_some() {
+        c.ui.view3d.follow = false;
+    } else if a.view.is_some() {
+        c.ui.view3d.follow = true;
+    }
     if fit {
         view3d::sync_scene(c.engine, c.ui);
         c.ui.view3d.fit(None);
@@ -908,6 +914,12 @@ struct OptionsArgs {
     wall_height: Option<f64>,
     /// mm.
     wall_thickness: Option<f64>,
+    /// Bottom of new walls above the layer, mm (default 0).
+    wall_base: Option<f64>,
+    /// Top surface of new floors above the layer, mm (default 0; 1000 = a 1 m stage).
+    floor_z: Option<f64>,
+    /// Thickness of new floors, mm (default 20), down from the top.
+    floor_thickness: Option<f64>,
     /// Trim height of new battens, mm.
     batten_trim: Option<f64>,
     /// mm.
@@ -967,6 +979,7 @@ fn set_options(c: &mut UiCtx, a: OptionsArgs) -> CmdResult {
     for (slot, v) in [
         (&mut o.wall_height, a.wall_height),
         (&mut o.wall_thickness, a.wall_thickness),
+        (&mut o.floor_thickness, a.floor_thickness),
         (&mut o.batten_length, a.batten_length),
         (&mut o.curtain_height, a.curtain_height),
         (&mut o.proscenium_width, a.proscenium_width),
@@ -984,11 +997,16 @@ fn set_options(c: &mut UiCtx, a: OptionsArgs) -> CmdResult {
     }
     for (slot, v) in [
         (&mut o.batten_trim, a.batten_trim),
+        (&mut o.wall_base, a.wall_base),
+        (&mut o.floor_z, a.floor_z),
         (&mut o.curtain_trim, a.curtain_trim),
         (&mut o.hoist_height, a.hoist_height),
         (&mut o.ceiling_height, a.ceiling_height),
     ] {
         if let Some(v) = v {
+            if !v.is_finite() {
+                return Err(CmdError::invalid_args("heights must be finite mm"));
+            }
             *slot = v;
         }
     }

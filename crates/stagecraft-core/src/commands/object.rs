@@ -158,10 +158,26 @@ fn transform_world(doc: &mut Document, ids: &[Id], f: impl Fn(DAffine3) -> DAffi
     let (linked, free): (Vec<Id>, Vec<Id>) =
         top_level(doc, ids).into_iter().partition(|id| doc.objects[id].sketch.is_some());
     if !linked.is_empty() {
-        crate::sketch::transform_linked(doc, &linked, |p| {
+        let plan = |p: [f64; 2]| {
             let q = f(DAffine3::from_translation(DVec3::new(p[0], p[1], 0.0))).translation;
             [q.x, q.y]
-        })?;
+        };
+        // A pure height change leaves the sketch alone.
+        let moves_plan = [[0.0, 0.0], [1000.0, 0.0], [0.0, 1000.0]].into_iter().any(|p| {
+            let q = plan(p);
+            (q[0] - p[0]).abs() > 1e-9 || (q[1] - p[1]).abs() > 1e-9
+        });
+        if moves_plan {
+            crate::sketch::transform_linked(doc, &linked, plan)?;
+        }
+        // Their placement z (base or top height) is their own: it takes the vertical part.
+        for id in &linked {
+            let z = world(doc, *id).expect("exists").translation;
+            let dz = f(DAffine3::from_translation(z)).translation.z - z.z;
+            if dz.abs() > 1e-9 {
+                doc.objects.get_mut(id).expect("exists").placement.position[2] += dz;
+            }
+        }
     }
     for id in free {
         let w = world(doc, id).expect("exists");

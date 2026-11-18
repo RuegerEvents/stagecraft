@@ -292,6 +292,9 @@ fn canvas(ui: &mut Ui, s: &mut Studio) {
 pub struct Prefs {
     pub appearance: Appearance,
     pub layout: SavedLayout,
+    /// The drawing tools' options (heights, sizes, profiles), without the fixture type,
+    /// which belongs to a document's library.
+    pub tools: crate::state::ToolOptions,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -343,8 +346,12 @@ mod tests {
             }],
         )
         .unwrap();
-        let prefs =
-            Prefs { appearance: Appearance { theme: ThemePref::Dark }, layout: SavedLayout { workspace: Some(ws) } };
+        let tools = crate::state::ToolOptions { floor_z: 1000.0, floor_thickness: 200.0, ..Default::default() };
+        let prefs = Prefs {
+            appearance: Appearance { theme: ThemePref::Dark },
+            layout: SavedLayout { workspace: Some(ws) },
+            tools,
+        };
         let dir = tempfile::tempdir().unwrap();
         {
             let (mut store, _) = craft_settings::SettingsStore::<Prefs>::open_at(dir.path());
