@@ -177,6 +177,10 @@ pub struct ViewportHit {
     pub id: Id,
     pub min: P2,
     pub max: P2,
+    /// The viewport's primitives in [`Page::prims`], `start..end`: its clipped view first
+    /// (one [`Prim::Clip`] spanning `min`–`max`, except for fixture lists), then its title.
+    /// The GUI redraws them moved or re-clipped while a viewport is dragged.
+    pub prims: [usize; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

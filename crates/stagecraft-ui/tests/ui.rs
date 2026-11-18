@@ -1005,3 +1005,117 @@ fn the_status_bar_shows_the_tool_prompt_and_there_is_no_command_line() {
     assert!(h.query_by_label("Placed it").is_some());
     assert!(h.query_by_label(&prompt).is_some());
 }
+
+fn frame_size(h: &Harness<'static, Studio>, sheet: Id, vp: Id) -> [f64; 2] {
+    let page = stagecraft_sheet::pages(h.state().engine.doc(), &[sheet]).remove(0);
+    let hit = page.viewports.iter().find(|v| v.id == vp).unwrap();
+    [hit.max[0] - hit.min[0], hit.max[1] - hit.min[1]]
+}
+
+/// Picking another scale in the Inspector keeps the frame on the paper and zooms the
+/// view around its centre, for a cropped and for a fitted viewport.
+#[test]
+fn a_new_scale_keeps_the_viewport_frame() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    let doc = h.state().engine.doc().clone();
+    let l102 = doc.sheets.values().find(|s| s.number == "L-102").unwrap().clone();
+    let front = l102.viewports[0].clone();
+    let section = l102.viewports[1].clone();
+    assert!(front.crop.is_some() && section.crop.is_none());
+    for vp in [&front, &section] {
+        run(&mut h, "ui.sheet", json!({ "sheet": "L-102", "viewport": vp.id }));
+        let before = frame_size(&h, l102.id, vp.id);
+        h.get_by_label("Viewport scale").click();
+        h.run();
+        let want = if vp.scale == 100.0 { "1:50" } else { "1:75" };
+        h.get_by_label(want).click();
+        h.run();
+        let now = h.state().engine.doc().sheets[&l102.id].viewport(vp.id).unwrap().clone();
+        assert_eq!(format!("1:{}", now.scale), want);
+        let after = frame_size(&h, l102.id, vp.id);
+        assert!((after[0] - before[0]).abs() < 1e-6 && (after[1] - before[1]).abs() < 1e-6, "{before:?} → {after:?}");
+        assert!(now.crop.is_some(), "a fitted viewport keeps its frame through a crop");
+    }
+}
+
+/// Dragging a viewport shows it where it goes (moved or re-cropped from the composed
+/// page) before the drop, and keeps it there until the recomposed page arrives.
+#[test]
+fn a_dragged_viewport_shows_live_and_stays_after_the_drop() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    run(&mut h, "ui.sheet", json!({ "sheet": "L-102" }));
+    let doc = h.state().engine.doc().clone();
+    let l102 = doc.sheets.values().find(|s| s.number == "L-102").unwrap().id;
+    let vp = doc.sheets[&l102].viewports[0].clone();
+    let page = stagecraft_sheet::pages(&doc, &[l102]).remove(0);
+    let hit = page.viewports.iter().find(|v| v.id == vp.id).unwrap().clone();
+    assert!(matches!(page.prims[hit.prims[0]], stagecraft_sheet::prim::Prim::Clip { .. }));
+    let journal = h.state().engine.journal().len();
+    // Halfway through a move: the live frame is 10 mm to the right, nothing committed.
+    let c = [(hit.min[0] + hit.max[0]) / 2.0, (hit.min[1] + hit.max[1]) / 2.0];
+    let (a, b) = (paper(&h, c), paper(&h, [c[0] + 20.0, c[1]]));
+    h.hover_at(a);
+    h.run();
+    h.event(Event::PointerButton { pos: a, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run();
+    for i in 1..=5 {
+        h.event(Event::PointerMoved(a + (b - a) * (i as f32 / 10.0)));
+        h.run();
+    }
+    let live = h.state().ui.sheets.live.clone().expect("a live preview while dragging");
+    assert!(live.moved && live.until.is_none());
+    assert!((live.min[0] - hit.min[0] - 10.0).abs() < 0.5, "{live:?}");
+    assert_eq!(h.state().engine.journal().len(), journal, "nothing runs before the drop");
+    for i in 6..=10 {
+        h.event(Event::PointerMoved(a + (b - a) * (i as f32 / 10.0)));
+        h.run();
+    }
+    h.event(Event::PointerButton {
+        pos: b,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+    assert_eq!(h.state().engine.journal().len(), journal + 1, "one viewport.update on release");
+    // Once the page with the change is composed the preview goes.
+    for _ in 0..200 {
+        if h.state().ui.sheets.live.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run();
+    }
+    assert!(h.state().ui.sheets.live.is_none(), "the recomposed page replaced the preview");
+
+    // A corner drag re-crops: same content on the paper, new clip.
+    let page = stagecraft_sheet::pages(h.state().engine.doc(), &[l102]).remove(0);
+    let hit = page.viewports.iter().find(|v| v.id == vp.id).unwrap().clone();
+    let corner = paper(&h, hit.max);
+    h.hover_at(corner);
+    h.run();
+    let to = paper(&h, [hit.max[0] - 30.0, hit.max[1] - 20.0]);
+    h.event(Event::PointerButton {
+        pos: corner,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+    for i in 1..=5 {
+        h.event(Event::PointerMoved(corner + (to - corner) * (i as f32 / 5.0)));
+        h.run();
+    }
+    let live = h.state().ui.sheets.live.clone().expect("live while cropping");
+    assert!(!live.moved);
+    assert!((live.max[0] - (hit.max[0] - 30.0)).abs() < 0.5 && (live.min[0] - hit.min[0]).abs() < 0.5, "{live:?}");
+    h.event(Event::PointerButton {
+        pos: to,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+    let crop = h.state().engine.doc().sheets[&l102].viewport(vp.id).unwrap().crop.unwrap();
+    assert!((crop[1][0] - crop[0][0] - (20400.0 - 3000.0)).abs() < 50.0, "30 mm less at 1:100: {crop:?}");
+}

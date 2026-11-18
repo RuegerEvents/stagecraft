@@ -40,6 +40,42 @@ fn sheets_are_created_numbered_and_undone() {
 }
 
 #[test]
+fn a_new_scale_keeps_the_viewport_frame_and_zooms_around_the_crop_centre() {
+    let mut e = Engine::new();
+    let s = id(&run(&mut e, "sheet.create", json!({})));
+    let vp = id(&run(
+        &mut e,
+        "viewport.create",
+        json!({ "sheet": s, "view": "plan", "scale": 100, "crop": [[-6000, -2000], [10000, 6000]], "position": [200, 150] }),
+    ));
+    let frame = |e: &Engine| {
+        let v = e.doc().sheets[&s].viewport(vp).unwrap().clone();
+        let c = v.crop.unwrap();
+        (
+            [(c[1][0] - c[0][0]) / v.scale, (c[1][1] - c[0][1]) / v.scale],
+            [(c[0][0] + c[1][0]) / 2.0, (c[0][1] + c[1][1]) / 2.0],
+            v,
+        )
+    };
+    let (size, centre, _) = frame(&e);
+    assert_eq!(size, [160.0, 80.0], "16 × 8 m at 1:100 is 160 × 80 mm on paper");
+    run(&mut e, "viewport.update", json!({ "viewport": vp, "scale": 50 }));
+    let (size50, centre50, v) = frame(&e);
+    assert_eq!(size50, size, "the frame on the paper stays");
+    assert_eq!(centre50, centre, "zoomed around the crop centre");
+    assert_eq!(v.crop, Some([[-2000.0, 0.0], [6000.0, 4000.0]]), "half as much model, twice as big");
+    assert_eq!(v.position, [200.0, 150.0]);
+    // Back to 1:200: twice the model in the same frame. Undo restores 1:50 and its crop.
+    run(&mut e, "viewport.update", json!({ "viewport": vp, "scale": 200 }));
+    assert_eq!(frame(&e).0, size);
+    run(&mut e, "history.undo", json!(null));
+    assert_eq!(frame(&e).2.crop, Some([[-2000.0, 0.0], [6000.0, 4000.0]]));
+    // A crop given with the scale is taken as it is.
+    run(&mut e, "viewport.update", json!({ "viewport": vp, "scale": 25, "crop": [[0, 0], [1000, 1000]] }));
+    assert_eq!(frame(&e).2.crop, Some([[0.0, 0.0], [1000.0, 1000.0]]));
+}
+
+#[test]
 fn viewports_take_views_scales_crops_and_tags() {
     let mut e = Engine::new();
     run(&mut e, "tag.create", json!({ "name": "house" }));

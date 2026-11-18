@@ -82,6 +82,23 @@ pub enum SheetDrag {
     Pan,
 }
 
+/// A viewport drawn where a drag puts it, from the page already composed: moved
+/// (everything shifted) or re-cropped (same content, new clip). Shown while dragging and
+/// after the drop until the page composed with the change arrives, so the frame never
+/// jumps back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Live {
+    pub viewport: Id,
+    /// The new frame, paper mm.
+    pub min: P2,
+    pub max: P2,
+    /// Moved (content goes along) rather than cropped (content stays on the paper).
+    pub moved: bool,
+    /// After the drop: the journal length of the change; the preview goes once the page
+    /// is that new.
+    pub until: Option<usize>,
+}
+
 pub struct SheetsState {
     /// The sheet shown; `None` = the first one.
     pub current: Option<Id>,
@@ -94,6 +111,8 @@ pub struct SheetsState {
     pub editor: bool,
     /// The label template open in the template editor.
     pub template: Option<Id>,
+    /// The drag preview (see [`Live`]).
+    pub live: Option<Live>,
     cache: Option<((usize, Id), Page)>,
     /// A page being composed on a worker thread (hidden lines can take a moment).
     pending: Option<((usize, Id), PageRx)>,
@@ -111,6 +130,7 @@ impl Default for SheetsState {
             drag: None,
             editor: false,
             template: None,
+            live: None,
             cache: None,
             pending: None,
         }
@@ -210,8 +230,10 @@ pub fn fit_texture(d: image::DynamicImage, max: u32) -> image::RgbaImage {
 
 pub(crate) fn texture(ctx: &egui::Context, data: &ImageData) -> Option<egui::TextureHandle> {
     use std::collections::HashMap;
-    use std::sync::Mutex;
-    static CACHE: Mutex<Option<HashMap<usize, egui::TextureHandle>>> = Mutex::new(None);
+    use std::sync::{Arc, Mutex};
+    // Per context (a texture belongs to its context; tests build several).
+    type Cache = Arc<Mutex<HashMap<usize, egui::TextureHandle>>>;
+    let cache: Cache = ctx.data_mut(|d| d.get_temp_mut_or_default::<Cache>(egui::Id::unique("sheet_textures")).clone());
     // Pointer plus a sample of the bytes: a freed image's address may be reused.
     let bytes: &[u8] = match data {
         ImageData::Encoded(b) => b,
@@ -222,8 +244,8 @@ pub(crate) fn texture(ctx: &egui::Context, data: &ImageData) -> Option<egui::Tex
     for (i, b) in bytes.iter().step_by(step).enumerate() {
         key = key.wrapping_mul(31).wrapping_add(*b as usize ^ i);
     }
-    let mut guard = CACHE.lock().ok()?;
-    let cache = guard.get_or_insert_with(HashMap::new);
+    let mut guard = cache.lock().ok()?;
+    let cache = &mut *guard;
     if let Some(t) = cache.get(&key) {
         return Some(t.clone());
     }
@@ -255,6 +277,40 @@ pub fn image_quad(painter: &Painter, tex: egui::TextureId, c: [egui::Pos2; 4], o
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
     painter.add(egui::Shape::mesh(mesh));
+}
+
+/// Draw a page; the viewport of `live` where the drag puts it.
+pub fn paint_page(painter: &Painter, cam: &PaperCam, page: &Page, live: Option<&Live>) {
+    let found = live.and_then(|l| page.viewports.iter().find(|h| h.id == l.viewport).map(|h| (l, h)));
+    let Some((l, h)) = found else {
+        paint_prims(painter, cam, &page.prims);
+        return;
+    };
+    let [a, b] = h.prims;
+    if a >= b || b > page.prims.len() {
+        paint_prims(painter, cam, &page.prims);
+        return;
+    }
+    paint_prims(painter, cam, &page.prims[..a]);
+    paint_prims(painter, cam, &page.prims[b..]);
+    // Moving the content by `off` on the paper = looking from `-off`.
+    let off = [l.min[0] - h.min[0], l.min[1] - h.min[1]];
+    let shifted = PaperCam { center: [cam.center[0] - off[0], cam.center[1] - off[1]], ..*cam };
+    match (&page.prims[a], l.moved) {
+        (Prim::Clip { prims, .. }, false) => {
+            // Cropped: the content stays on the paper, only the clip changes; the title
+            // goes with the frame's lower left corner.
+            let r = Rect::from_two_pos(cam.to_screen(l.min), cam.to_screen(l.max));
+            let clipped = painter.with_clip_rect(r.intersect(painter.clip_rect()));
+            if prims.iter().any(|p| matches!(p, Prim::Image { .. })) {
+                // A rendered view only has the old frame's picture until the new one.
+                clipped.rect_filled(r, 0.0, Color32::from_gray(238));
+            }
+            paint_prims(&clipped, cam, prims);
+            paint_prims(painter, &shifted, &page.prims[a + 1..b]);
+        }
+        _ => paint_prims(painter, &shifted, &page.prims[a..b]),
+    }
 }
 
 /// Draw composed primitives (paper mm) on screen.
@@ -402,6 +458,13 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     painter.rect_filled(rect, 0.0, if dark { Color32::from_gray(0x2a) } else { Color32::from_gray(0xd9) });
     s.ui.sheets.cam.rect = rect;
     let (page, busy) = page_busy(s);
+    // The preview after a drop goes once the page shows the change.
+    if !busy
+        && let Some(Live { until: Some(k), .. }) = &s.ui.sheets.live
+        && s.ui.sheets.cache.as_ref().is_none_or(|((n, _), _)| n >= k)
+    {
+        s.ui.sheets.live = None;
+    }
     if busy {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
     }
@@ -421,7 +484,22 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
     let paper = Rect::from_two_pos(cam.to_screen([0.0, 0.0]), cam.to_screen(page.size));
     painter.rect_filled(paper.translate(vec2(3.0, 4.0)), 0.0, Color32::from_black_alpha(60));
     painter.rect_filled(paper, 0.0, Color32::WHITE);
-    paint_prims(&painter.with_clip_rect(paper.intersect(rect)), &cam, &page.prims);
+    // While a viewport is dragged: the view where it goes, live (from the composed page:
+    // moved, or re-clipped for a crop), full quality once the new page is composed.
+    let drag_live = match (&s.ui.sheets.drag, ui.input(|i| i.pointer.hover_pos()).map(|p| cam.to_paper(p))) {
+        (Some(d @ (SheetDrag::Move { viewport, .. } | SheetDrag::Resize { viewport, .. })), Some(p)) => {
+            page.viewports.iter().find(|h| h.id == *viewport).map(|h| {
+                let (min, max) = dragged_rect(d, h.min, h.max, p);
+                Live { viewport: *viewport, min, max, moved: matches!(d, SheetDrag::Move { .. }), until: None }
+            })
+        }
+        _ => None,
+    };
+    if drag_live.is_some() {
+        s.ui.sheets.live = drag_live;
+    }
+    let live = s.ui.sheets.live.clone();
+    paint_page(&painter.with_clip_rect(paper.intersect(rect)), &cam, &page, live.as_ref());
 
     let sel = s.ui.sheets.viewport.filter(|v| page.viewports.iter().any(|h| h.id == *v));
     let pointer = ui.input(|i| i.pointer.hover_pos());
@@ -523,10 +601,21 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             finish_drag(s, &page, d, p);
         }
         s.ui.sheets.drag = None;
+        // Keep showing the dropped viewport until the page with the change arrives.
+        let n = s.engine.journal().len();
+        if let Some(l) = &mut s.ui.sheets.live {
+            l.until = Some(n);
+        }
+        ui.ctx().request_repaint();
     }
 
     // The selected viewport: outline and corner handles.
     if let Some(h) = page.viewports.iter().find(|h| Some(h.id) == s.ui.sheets.viewport) {
+        let (min, max) = match s.ui.sheets.live.as_ref().filter(|l| l.viewport == h.id) {
+            Some(l) => (l.min, l.max),
+            None => (h.min, h.max),
+        };
+        let h = stagecraft_sheet::prim::ViewportHit { id: h.id, min, max, prims: h.prims };
         let r = Rect::from_two_pos(cam.to_screen(h.min), cam.to_screen(h.max));
         painter.rect_stroke(r, 0.0, Stroke::new(1.5, accent), egui::StrokeKind::Outside);
         for c in corners(h.min, h.max) {
@@ -793,6 +882,25 @@ fn view_label(v: &ViewKind) -> String {
     }
 }
 
+/// A new scale for a viewport that keeps its frame on the paper and zooms around the
+/// crop's centre. `viewport.update` rescales a crop itself; a fitted viewport first gets
+/// the crop it fits to, so its frame stays too (rendered views keep a fixed frame anyway).
+pub fn set_scale(s: &mut Studio, vp: &Viewport, scale: f64) {
+    let mut args = json!({ "viewport": vp.id, "scale": scale });
+    if vp.crop.is_none()
+        && !matches!(vp.view, ViewKind::Rendered { .. } | ViewKind::FixtureList)
+        && vp.scale > 0.0
+        && let Some([lo, hi]) =
+            stagecraft_sheet::compose::effective_crop(s.engine.doc(), vp, stagecraft_sheet::default_source())
+    {
+        let f = scale / vp.scale;
+        let c = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
+        let h = [(hi[0] - lo[0]) / 2.0 * f, (hi[1] - lo[1]) / 2.0 * f];
+        args["crop"] = json!([[c[0] - h[0], c[1] - h[1]], [c[0] + h[0], c[1] + h[1]]]);
+    }
+    let _ = s.run("viewport.update", args);
+}
+
 fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, salt: &str) {
     let up = |s: &mut Studio, args: Value| {
         let mut a = args;
@@ -873,7 +981,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                 .show_ui(ui, |ui| {
                     for sc in SCALES {
                         if ui.selectable_label(vp.scale == sc, format!("1:{sc}")).clicked() {
-                            up(s, json!({ "scale": sc }));
+                            set_scale(s, vp, sc);
                         }
                     }
                 });

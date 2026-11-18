@@ -1049,9 +1049,10 @@ pub fn compose(doc: &Document, sheet: Id, inputs: &Inputs) -> Option<Page> {
     let mut labels = Vec::new();
     for vp in &sheet.viewports {
         let Some(c) = compose_viewport(doc, vp, inputs) else { continue };
+        let start = prims.len();
         prims.extend(c.prims);
         viewport_title(doc, vp, c.rect, &mut prims);
-        viewports.push(ViewportHit { id: vp.id, min: c.rect[0], max: c.rect[1] });
+        viewports.push(ViewportHit { id: vp.id, min: c.rect[0], max: c.rect[1], prims: [start, prims.len()] });
         labels.extend(c.labels);
     }
     let tb = TitleBlock::for_sheet(doc, sheet);

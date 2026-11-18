@@ -527,14 +527,26 @@ fn vp_create(ctx: &mut Ctx, a: VpCreateArgs) -> CmdResult {
     Ok(json!({ "id": id }))
 }
 
+/// A crop grown or shrunk by `f` around its centre (the frame on paper stays when the
+/// scale denominator changes by the same factor).
+fn rescale_crop([lo, hi]: [P2; 2], f: f64) -> [P2; 2] {
+    let c = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
+    let h = [(hi[0] - lo[0]) / 2.0 * f, (hi[1] - lo[1]) / 2.0 * f];
+    [[c[0] - h[0], c[1] - h[1]], [c[0] + h[0], c[1] + h[1]]]
+}
+
 #[derive(Deserialize, JsonSchema)]
 struct VpUpdateArgs {
     viewport: Id,
     name: Option<String>,
     view: Option<ViewArg>,
-    /// Scale denominator.
+    /// Scale denominator. A cropped viewport keeps its frame on the paper: the crop
+    /// shrinks or grows around its centre (1:100 → 1:50 shows half as much, twice as
+    /// big). A fitted viewport (no crop) keeps fitting, so its frame changes with the
+    /// scale; pass its current crop along to keep the frame (the GUI does).
     scale: Option<f64>,
-    /// New crop, model mm; `null` keeps it. Use `fit: true` to go back to fitting.
+    /// New crop, model mm; `null` keeps it (rescaled with `scale`). Use `fit: true` to go
+    /// back to fitting.
     crop: Option<[P2; 2]>,
     /// Drop the crop and fit everything shown.
     #[serde(default)]
@@ -604,6 +616,13 @@ fn vp_update(ctx: &mut Ctx, a: VpUpdateArgs) -> CmdResult {
         v.view = x;
     }
     if let Some(x) = a.scale {
+        if let Some([lo, hi]) = v.crop
+            && crop.is_none()
+            && !a.fit
+            && v.scale > 0.0
+        {
+            v.crop = Some(rescale_crop([lo, hi], x / v.scale));
+        }
         v.scale = x;
     }
     if a.fit {
