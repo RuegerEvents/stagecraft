@@ -103,7 +103,7 @@ impl ShareBackend for LiveShare {
         let dir = self.client.cache_dir().join("named");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let path = dir.join(file_name(entry));
-        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        stagecraft_core::file::write_atomic(&path, &bytes).map_err(|e| e.message)?;
         Ok(path)
     }
 }

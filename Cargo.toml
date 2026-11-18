@@ -60,6 +60,7 @@ ureq = { version = "3", features = ["cookies"] }
 security-framework = "3"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 # storytold/craft-libs (MIT OR Apache-2.0), one revision for every crate.
+craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 craft-dialogs = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 
 # Hidden-line removal runs on every sheet change; keep it fast in debug builds too.

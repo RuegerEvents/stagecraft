@@ -27,6 +27,10 @@ zip.workspace = true
 glam.workspace = true
 image.workspace = true
 
+# Crash-safe saves; the browser build has no files.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+craft-atomic.workspace = true
+
 # The browser build needs a JS source of randomness for uuid v4.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 uuid = { workspace = true, features = ["js"] }

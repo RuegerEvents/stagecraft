@@ -232,6 +232,31 @@ fn save_and_open_round_trip() {
 }
 
 #[test]
+fn saving_replaces_the_file_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("plan.stagecraft");
+    let mut e = Engine::new();
+    rig(&mut e);
+    run(&mut e, "doc.save", json!({ "path": path }));
+    run(&mut e, "doc.set_meta", json!({ "project": "Second" }));
+    run(&mut e, "doc.save", Value::Null);
+    run(&mut e, "mvr.export", json!({ "path": dir.path().join("plan.mvr") }));
+    // Nothing but the two files: no staging file is left behind.
+    let mut names: Vec<_> =
+        std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    names.sort();
+    assert_eq!(names, ["plan.mvr", "plan.stagecraft"]);
+    let mut e2 = Engine::new();
+    run(&mut e2, "doc.open", json!({ "path": path }));
+    assert_eq!(e2.doc().meta.project, "Second");
+
+    // A failed save keeps the old file.
+    let missing = dir.path().join("no/such/dir/plan.stagecraft");
+    assert!(e.execute("doc.save", json!({ "path": missing })).is_err());
+    assert!(std::fs::metadata(&path).unwrap().len() > 0);
+}
+
+#[test]
 fn journal_records_changes_only() {
     let mut e = Engine::new();
     rig(&mut e);

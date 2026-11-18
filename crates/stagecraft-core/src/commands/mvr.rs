@@ -67,7 +67,7 @@ struct ExportArgs {
 
 fn export(ctx: &mut Ctx, a: ExportArgs) -> CmdResult {
     let (bytes, mut summary) = crate::mvr::export(ctx.doc())?;
-    std::fs::write(&a.path, &bytes).map_err(|e| CmdError::io(format!("{}: {e}", a.path.display())))?;
+    crate::file::write_atomic(&a.path, &bytes)?;
     summary["path"] = json!(a.path);
     summary["bytes"] = json!(bytes.len());
     Ok(summary)

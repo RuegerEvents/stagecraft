@@ -11,7 +11,7 @@ publish = false
 [features]
 default = []
 # GDTF Share client (blocking HTTP, disk cache). Native only.
-share = ["dep:ureq", "dep:serde", "dep:serde_json"]
+share = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:craft-atomic"]
 # Read GDTF Share credentials from the macOS keychain.
 keychain = ["share", "dep:security-framework"]
 
@@ -21,6 +21,7 @@ roxmltree.workspace = true
 zip.workspace = true
 gltf.workspace = true
 ureq = { workspace = true, optional = true }
+craft-atomic = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 

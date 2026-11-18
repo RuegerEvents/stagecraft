@@ -244,10 +244,9 @@ impl ShareClient {
     }
 }
 
+/// A crash or a full disk never leaves half a cached GDTF (craft-atomic).
 fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension("part");
-    std::fs::write(&tmp, data)?;
-    std::fs::rename(&tmp, path)
+    craft_atomic::atomic_write(path, data)
 }
 
 /// Parses a `getList.php` answer. Field types vary in practice (numbers as strings
