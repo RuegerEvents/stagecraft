@@ -617,14 +617,19 @@ fn title_block(doc: &Document, sheet: &Sheet, tb: &TitleBlock, origin: P2, out: 
 }
 
 fn legend(doc: &Document, sheet: &Sheet, right: f64, bottom: f64, width: f64, out: &mut Vec<Prim>) {
-    // Type name → (count, a fixture of that type for its symbol).
-    let mut counts: BTreeMap<String, (usize, Id)> = BTreeMap::new();
+    // Type name → (count, a fixture of that type for its symbol, footprint if all agree).
+    let mut counts: BTreeMap<String, (usize, Id, Option<String>)> = BTreeMap::new();
     let mut seen: Vec<Id> = Vec::new();
     for vp in sheet.viewports.iter().filter(|v| v.view == ViewKind::Plan) {
         for o in fixtures_of(doc, vp) {
             if !seen.contains(&o.id) {
                 seen.push(o.id);
-                counts.entry(fixture_type(doc, o)).or_insert((0, o.id)).0 += 1;
+                let fp = stagecraft_core::patch::mode(doc, o).map(|m| m.footprint_text());
+                let e = counts.entry(fixture_type(doc, o)).or_insert((0, o.id, fp.clone()));
+                e.0 += 1;
+                if e.2 != fp {
+                    e.2 = None;
+                }
             }
         }
     }
@@ -647,12 +652,12 @@ fn legend(doc: &Document, sheet: &Sheet, right: f64, bottom: f64, width: f64, ou
         *h = HAlign::Right;
     }
     out.push(tt);
-    for (i, (name, (n, example))) in counts.iter().enumerate() {
+    for (i, (name, (n, example, footprint))) in counts.iter().enumerate() {
         let y = max[1] - row * (i as f64 + 2.0) - 0.5;
         legend_symbol(doc, *example, [min[0] + 6.5, y + 2.4], out);
         let mut label = name.clone();
-        if let Some(m) = doc.objects.get(example).and_then(|o| stagecraft_core::patch::mode(doc, o)) {
-            label = format!("{label}  ({} ch)", m.footprint_text());
+        if let Some(fp) = footprint {
+            label = format!("{label}  ({fp} ch)");
         }
         out.push(Prim::text([min[0] + 13.0, y + 1.6], label, 2.2));
         let mut c = Prim::text([max[0] - 3.0, y + 1.6], format!("× {n}"), 2.2);
