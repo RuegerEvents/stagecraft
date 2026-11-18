@@ -119,7 +119,9 @@ impl Studio {
         }
         crate::library::poll(self);
         shortcuts(ui, self);
-        egui::Panel::top("menu").show(ui, |ui| panels::menu_bar(ui, self));
+        if !self.ui.native_menu {
+            egui::Panel::top("menu").show(ui, |ui| crate::menu::show_in_window(ui, self));
+        }
         egui::Panel::top("toolbar").show(ui, |ui| panels::toolbar(ui, self));
         egui::Panel::bottom("status").show(ui, |ui| panels::status_bar(ui, self));
         egui::CentralPanel::no_frame().show(ui, |ui| crate::dock::show(ui, self));
@@ -160,7 +162,10 @@ fn shortcuts(ui: &mut Ui, s: &mut Studio) {
     if s.ui.palette.open {
         return;
     }
-    // Redo before undo: ⌘⇧Z also matches ⌘Z when shift is ignored.
+    // Shifted first: ⌘⇧Z also matches ⌘Z when shift is ignored.
+    if pressed(ui, cmd_shift(Key::S)) {
+        panels::save(s, true);
+    }
     if pressed(ui, cmd_shift(Key::Z)) {
         let _ = s.run("history.redo", Value::Null);
     }
@@ -228,6 +233,14 @@ pub struct StageApp {
     server: Option<Server>,
     _registration: Option<discovery::Registration>,
     shot_requested: bool,
+    /// The macOS menu bar, when AppKit took it.
+    #[cfg(target_os = "macos")]
+    native_menu: Option<craft_menu::NativeMenu>,
+    /// What `NSWindow.movable` was last set to (inset title bar).
+    #[cfg(target_os = "macos")]
+    movable: Option<bool>,
+    /// Close already sent after the user confirmed.
+    closing: bool,
     /// Filled by the screenshot callback once the frame arrives.
     shot_slot: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
     title: String,
@@ -300,13 +313,53 @@ fn save_png(image: &egui::ColorImage, path: &std::path::Path) -> Result<(), CmdE
 }
 
 impl eframe::App for StageApp {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &mut self.native_menu {
+            menu.raw_input(raw_input);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = raw_input;
+    }
+
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.answer_calls(ctx);
+        // Quit and the close button: ask first when there are unsaved changes; the answer
+        // comes on a later frame and closes the window again.
+        let ui = &mut self.studio.ui;
+        if ui.quit_confirmed && !self.closing {
+            self.closing = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if ctx.input(|i| i.viewport().close_requested())
+            && self.studio.engine.dirty()
+            && !ui.quit_confirmed
+            && ui.native_dialogs
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ui.file_request = Some(FileRequest::Quit);
+        }
+        craft_quit::on_close_request(ctx);
     }
 
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.take_screenshots(ui);
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &mut self.native_menu {
+            menu.set_gate(crate::menu::gate(&self.studio, ui.ctx()));
+            for c in menu.take_clicks(ui.ctx()) {
+                crate::menu::run(&mut self.studio, &c);
+            }
+        }
         self.studio.show(ui);
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(menu) = &mut self.native_menu {
+                menu.sync(craft_menu::mac_layout(&crate::menu::bar(&self.studio), &crate::menu::options()));
+            }
+            if self.studio.ui.inset_title_bar {
+                craft_window::title_bar::sync_movable(ui.ctx(), &mut self.movable);
+            }
+        }
         // Never a blocking dialog here: see `dialogs.rs`.
         self.studio.file_dialogs();
         self.studio.dialogs.show_pending(Some(&*frame));
@@ -332,13 +385,20 @@ fn now() -> u64 {
 /// mode "gui", so `stagecraft exec` and MCP drive this window.
 pub fn run(engine: Engine) -> Result<(), String> {
     let title = Studio::new(Engine::new()).title();
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(title.clone())
-            .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([900.0, 560.0]),
-        ..Default::default()
-    };
+    let viewport = egui::ViewportBuilder::default()
+        .with_title(title.clone())
+        .with_inner_size([1440.0, 900.0])
+        .with_min_inner_size([900.0, 560.0]);
+    // macOS: the toolbar is the title bar (full-size content view, window buttons over its
+    // left end), as craft-window decides for every Craft app. Elsewhere the desktop draws the
+    // frame: StageCraft has no caption buttons of its own. `STAGECRAFT_TITLEBAR=system` or
+    // `CRAFT_TITLEBAR=system` keeps the macOS title bar too.
+    use craft_window::policy::{Backend, Frame, TitleBarPref, apply, decide_for};
+    let pref = if cfg!(target_os = "macos") { TitleBarPref::Integrated } else { TitleBarPref::System };
+    let decision = decide_for(craft_window::Prefix::new("STAGECRAFT"), Backend::from_env(), pref);
+    let inset = matches!(decision.frame, Frame::Inset(_));
+    let viewport = if inset || !cfg!(target_os = "macos") { apply(viewport, &decision.frame) } else { viewport };
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native(
         "StageCraft",
         options,
@@ -380,12 +440,30 @@ pub fn run(engine: Engine) -> Result<(), String> {
             let wake = ctx.clone();
             studio.dialogs = craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint()));
             studio.offscreen = cc.wgpu_render_state.as_ref().map(view3d::offscreen::Offscreen::from_render_state);
+            #[cfg(target_os = "macos")]
+            let native_menu = {
+                let menu = craft_menu::mac::install(&ctx, &crate::menu::laid_out(&studio).bar);
+                if menu.is_none() {
+                    eprintln!("stagecraft: AppKit refused the menu bar, keeping the in-window menus");
+                }
+                menu
+            };
+            #[cfg(target_os = "macos")]
+            {
+                studio.ui.native_menu = native_menu.is_some();
+                studio.ui.inset_title_bar = inset;
+            }
             Ok(Box::new(StageApp {
                 studio,
                 server,
                 _registration: registration,
                 shot_requested: false,
                 shot_slot: Default::default(),
+                #[cfg(target_os = "macos")]
+                native_menu,
+                #[cfg(target_os = "macos")]
+                movable: None,
+                closing: false,
                 title,
             }))
         }),

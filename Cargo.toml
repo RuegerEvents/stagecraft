@@ -71,6 +71,9 @@ craft-xml = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d
 craft-zip = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d", features = ["serde"] }
 craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
+craft-menu = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
+craft-quit = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d", features = ["egui"] }
+craft-window = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d", features = ["egui"] }
 
 # storytold's egui fork (0.37 plus the suite's patches) and its winit companion, at the
 # revisions craft-libs pins in its own workspace [patch]. A dependency's [patch] is ignored by

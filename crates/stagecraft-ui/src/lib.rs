@@ -18,6 +18,7 @@ pub mod fuzzy;
 pub mod i18n;
 pub mod inspector;
 pub mod library;
+pub mod menu;
 pub mod palette;
 pub mod panels;
 pub mod schema_form;

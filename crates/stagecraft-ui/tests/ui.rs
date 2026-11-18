@@ -685,3 +685,23 @@ fn panels_hide_float_move_and_reset() {
     assert_eq!(h.state().ui.layout.layout, stagecraft_ui::dock::default_layout());
     assert!(floating_panels(&h).is_empty());
 }
+
+// ---- menus -----------------------------------------------------------------------
+
+#[test]
+fn the_in_window_menus_run_commands() {
+    let mut h = harness(stagecraft_ui::demo::engine());
+    h.get_by_label("Insert").click();
+    h.run();
+    h.get_by_label("Batten").click();
+    h.run();
+    assert_eq!(h.state().ui.tool, stagecraft_ui::Tool::Batten);
+    h.get_by_label("Window").click();
+    h.run();
+    h.get_by_role_and_label(egui::accesskit::Role::MenuItemCheckBox, "Table").click();
+    h.run();
+    assert!(!h.state().ui.layout.layout.contains(&stagecraft_ui::state::PanelKind::Table));
+    // Every item names a command one of the registries (or the app) runs.
+    let bar = stagecraft_ui::menu::bar(h.state());
+    assert!(bar.items().len() > 40);
+}

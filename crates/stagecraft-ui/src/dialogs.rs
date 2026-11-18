@@ -41,12 +41,16 @@ impl Studio {
             }
         }
         let Some(req) = self.ui.file_request.take() else { return };
-        let discards = matches!(req, FileRequest::Open | FileRequest::New);
+        let discards = matches!(req, FileRequest::Open | FileRequest::New | FileRequest::Quit);
         if discards && self.engine.dirty() && self.ui.native_dialogs {
+            let (title, text) = match req {
+                FileRequest::Quit => ("dialog.quit.title", "dialog.quit.text"),
+                _ => ("dialog.discard.title", "dialog.discard.text"),
+            };
             let message = Message {
                 level: MessageLevel::Warning,
-                title: t("dialog.discard.title").to_owned(),
-                description: t("dialog.discard.text").to_owned(),
+                title: t(title).to_owned(),
+                description: t(text).to_owned(),
                 buttons: MessageButtons::OkCancel,
             };
             self.dialogs.ask_message(message, Then::Discard(req));
@@ -66,6 +70,11 @@ impl Studio {
         let dialog = match req {
             FileRequest::New => {
                 let _ = self.run("doc.new", json!({ "discard": true }));
+                return;
+            }
+            FileRequest::Quit => {
+                // The app sees the flag and closes the window on its next frame.
+                self.ui.quit_confirmed = true;
                 return;
             }
             FileRequest::Open => FileDialog::open().filter("StageCraft", &["stagecraft"]),
@@ -91,7 +100,7 @@ impl Studio {
     fn answered(&mut self, req: FileRequest, paths: Vec<PathBuf>) {
         let path = paths[0].clone();
         match req {
-            FileRequest::New => {}
+            FileRequest::New | FileRequest::Quit => {}
             FileRequest::Open => {
                 let _ = self.run("doc.open", json!({ "path": path, "discard": true }));
             }

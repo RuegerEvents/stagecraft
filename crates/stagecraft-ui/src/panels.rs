@@ -6,8 +6,11 @@ use stagecraft_core::{Id, Layer};
 
 use crate::app::Studio;
 use crate::i18n::{t, tf};
-use crate::state::{FileRequest, PanelKind, ThemePref, Tool, View};
+use crate::state::{FileRequest, Tool, View};
 use crate::widgets::{self, Icon, button, edit_field, icon_button};
+
+/// Room the macOS window buttons take at the toolbar's left with the inset title bar.
+pub const TRAFFIC_LIGHTS: f32 = 72.0;
 
 /// New document; with unsaved changes the app asks first (the answer comes on a later frame).
 pub fn new_document(s: &mut Studio) {
@@ -27,104 +30,17 @@ pub fn save(s: &mut Studio, save_as: bool) {
     }
 }
 
-pub fn menu_bar(ui: &mut Ui, s: &mut Studio) {
-    egui::MenuBar::new().ui(ui, |ui| {
-        ui.menu_button(t("menu.file"), |ui| {
-            if ui.button(t("menu.new")).clicked() {
-                new_document(s);
-            }
-            if ui.button(t("menu.open")).clicked() {
-                s.ui.file_request = Some(FileRequest::Open);
-            }
-            if ui.button(t("menu.save")).clicked() {
-                save(s, false);
-            }
-            if ui.button(t("menu.save_as")).clicked() {
-                save(s, true);
-            }
-            ui.separator();
-            if ui.button(t("menu.import_mvr")).clicked() {
-                s.ui.file_request = Some(FileRequest::ImportMvr);
-            }
-            if ui.button(t("menu.import_model")).clicked() {
-                s.ui.file_request = Some(FileRequest::ImportModel);
-            }
-            if ui.button(t("menu.import_underlay")).clicked() {
-                s.ui.file_request = Some(FileRequest::ImportUnderlay);
-            }
-            if ui.button(t("menu.export_mvr")).clicked() {
-                s.ui.file_request = Some(FileRequest::ExportMvr);
-            }
-            ui.separator();
-            if ui.add_enabled(!s.engine.doc().sheets.is_empty(), egui::Button::new(t("menu.export_pdf"))).clicked() {
-                s.ui.file_request = Some(FileRequest::ExportPdf);
-            }
-        });
-        ui.menu_button(t("menu.edit"), |ui| {
-            if ui.add_enabled(s.engine.can_undo(), egui::Button::new(t("menu.undo"))).clicked() {
-                let _ = s.run("history.undo", Value::Null);
-            }
-            if ui.add_enabled(s.engine.can_redo(), egui::Button::new(t("menu.redo"))).clicked() {
-                let _ = s.run("history.redo", Value::Null);
-            }
-            ui.separator();
-            let any = !s.engine.selection().is_empty();
-            if ui.add_enabled(any, egui::Button::new(t("menu.delete"))).clicked() {
-                let ids = s.engine.selection().to_vec();
-                let _ = s.run("object.delete", json!({ "ids": ids }));
-            }
-            if ui.button(t("menu.palette")).clicked() {
-                s.ui.palette.open();
-            }
-        });
-        ui.menu_button(t("menu.view"), |ui| {
-            for (view, key) in [
-                (View::Plan, "view.plan"),
-                (View::ThreeD, "view.3d"),
-                (View::Split, "view.split"),
-                (View::Sheets, "view.sheets"),
-            ] {
-                if ui.radio(s.ui.view == view, t(key)).clicked() {
-                    let _ = s.run("ui.set_view", json!({ "view": view }));
-                }
-            }
-            if ui.button(t("menu.zoom_fit")).clicked() {
-                let _ = s.run("ui.zoom_to_fit", Value::Null);
-            }
-            ui.menu_button(t("menu.standard_views"), |ui| {
-                for v in crate::view3d::StdView::ALL {
-                    if ui.button(t(v.key())).clicked() {
-                        let _ = s.run("ui.camera", json!({ "view": v }));
-                    }
-                }
-            });
-            ui.separator();
-            for p in crate::dock::PANELS.into_iter().filter(|p| *p != PanelKind::Canvas) {
-                let mut on = s.ui.layout.layout.contains(&p);
-                if ui.checkbox(&mut on, crate::dock::label(p)).changed() {
-                    let _ = s.run("ui.toggle_panel", json!({ "panel": p, "visible": on }));
-                }
-            }
-            if ui.button(t("menu.reset_layout")).clicked() {
-                let _ = s.run("ui.reset_layout", Value::Null);
-            }
-            ui.separator();
-            for (theme, key) in [
-                (ThemePref::System, "theme.system"),
-                (ThemePref::Light, "theme.light"),
-                (ThemePref::Dark, "theme.dark"),
-            ] {
-                if ui.radio(s.ui.theme == theme, t(key)).clicked() {
-                    let _ = s.run("ui.set_theme", json!({ "theme": theme }));
-                }
-            }
-        });
-    });
-}
-
 pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
     ui.add_space(3.0);
+    if s.ui.inset_title_bar {
+        // The strip is the window's title bar: drags on its empty parts move the window.
+        let strip = ui.max_rect();
+        craft_window::title_bar::empty_area(ui, strip);
+    }
     ui.horizontal(|ui| {
+        if s.ui.inset_title_bar {
+            ui.add_space(TRAFFIC_LIGHTS);
+        }
         let groups: Vec<&[Tool]> =
             if s.ui.view == View::Sheets { Vec::new() } else { vec![&Tool::DRAW[..], &Tool::STAGE[..]] };
         // Calibrate only matters with an underlay in the document.

@@ -414,6 +414,13 @@ pub struct UiState {
     pub file_request: Option<FileRequest>,
     /// Native file and message dialogs (off in headless tests).
     pub native_dialogs: bool,
+    /// The menus are the macOS menu bar, so the window draws no menu row.
+    pub native_menu: bool,
+    /// macOS full-size content view: the toolbar is the title bar and leaves room for the
+    /// window buttons at its left.
+    pub inset_title_bar: bool,
+    /// The user agreed to quit without saving.
+    pub quit_confirmed: bool,
     /// Sketch overlay, dimension selection and editing, drag preview.
     pub sketch: crate::sketch_ui::SketchUi,
 }
@@ -438,6 +445,8 @@ pub enum FileRequest {
     ImportModel,
     /// An image, PDF, SVG or DXF under the plan.
     ImportUnderlay,
+    /// Quit (asks first with unsaved changes).
+    Quit,
 }
 
 impl Default for UiState {
@@ -464,6 +473,9 @@ impl Default for UiState {
             shots: Vec::new(),
             file_request: None,
             native_dialogs: false,
+            native_menu: false,
+            inset_title_bar: false,
+            quit_confirmed: false,
             sketch: Default::default(),
         }
     }
