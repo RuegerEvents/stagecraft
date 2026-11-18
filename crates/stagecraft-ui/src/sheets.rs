@@ -1299,6 +1299,7 @@ fn sheet_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, id: Id) {
 pub fn meta_texts(m: &stagecraft_core::model::Meta) -> Vec<(&'static str, &'static str, String)> {
     vec![
         ("meta.project", "project", m.project.clone()),
+        ("meta.producer", "producer", m.producer.clone()),
         ("meta.venue", "venue", m.venue.clone()),
         ("meta.venue_address", "venue_address", m.venue_address.replace('\n', " / ")),
         ("meta.production_dates", "production_dates", m.production_dates.clone()),
@@ -1307,6 +1308,7 @@ pub fn meta_texts(m: &stagecraft_core::model::Meta) -> Vec<(&'static str, &'stat
         ("meta.website", "website", m.website.clone()),
         ("meta.date", "date", m.date.clone()),
         ("meta.revision", "revision", m.revision.clone()),
+        ("meta.status", "status", m.status.clone()),
     ]
 }
 

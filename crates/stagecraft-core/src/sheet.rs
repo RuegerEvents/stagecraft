@@ -334,7 +334,7 @@ pub enum TitleItem {
     },
     /// Text with placeholders: {project}, {venue}, {venue_address}, {drawn_by},
     /// {date}, {production_dates}, {scale}, {revision}, {sheet_name}, {sheet_number},
-    /// {sheet_rev}, {company}, {website}, {paper}. `{a|b}` takes `b` when `a` is
+    /// {sheet_rev}, {company}, {website}, {paper}, {producer}. `{a|b}` takes `b` when `a` is
     /// empty; `{t:key}` is a word from the sheet-text catalog in the document's sheet
     /// language (`{t:production}`, `{t:drawing}`, `{t:scale}` …).
     Text {
@@ -479,6 +479,7 @@ impl TitleBlock {
                 // Production.
                 text_item([1.2, 17.9], "{t:production}", label, false),
                 wrapped([1.2, 14.2], "{project}", 2.3, true, split - 3.0, 2, false),
+                wrapped([1.2, 7.6], "{producer}", small, false, split - 3.0, 1, false),
                 wrapped([1.2, 1.1], "{venue_address|venue}", small, false, 30.0, 3, true),
                 right([split - 1.0, 1.1], "{production_dates|date}", 1.6),
                 // Drawing.

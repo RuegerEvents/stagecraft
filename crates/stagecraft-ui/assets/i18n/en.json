@@ -300,6 +300,8 @@
   "meta.venue_address": "Venue address",
   "meta.production_dates": "Production dates",
   "meta.website": "Website",
+  "meta.producer": "Produced by",
+  "meta.status": "Status (draft …)",
   "meta.sheet_language": "Sheet language",
   "meta.dimension_format": "Dimensions",
   "meta.dim.m_sup_mm": "Metres, mm raised (6.15⁵)",

@@ -740,15 +740,17 @@ pub fn placeholders(doc: &Document, sheet: &Sheet) -> Vec<(&'static str, String)
     if !m.revision.is_empty() {
         sheet_rev.push(format!("{} {}", tr(lang, "revision"), m.revision));
     }
+    let date = stagecraft_core::sheet::text::date(lang, &m.date);
     if !m.production_dates.is_empty() && !m.date.is_empty() {
-        sheet_rev.push(m.date.clone());
+        sheet_rev.push(date.clone());
     }
     vec![
         ("project", m.project.clone()),
         ("venue", m.venue.clone()),
         ("venue_address", m.venue_address.clone()),
         ("drawn_by", m.drawn_by.clone()),
-        ("date", m.date.clone()),
+        ("date", date),
+        ("producer", m.producer.clone()),
         ("production_dates", m.production_dates.clone()),
         ("scale", scales.join(", ")),
         ("revision", m.revision.clone()),
@@ -1120,7 +1122,32 @@ pub fn compose(doc: &Document, sheet: Id, inputs: &Inputs) -> Option<Page> {
     if sheet.show_legend {
         legend(doc, sheet, w - inset, tb_top, tb_w, &mut prims);
     }
+    status_stamp(doc, w - inset - tb_w - 6.0, inset, &mut prims);
     Some(Page { size: [w, h], prims, viewports, labels })
+}
+
+/// The plan status (`meta.status`, e.g. ENTWURF) as a stamp left of the title block:
+/// large bold red letters in a red frame, right edge at `right`, bottom at `bottom`.
+fn status_stamp(doc: &Document, right: f64, bottom: f64, out: &mut Vec<Prim>) {
+    let text = stagecraft_core::sheet::text::status(doc.meta.sheet_language, &doc.meta.status);
+    if text.is_empty() {
+        return;
+    }
+    let red = Rgb(190, 30, 30);
+    let size = 9.0;
+    let w = text_width(&text, size, true) + 8.0;
+    let (min, max) = ([right - w, bottom], [right, bottom + size + 6.0]);
+    out.push(Prim::rect(min, max, Some(Pen { width: 0.8, dash: None, color: red }), Some(Rgb::WHITE)));
+    out.push(Prim::Text {
+        pos: [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0],
+        text,
+        size,
+        angle: 0.0,
+        h: HAlign::Center,
+        v: VAlign::Middle,
+        bold: true,
+        color: red,
+    });
 }
 
 /// World → paper mapping of a plan viewport (for the GUI's hit tests and drags).

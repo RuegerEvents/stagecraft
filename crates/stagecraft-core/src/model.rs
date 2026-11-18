@@ -173,6 +173,13 @@ pub struct Meta {
     /// Website shown in title blocks.
     #[serde(default)]
     pub website: String,
+    /// Who produces the show (ensemble, company), printed under the production title.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub producer: String,
+    /// Plan status stamped large on every sheet: `draft` (ENTWURF / DRAFT),
+    /// `preliminary` (VORABZUG / PRELIMINARY), any other text as written; empty = none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub status: String,
     /// Language of sheet text (title block labels, legend, view names). Default English.
     #[serde(default)]
     pub sheet_language: crate::units::Language,

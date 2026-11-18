@@ -109,7 +109,8 @@ struct MetaArgs {
     revision: Option<String>,
     /// Company shown in title blocks.
     company: Option<String>,
-    /// Date printed in title blocks, free text.
+    /// Date printed in title blocks: ISO `YYYY-MM-DD` (printed per sheet language,
+    /// de 18.11.2026, en 2026-11-18) or free text (printed as written).
     date: Option<String>,
     /// PNG or JPEG file for the title block logo; empty string removes the logo.
     logo_file: Option<PathBuf>,
@@ -119,6 +120,11 @@ struct MetaArgs {
     /// blocks show the date instead while this is empty.
     production_dates: Option<String>,
     website: Option<String>,
+    /// Who produces the show, printed under the production title.
+    producer: Option<String>,
+    /// Status stamped on every sheet: `draft`, `preliminary` (translated) or free text;
+    /// empty string removes it.
+    status: Option<String>,
     /// Language of sheet text: `en` (default) or `de`. Viewports still named by
     /// default ("Plan", "Section" …) are renamed into the new language.
     sheet_language: Option<Language>,
@@ -178,6 +184,12 @@ fn set_meta(ctx: &mut Ctx, a: MetaArgs) -> CmdResult {
     }
     if let Some(v) = a.website {
         m.website = v;
+    }
+    if let Some(v) = a.producer {
+        m.producer = v;
+    }
+    if let Some(v) = a.status {
+        m.status = v;
     }
     if let Some(v) = a.company {
         m.company = v;

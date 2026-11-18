@@ -191,7 +191,7 @@ fn compact_block_in_german_and_the_generic_one() {
         "Street 1",
         "12345 Town",
         "01.05.2026 – 03.05.2026",
-        "Blatt L-1  ·  Rev. A  ·  2026-11-18",
+        "Blatt L-1  ·  Rev. A  ·  18.11.2026",
         "Typ",
         "Grundriss",
         "Ansicht vorne",
