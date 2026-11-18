@@ -17,7 +17,7 @@ keychain = ["share", "dep:security-framework"]
 
 [dependencies]
 glam.workspace = true
-roxmltree.workspace = true
+craft-xml.workspace = true
 zip.workspace = true
 craft-zip.workspace = true
 gltf.workspace = true

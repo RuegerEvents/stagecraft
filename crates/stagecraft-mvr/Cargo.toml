@@ -8,7 +8,7 @@ license.workspace = true
 
 # No StageCraft dependencies (GDTFs are carried as bytes); builds for wasm32-unknown-unknown.
 [dependencies]
-quick-xml.workspace = true
+craft-xml.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 zip.workspace = true

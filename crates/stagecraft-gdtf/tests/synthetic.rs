@@ -176,3 +176,12 @@ fn fatal_errors() {
     let many = craft_zip::zip64_entry_count_sample(10_000_000);
     assert!(matches!(Gdtf::from_bytes(&many), Err(GdtfError::Zip(m)) if m.contains("entries")));
 }
+
+#[test]
+fn dtd_entities_are_not_expanded() {
+    let xml = br#"<?xml version="1.0"?><!DOCTYPE GDTF [<!ENTITY n "Expanded">]>
+<GDTF DataVersion="1.2"><FixtureType Name="&n;" Manufacturer="M"><Geometries/><DMXModes/></FixtureType></GDTF>"#;
+    let g = Gdtf::from_bytes(&common::zip(&[("description.xml", xml)])).unwrap();
+    assert_eq!(g.fixture.name, "");
+    assert_eq!(g.fixture.manufacturer, "M");
+}

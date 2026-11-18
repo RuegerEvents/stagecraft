@@ -1,11 +1,8 @@
-//! A small owned XML tree: parsed tolerantly with quick-xml, written by hand so the
+//! A small owned XML tree: parsed tolerantly with craft-xml, written by hand so the
 //! output is byte-for-byte deterministic.
 //!
 //! The tree also carries MVR content the model does not know (vendor `UserData`,
 //! unknown child nodes), which is written back unchanged.
-
-use quick_xml::events::Event;
-use quick_xml::{Reader, XmlVersion};
 
 /// An XML element with its attributes (in source order) and children.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -96,108 +93,55 @@ pub struct Parsed {
     pub problems: Vec<String>,
 }
 
-/// Parse XML text into a tree. Never fails: on a syntax error the elements read so
-/// far are kept (open elements are closed) and the error is reported.
+/// What the scene XML may hold. A rig with ten thousand fixtures is a few hundred thousand
+/// elements; these leave room for far more and stop a hostile file before it fills memory.
+const LIMITS: craft_xml::Limits = craft_xml::Limits {
+    max_input: 1 << 30,
+    max_depth: 512,
+    max_nodes: 40_000_000,
+    max_elements: usize::MAX,
+    max_attrs: 4096,
+    max_attrs_total: 80_000_000,
+};
+
+/// Parse XML text into a tree with craft-xml (no DTDs, no entity expansion, bounded). Never
+/// fails: on a syntax error the elements read so far are kept (open elements are closed) and
+/// the error is reported.
 pub fn parse(text: &str) -> Parsed {
-    let mut reader = Reader::from_str(text);
-    let cfg = reader.config_mut();
-    cfg.check_end_names = false;
-    cfg.trim_text(false);
-
-    let mut problems = Vec::new();
-    let mut stack: Vec<Element> = Vec::new();
-    let mut root: Option<Element> = None;
-
-    let close = |stack: &mut Vec<Element>, root: &mut Option<Element>, el: Element| {
-        if let Some(parent) = stack.last_mut() {
-            parent.children.push(Node::Element(el));
-        } else if root.is_none() {
-            *root = Some(el);
-        }
+    use craft_xml::{Options, UnknownEntity};
+    let lenient = Options { limits: LIMITS, unknown_entity: UnknownEntity::Literal, ..Options::default() };
+    // A checking read first, so a damaged file is reported (end tags that do not match,
+    // elements left open, unknown entities); then the lenient one keeps what it can. Both stop
+    // at the end of the root: exporters leave junk after it.
+    let check = Options { strict_end_tags: true, unknown_entity: UnknownEntity::Error, ..lenient };
+    let bytes = text.as_bytes();
+    let problem = match check.parse(bytes) {
+        Ok(root) => return Parsed { root: Some(element(root)), problems: Vec::new() },
+        Err(e) if e.is_limit() => return Parsed { root: None, problems: vec![format!("XML refused: {e}")] },
+        Err(e) => format!("XML: {e}"),
     };
-
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(s)) => {
-                stack.push(start_element(&s, &mut problems));
-            }
-            Ok(Event::Empty(s)) => {
-                let el = start_element(&s, &mut problems);
-                close(&mut stack, &mut root, el);
-            }
-            Ok(Event::End(_)) => {
-                if let Some(el) = stack.pop() {
-                    close(&mut stack, &mut root, el);
-                } else {
-                    problems.push("closing tag without opening tag".into());
-                }
-            }
-            Ok(Event::Text(t)) => {
-                if let Some(top) = stack.last_mut() {
-                    push_text(top, &t.xml10_content());
-                }
-            }
-            Ok(Event::CData(t)) => {
-                if let Some(top) = stack.last_mut() {
-                    push_text(top, &t.xml10_content());
-                }
-            }
-            Ok(Event::GeneralRef(r)) => {
-                let resolved = match r.resolve_char_ref() {
-                    Ok(Some(c)) => Some(c.to_string()),
-                    Ok(None) => quick_xml::escape::resolve_predefined_entity(&r).map(String::from),
-                    Err(_) => None,
-                };
-                let s = resolved.unwrap_or_else(|| {
-                    problems.push(format!("unknown entity &{};", &*r));
-                    format!("&{};", &*r)
-                });
-                if let Some(top) = stack.last_mut() {
-                    push_text(top, &s);
-                }
-            }
-            Ok(Event::Eof) => break,
-            Ok(_) => {} // declaration, comments, PIs, doctype
-            Err(e) => {
-                problems.push(format!("XML syntax error at byte {}: {e}", reader.error_position()));
-                break;
-            }
-        }
+    let (root, err) = lenient.parse_streaming_partial(bytes, &[], |_| Ok::<(), craft_xml::Error>(()));
+    let mut problems = vec![problem];
+    if let Some(e) = err {
+        problems.push(format!("XML: {e}"));
     }
-    if !stack.is_empty() {
-        problems.push(format!("{} unclosed element(s) at end of XML", stack.len()));
-        while let Some(el) = stack.pop() {
-            close(&mut stack, &mut root, el);
-        }
-    }
-    Parsed { root, problems }
+    Parsed { root: root.map(element), problems }
 }
 
-fn push_text(el: &mut Element, s: &str) {
-    if let Some(Node::Text(t)) = el.children.last_mut() {
-        t.push_str(s);
-    } else {
-        el.children.push(Node::Text(s.to_string()));
-    }
-}
-
-fn start_element(s: &quick_xml::events::BytesStart, problems: &mut Vec<String>) -> Element {
-    let name = s.name().as_ref().to_string();
-    let mut el = Element::new(name);
-    for a in s.attributes().with_checks(false) {
-        match a {
-            Ok(a) => {
-                let k = a.key.as_ref().to_string();
-                let v = match a.normalized_value(XmlVersion::Implicit1_0) {
-                    Ok(v) => v.into_owned(),
-                    Err(_) => a.value.to_string(),
-                };
-                el.attrs.push((k, v));
-            }
-            Err(e) => problems.push(format!("bad attribute in <{}>: {e}", el.name)),
+/// craft-xml's tree as ours: CDATA joins the text, comments and instructions are not kept.
+fn element(el: craft_xml::El) -> Element {
+    let mut out = Element { name: el.name, attrs: el.attrs, children: Vec::with_capacity(el.children.len()) };
+    for n in el.children {
+        match n {
+            craft_xml::Node::El(e) => out.children.push(Node::Element(element(e))),
+            craft_xml::Node::Text(t) | craft_xml::Node::CData(t) => match out.children.last_mut() {
+                Some(Node::Text(prev)) => prev.push_str(&t),
+                _ => out.children.push(Node::Text(t)),
+            },
+            craft_xml::Node::Pi { .. } | craft_xml::Node::Comment(_) => {}
         }
     }
-    el
+    out
 }
 
 /// Write a tree as an indented XML document with declaration.
@@ -300,6 +244,14 @@ mod tests {
         assert_eq!(root.name, "A");
         assert!(root.child("B").is_some());
         assert!(root.child("C").unwrap().child("D").is_some());
+    }
+
+    #[test]
+    fn entities_are_not_expanded() {
+        let src = r#"<!DOCTYPE A [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]><A>&b;</A>"#;
+        let p = parse(src);
+        assert_eq!(p.root.unwrap().text(), "&b;", "kept literally, never expanded");
+        assert!(p.problems.iter().any(|m| m.contains("&b;")), "{:?}", p.problems);
     }
 
     #[test]

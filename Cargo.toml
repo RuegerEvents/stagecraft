@@ -54,7 +54,6 @@ sha2 = "0.10"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 roxmltree = "0.20"
-quick-xml = "0.42"
 gltf = { version = "1", default-features = false, features = ["utils", "names"] }
 ureq = { version = "3", features = ["cookies"] }
 security-framework = "3"
@@ -62,6 +61,7 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 # storytold/craft-libs (MIT OR Apache-2.0), one revision for every crate.
 craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 craft-dialogs = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
+craft-xml = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 craft-zip = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 
 # Hidden-line removal runs on every sheet change; keep it fast in debug builds too.

@@ -2,37 +2,46 @@
 
 use std::collections::BTreeMap;
 
+use craft_xml::El;
 use glam::Mat4;
-use roxmltree::{Document, Node, ParsingOptions};
+
+/// An element of `description.xml`.
+type Node<'a> = &'a El;
 
 use crate::types::*;
 use crate::{GdtfError, Warning};
 
+/// What a `description.xml` may hold. Real ones are a few MB with tens of thousands of
+/// elements (pixel bars with many emitters).
+const LIMITS: craft_xml::Limits = craft_xml::Limits {
+    max_input: 256 << 20,
+    max_depth: 256,
+    max_nodes: 8_000_000,
+    max_elements: usize::MAX,
+    max_attrs: 1024,
+    max_attrs_total: 16_000_000,
+};
+
 pub(crate) fn parse_description(xml: &[u8], warnings: &mut Vec<Warning>) -> Result<FixtureType, GdtfError> {
     let text = decode(xml, warnings);
-    let opts = ParsingOptions { allow_dtd: true, ..ParsingOptions::default() };
-    // Some exporters pad the file with NUL bytes or append junk after </GDTF>.
+    // craft-xml: no DTD processing, no entity expansion, bounded. Names by local part, as
+    // GDTF has no namespaces but some exporters add one. End tags must match; the read stops
+    // at the end of the root, so junk after </GDTF> (some exporters pad with NUL bytes or
+    // append data) is not looked at.
+    let opts = craft_xml::Options { limits: LIMITS, strict_end_tags: true, ..craft_xml::Options::local() };
     let trimmed = text.trim_end_matches(|c: char| c == '\0' || c.is_whitespace());
-    let doc = match Document::parse_with_options(trimmed, opts) {
-        Ok(d) => d,
-        Err(e) => {
-            let cut = trimmed.rfind("</GDTF>").map(|i| &trimmed[..i + "</GDTF>".len()]);
-            match cut.filter(|c| c.len() < trimmed.len()) {
-                Some(c) => {
-                    let d = Document::parse_with_options(c, opts).map_err(|_| GdtfError::Xml(e.to_string()))?;
-                    warnings.push(Warning::new("xml", "ignored data after </GDTF>"));
-                    d
-                }
-                None => return Err(GdtfError::Xml(e.to_string())),
-            }
-        }
-    };
-    let root = doc.root_element();
-    if root.tag_name().name() != "GDTF" {
-        warnings.push(Warning::new("xml", format!("root element is <{}>, expected <GDTF>", root.tag_name().name())));
+    let doc = opts.parse(trimmed.as_bytes()).map_err(|e| GdtfError::Xml(e.to_string()))?;
+    if let Some(end) = trimmed.rfind("</GDTF>")
+        && end + "</GDTF>".len() < trimmed.len()
+    {
+        warnings.push(Warning::new("xml", "ignored data after </GDTF>"));
     }
-    let data_version = root.attribute("DataVersion").unwrap_or("").to_string();
-    let ft = if root.tag_name().name() == "FixtureType" {
+    let root = &doc;
+    if root.name.as_str() != "GDTF" {
+        warnings.push(Warning::new("xml", format!("root element is <{}>, expected <GDTF>", root.name.as_str())));
+    }
+    let data_version = root.attr("DataVersion").unwrap_or("").to_string();
+    let ft = if root.name.as_str() == "FixtureType" {
         root
     } else {
         child(root, "FixtureType").ok_or(GdtfError::NoFixtureType)?
@@ -53,7 +62,7 @@ pub(crate) fn parse_description(xml: &[u8], warnings: &mut Vec<Warning>) -> Resu
             p.int(ft, "ThumbnailOffsetX", 0, "FixtureType"),
             p.int(ft, "ThumbnailOffsetY", 0, "FixtureType"),
         ),
-        can_have_children: !ft.attribute("CanHaveChildren").is_some_and(|v| v.eq_ignore_ascii_case("no")),
+        can_have_children: !ft.attr("CanHaveChildren").is_some_and(|v| v.eq_ignore_ascii_case("no")),
         ..FixtureType::default()
     };
     if out.name.is_empty() {
@@ -64,13 +73,13 @@ pub(crate) fn parse_description(xml: &[u8], warnings: &mut Vec<Warning>) -> Resu
         out.physical = p.physical(pd);
     }
     if let Some(models) = child(ft, "Models") {
-        for m in models.children().filter(|n| n.has_tag_name("Model")) {
+        for m in models.elements().filter(|n| n.name == "Model") {
             out.models.push(p.model(m));
         }
     }
     match child(ft, "Geometries") {
         Some(g) => {
-            for n in g.children().filter(Node::is_element) {
+            for n in g.elements() {
                 if let Some(geo) = p.geometry(n, 0) {
                     out.geometries.push(geo);
                 }
@@ -80,18 +89,18 @@ pub(crate) fn parse_description(xml: &[u8], warnings: &mut Vec<Warning>) -> Resu
     }
     match child(ft, "DMXModes") {
         Some(m) => {
-            for n in m.children().filter(|n| n.has_tag_name("DMXMode")) {
+            for n in m.elements().filter(|n| n.name == "DMXMode") {
                 out.modes.push(p.mode(n));
             }
         }
         None => p.warn("DMXModes", "missing"),
     }
     if let Some(r) = child(ft, "Revisions") {
-        for n in r.children().filter(|n| n.has_tag_name("Revision")) {
+        for n in r.elements().filter(|n| n.name == "Revision") {
             out.revisions.push(Revision {
                 text: attr(n, "Text"),
                 date: attr(n, "Date"),
-                user_id: n.attribute("UserID").and_then(|v| v.trim().parse().ok()),
+                user_id: n.attr("UserID").and_then(|v| v.trim().parse().ok()),
                 modified_by: attr(n, "ModifiedBy"),
             });
         }
@@ -112,16 +121,16 @@ fn decode(xml: &[u8], warnings: &mut Vec<Warning>) -> String {
     }
 }
 
-fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
-    n.children().find(|c| c.has_tag_name(name))
+fn child<'a>(n: Node<'a>, name: &str) -> Option<Node<'a>> {
+    n.elements().find(|c| c.name == name)
 }
 
 fn attr(n: Node, name: &str) -> String {
-    n.attribute(name).unwrap_or("").to_string()
+    n.attr(name).unwrap_or("").to_string()
 }
 
 fn opt_attr(n: Node, name: &str) -> Option<String> {
-    n.attribute(name).map(str::trim).filter(|v| !v.is_empty()).map(str::to_string)
+    n.attr(name).map(str::trim).filter(|v| !v.is_empty()).map(str::to_string)
 }
 
 /// Parses a GDTF float, accepting a decimal comma as some exporters write.
@@ -189,7 +198,7 @@ impl Parser<'_> {
     }
 
     fn float(&mut self, n: Node, name: &str, ctx: &str) -> Option<f32> {
-        let v = n.attribute(name)?;
+        let v = n.attr(name)?;
         if v.trim().is_empty() {
             return None;
         }
@@ -205,7 +214,7 @@ impl Parser<'_> {
     }
 
     fn int(&mut self, n: Node, name: &str, default: i32, ctx: &str) -> i32 {
-        match n.attribute(name).map(str::trim) {
+        match n.attr(name).map(str::trim) {
             None | Some("") => default,
             Some(v) => v.parse().ok().or_else(|| parse_float(v).map(|f| f.round() as i32)).unwrap_or_else(|| {
                 self.warn(ctx, format!("{name}=\"{v}\" is not an integer"));
@@ -219,8 +228,8 @@ impl Parser<'_> {
         let Some(props) = child(pd, "Properties") else {
             return out;
         };
-        for n in props.children().filter(Node::is_element) {
-            match n.tag_name().name() {
+        for n in props.elements() {
+            match n.name.as_str() {
                 "Weight" => out.weight_kg = self.float(n, "Value", "Weight").filter(|w| *w > 0.0),
                 "LegHeight" => out.leg_height_m = self.float(n, "Value", "LegHeight").filter(|w| *w > 0.0),
                 "OperatingTemperature" => {
@@ -253,7 +262,7 @@ impl Parser<'_> {
             length_m: self.float_or(n, "Length", 0.0, &ctx).abs(),
             width_m: self.float_or(n, "Width", 0.0, &ctx).abs(),
             height_m: self.float_or(n, "Height", 0.0, &ctx).abs(),
-            primitive: PrimitiveType::parse(n.attribute("PrimitiveType").unwrap_or("")),
+            primitive: PrimitiveType::parse(n.attr("PrimitiveType").unwrap_or("")),
             file: opt_attr(n, "File"),
             svg_offset,
             svg_side_offset,
@@ -271,10 +280,10 @@ impl Parser<'_> {
             self.warn("Geometries", "geometry tree deeper than 64; cut off");
             return None;
         }
-        let tag = n.tag_name().name();
+        let tag = n.name.as_str();
         let name = attr(n, "Name");
         let ctx = format!("{tag} {name}");
-        let position = match n.attribute("Position") {
+        let position = match n.attr("Position") {
             None => Mat4::IDENTITY,
             Some(s) if s.trim().is_empty() => Mat4::IDENTITY,
             Some(s) => parse_matrix(s).unwrap_or_else(|| {
@@ -302,8 +311,8 @@ impl Parser<'_> {
             "Magnet" => GeometryKind::Magnet,
             "GeometryReference" => {
                 let mut breaks = Vec::new();
-                for b in n.children().filter(|c| c.has_tag_name("Break")) {
-                    let off = b.attribute("DMXOffset").unwrap_or("1");
+                for b in n.elements().filter(|c| c.name == "Break") {
+                    let off = b.attr("DMXOffset").unwrap_or("1");
                     let dmx_offset = parse_dmx_address(off).unwrap_or_else(|| {
                         self.warn(&ctx, format!("Break DMXOffset=\"{off}\" unreadable; using 1"));
                         1
@@ -326,14 +335,13 @@ impl Parser<'_> {
         };
         let mut children = Vec::new();
         if !matches!(kind, GeometryKind::Reference { .. }) {
-            for c in n.children().filter(Node::is_element) {
+            for c in n.elements() {
                 if let Some(g) = self.geometry(c, depth + 1) {
                     children.push(g);
                 }
             }
         }
-        let attributes: BTreeMap<String, String> =
-            n.attributes().map(|a| (a.name().to_string(), a.value().to_string())).collect();
+        let attributes: BTreeMap<String, String> = n.attrs.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         Some(Geometry { name, model: opt_attr(n, "Model"), position, kind, children, attributes })
     }
 
@@ -363,14 +371,14 @@ impl Parser<'_> {
             self.warn(&ctx, "no DMXChannels");
             return mode;
         };
-        for c in chs.children().filter(|c| c.has_tag_name("DMXChannel")) {
+        for c in chs.elements().filter(|c| c.name == "DMXChannel") {
             mode.channels.push(self.channel(c, &ctx));
         }
         mode
     }
 
     fn channel(&mut self, n: Node, ctx: &str) -> DmxChannel {
-        let dmx_break = match n.attribute("DMXBreak").map(str::trim) {
+        let dmx_break = match n.attr("DMXBreak").map(str::trim) {
             None | Some("") => DmxBreak::Number(1),
             Some(v) if v.eq_ignore_ascii_case("overwrite") => DmxBreak::Overwrite,
             Some(v) => match v.parse::<u32>() {
@@ -382,7 +390,7 @@ impl Parser<'_> {
             },
         };
         let mut offsets = Vec::new();
-        if let Some(o) = n.attribute("Offset").map(str::trim)
+        if let Some(o) = n.attr("Offset").map(str::trim)
             && !o.is_empty()
             && !o.eq_ignore_ascii_case("none")
         {
@@ -394,23 +402,23 @@ impl Parser<'_> {
             }
         }
         let logical_channels = n
-            .children()
-            .filter(|c| c.has_tag_name("LogicalChannel"))
+            .elements()
+            .filter(|c| c.name == "LogicalChannel")
             .map(|l| LogicalChannel {
                 attribute: attr(l, "Attribute"),
                 snap: attr(l, "Snap"),
                 master: attr(l, "Master"),
                 functions: l
-                    .children()
-                    .filter(|c| c.has_tag_name("ChannelFunction"))
+                    .elements()
+                    .filter(|c| c.name == "ChannelFunction")
                     .map(|f| ChannelFunction {
                         name: attr(f, "Name"),
                         attribute: attr(f, "Attribute"),
                         original_attribute: attr(f, "OriginalAttribute"),
                         dmx_from: attr(f, "DMXFrom"),
                         default: attr(f, "Default"),
-                        physical_from: f.attribute("PhysicalFrom").and_then(parse_float),
-                        physical_to: f.attribute("PhysicalTo").and_then(parse_float),
+                        physical_from: f.attr("PhysicalFrom").and_then(parse_float),
+                        physical_to: f.attr("PhysicalTo").and_then(parse_float),
                         wheel: opt_attr(f, "Wheel"),
                     })
                     .collect(),
