@@ -14,4 +14,15 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
 [dev-dependencies]
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
+schemars = "1.2"
+
+# faer's generic dense QR is monomorphised into this crate and is ~500× slower
+# unoptimised (6 s instead of 12 ms for the 200-point room). Optimise dev builds a little
+# and the numeric dependencies fully. Move to the workspace root on integration.
+[profile.dev]
+opt-level = 1
+[profile.dev.package.faer]
+opt-level = 3
+[profile.dev.package.ezpz]
+opt-level = 3
