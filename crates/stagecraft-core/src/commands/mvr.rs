@@ -77,19 +77,20 @@ fn export(ctx: &mut Ctx, a: ExportArgs) -> CmdResult {
 struct ModelArgs {
     #[serde(flatten)]
     common: Common,
-    /// Path to a `.glb`, `.gltf`, `.obj` or `.3ds` file. A `.gltf`'s external
-    /// buffers are read from next to it and embedded.
+    /// Path to a `.glb`, `.gltf`, `.obj`, `.stl`, `.ply`, `.fbx`, `.3mf` or `.3ds` file. A
+    /// `.gltf`'s external buffers are read from next to it and embedded; other files must stand
+    /// alone (OBJ materials and textures are not read).
     path: Option<PathBuf>,
     /// The file's bytes, base64, instead of `path` (needs `file_name` for the format).
     data_base64: Option<String>,
     /// File name with extension for `data_base64`.
     file_name: Option<String>,
-    /// File units: `m`, `cm`, `mm`, `in`, or `auto` (default: glTF metres; OBJ and 3DS
-    /// mm unless smaller than 50 units across, then metres).
+    /// File units: `m`, `cm`, `mm`, `in`, or `auto` (default: glTF metres, FBX and 3MF as the
+    /// file says; OBJ, STL, PLY and 3DS mm unless smaller than 50 units across, then metres).
     #[serde(default)]
     unit: Option<String>,
-    /// Up axis of the file: `y` or `z`. Default: z for 3DS, y for OBJ; glTF is y-up by
-    /// definition and always turned.
+    /// Up axis of the file: `y` or `z`. Default: y for OBJ, z for STL, PLY, 3MF and 3DS; glTF
+    /// (y-up by definition) and FBX (axes in the file) are always turned.
     #[serde(default)]
     up: Option<String>,
     /// Where the file's origin goes, mm. Default 0, 0, 0.
@@ -128,27 +129,29 @@ fn model_import(ctx: &mut Ctx, a: ModelArgs) -> CmdResult {
         None => (name.clone(), String::new()),
     };
     if !model_file::EXTENSIONS.contains(&ext.as_str()) {
-        return Err(CmdError::invalid_args(format!("`{name}`: use a .glb, .gltf, .obj or .3ds file")));
+        return Err(CmdError::invalid_args(format!("`{name}`: use a .{} file", model_file::EXTENSIONS.join(", ."))));
     }
     if ext == "gltf" {
         bytes = inline_gltf(&bytes, a.path.as_deref().and_then(Path::parent))?;
     }
-    let raw = model_file::read(&ext, &bytes).map_err(|e| CmdError::invalid_args(format!("`{name}`: {e}")))?;
+    let read = model_file::read_file(&ext, &bytes).map_err(|e| CmdError::invalid_args(format!("`{name}`: {e}")))?;
     let scale = match a.unit.as_deref().unwrap_or("auto") {
-        "auto" => model_file::guess_scale(&ext, &raw),
+        "auto" => model_file::guess_scale(&read),
         "m" => 1000.0,
         "cm" => 10.0,
         "mm" => 1.0,
         "in" => 25.4,
         u => return Err(CmdError::invalid_args(format!("unknown unit `{u}`; use m, cm, mm, in or auto"))),
     };
+    // glTF and FBX say their axes and are turned when read.
     let y_up = match (a.up.as_deref(), ext.as_str()) {
-        (_, "glb" | "gltf") => false,
+        (_, "glb" | "gltf" | "fbx") => false,
         (Some("y"), _) => true,
         (Some("z"), _) => false,
         (None, e) => e == "obj",
         (Some(u), _) => return Err(CmdError::invalid_args(format!("up must be `y` or `z`, not `{u}`"))),
     };
+    let raw = read.mesh;
     let asset = Asset::new(&name, &ext, bytes);
     let part = ModelPart { asset: asset.hash.clone(), matrix: ModelPart::IDENTITY, scale, y_up };
     let bounds = model_file::part_bounds(&raw, &part).unwrap_or([[0.0; 3]; 2]);
@@ -162,5 +165,8 @@ fn model_import(ctx: &mut Ctx, a: ModelArgs) -> CmdResult {
     out["triangles"] = json!(raw.indices.len() / 3);
     out["size"] = json!([bounds[1][0] - bounds[0][0], bounds[1][1] - bounds[0][1], bounds[1][2] - bounds[0][2]]);
     out["scale"] = json!(scale);
+    if !read.warnings.is_empty() {
+        out["warnings"] = json!(read.warnings);
+    }
     Ok(out)
 }

@@ -296,11 +296,155 @@ fn model_import_reads_obj_and_glb() {
     let size: Vec<f64> =
         r["size"].as_array().unwrap().iter().map(|v| (v.as_f64().unwrap() * 10.0).round() / 10.0).collect();
     assert_eq!(size, vec![2000.0, 1000.0, 500.0]);
-    assert!(e.execute("model.import", json!({ "path": tmp.path().join("x.stl") })).is_err());
+    assert!(e.execute("model.import", json!({ "path": tmp.path().join("x.stl") })).is_err(), "missing file");
+    assert!(e.execute("model.import", json!({ "path": tmp.path().join("x.dae") })).is_err(), "unknown format");
     // Saved and loaded with its asset.
     let file = tmp.path().join("m.stagecraft");
     run(&mut e, "doc.save", json!({ "path": file }));
     let e2 = Engine::open(&file).unwrap();
     let o2 = &e2.doc().objects[&m];
     assert_eq!(stagecraft_geom::mesh(e2.doc(), o2, stagecraft_geom::Lod::Full).triangle_count(), 12);
+}
+
+/// The 2 × 1 × 0.5 m box of the OBJ test as triangles, in metres, z-up.
+fn box_triangles() -> Vec<[[f64; 3]; 3]> {
+    let v = |x: f64, y: f64, z: f64| [x, y, z];
+    let c = [
+        v(0.0, 0.0, 0.0),
+        v(2.0, 0.0, 0.0),
+        v(2.0, 1.0, 0.0),
+        v(0.0, 1.0, 0.0),
+        v(0.0, 0.0, 0.5),
+        v(2.0, 0.0, 0.5),
+        v(2.0, 1.0, 0.5),
+        v(0.0, 1.0, 0.5),
+    ];
+    let quads = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
+    quads.iter().flat_map(|q| [[c[q[0]], c[q[1]], c[q[2]]], [c[q[0]], c[q[2]], c[q[3]]]]).collect()
+}
+
+fn size_of(r: &Value) -> Vec<f64> {
+    r["size"].as_array().unwrap().iter().map(|v| (v.as_f64().unwrap() * 10.0).round() / 10.0).collect()
+}
+
+#[test]
+fn model_import_reads_stl_ply_fbx_and_3mf() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tris = box_triangles();
+    let mut e = Engine::new();
+    let import = |e: &mut Engine, name: &str, bytes: &[u8], extra: Value| {
+        let p = tmp.path().join(name);
+        std::fs::write(&p, bytes).unwrap();
+        let mut args = json!({ "path": p });
+        if let (Some(a), Some(x)) = (args.as_object_mut(), extra.as_object()) {
+            a.extend(x.clone());
+        }
+        let r = run(e, "model.import", args);
+        let o = e.doc().objects[&id(&r)].clone();
+        assert_eq!(stagecraft_geom::mesh(e.doc(), &o, stagecraft_geom::Lod::Full).triangle_count(), 12, "{name}");
+        r
+    };
+
+    // Binary STL in mm (z-up, the usual).
+    let mut stl = vec![0u8; 80];
+    stl.extend((tris.len() as u32).to_le_bytes());
+    for t in &tris {
+        stl.extend([0u8; 12]);
+        for p in t {
+            for c in p {
+                stl.extend(((c * 1000.0) as f32).to_le_bytes());
+            }
+        }
+        stl.extend([0u8; 2]);
+    }
+    let r = import(&mut e, "box.stl", &stl, json!({}));
+    assert_eq!(size_of(&r), vec![2000.0, 1000.0, 500.0], "{r}");
+
+    // ASCII PLY in metres (small, so read as metres).
+    let mut ply = format!(
+        "ply\nformat ascii 1.0\nelement vertex {}\nproperty float x\nproperty float y\nproperty float z\n\
+         element face {}\nproperty list uchar int vertex_indices\nend_header\n",
+        tris.len() * 3,
+        tris.len()
+    );
+    for t in &tris {
+        for p in t {
+            ply.push_str(&format!("{} {} {}\n", p[0], p[1], p[2]));
+        }
+    }
+    for i in 0..tris.len() {
+        ply.push_str(&format!("3 {} {} {}\n", 3 * i, 3 * i + 1, 3 * i + 2));
+    }
+    let r = import(&mut e, "box.ply", ply.as_bytes(), json!({}));
+    assert_eq!(size_of(&r), vec![2000.0, 1000.0, 500.0], "{r}");
+
+    // 3MF in centimetres: the unit comes from the file.
+    let mut verts = String::new();
+    let mut faces = String::new();
+    for (i, t) in tris.iter().enumerate() {
+        for p in t {
+            verts.push_str(&format!("<vertex x=\"{}\" y=\"{}\" z=\"{}\"/>", p[0] * 100.0, p[1] * 100.0, p[2] * 100.0));
+        }
+        faces.push_str(&format!("<triangle v1=\"{}\" v2=\"{}\" v3=\"{}\"/>", 3 * i, 3 * i + 1, 3 * i + 2));
+    }
+    let model = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><model unit="centimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model"><mesh><vertices>{verts}</vertices><triangles>{faces}</triangles></mesh></object></resources><build><item objectid="1"/></build></model>"#
+    );
+    let mut w = craft_zip::Writer::new();
+    w.add(
+        "[Content_Types].xml",
+        br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>"#,
+        craft_zip::Compression::Deflated,
+    )
+    .unwrap();
+    w.add(
+        "_rels/.rels",
+        br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>"#,
+        craft_zip::Compression::Deflated,
+    )
+    .unwrap();
+    w.add("3D/3dmodel.model", model.as_bytes(), craft_zip::Compression::Deflated).unwrap();
+    let r = import(&mut e, "box.3mf", &w.finish().unwrap(), json!({}));
+    assert_eq!(size_of(&r), vec![2000.0, 1000.0, 500.0], "{r}");
+    assert_eq!(r["scale"], 10.0);
+
+    // ASCII FBX, y-up in metres (UnitScaleFactor 100 cm): turned to z-up and scaled.
+    let mut v = Vec::new();
+    let mut idx = Vec::new();
+    for (i, t) in tris.iter().enumerate() {
+        for p in t {
+            // z-up → y-up: (x, y, z) → (x, z, −y)
+            v.extend([p[0], p[2], -p[1]]);
+        }
+        idx.extend([3 * i as i64, 3 * i as i64 + 1, -(3 * i as i64 + 2) - 1]);
+    }
+    let list = |xs: &[String]| xs.join(",");
+    let fbx = format!(
+        "; FBX 7.4.0 project file\nFBXHeaderExtension:  {{\n\tFBXVersion: 7400\n}}\n\
+         GlobalSettings:  {{\n\tVersion: 1000\n\tProperties70:  {{\n\
+         \t\tP: \"UpAxis\", \"int\", \"Integer\", \"\",1\n\t\tP: \"UpAxisSign\", \"int\", \"Integer\", \"\",1\n\
+         \t\tP: \"FrontAxis\", \"int\", \"Integer\", \"\",2\n\t\tP: \"FrontAxisSign\", \"int\", \"Integer\", \"\",1\n\
+         \t\tP: \"CoordAxis\", \"int\", \"Integer\", \"\",0\n\t\tP: \"CoordAxisSign\", \"int\", \"Integer\", \"\",1\n\
+         \t\tP: \"UnitScaleFactor\", \"double\", \"Number\", \"\",100\n\t}}\n}}\n\
+         Objects:  {{\n\tGeometry: 10, \"Geometry::Box\", \"Mesh\" {{\n\
+         \t\tVertices: *{} {{\n\t\t\ta: {}\n\t\t}}\n\
+         \t\tPolygonVertexIndex: *{} {{\n\t\t\ta: {}\n\t\t}}\n\t}}\n\
+         \tModel: 20, \"Model::Box\", \"Mesh\" {{\n\t}}\n}}\n\
+         Connections:  {{\n\tC: \"OO\",10,20\n\tC: \"OO\",20,0\n}}\n",
+        v.len(),
+        list(&v.iter().map(|x| x.to_string()).collect::<Vec<_>>()),
+        idx.len(),
+        list(&idx.iter().map(|x| x.to_string()).collect::<Vec<_>>()),
+    );
+    let r = import(&mut e, "box.fbx", fbx.as_bytes(), json!({}));
+    assert_eq!(size_of(&r), vec![2000.0, 1000.0, 500.0], "{r}");
+    assert_eq!(r["scale"], 1000.0);
+
+    // Saved and loaded: every format draws again from its asset.
+    let file = tmp.path().join("m.stagecraft");
+    run(&mut e, "doc.save", json!({ "path": file }));
+    let e2 = Engine::open(&file).unwrap();
+    for o in e2.doc().objects.values() {
+        assert_eq!(stagecraft_geom::mesh(e2.doc(), o, stagecraft_geom::Lod::Full).triangle_count(), 12, "{}", o.name);
+    }
 }

@@ -158,7 +158,7 @@ impl Studio {
 }
 
 /// What File > Import model offers (`model.import` reads all of them).
-pub const MODEL_EXTENSIONS: &[&str] = &["glb", "gltf", "obj", "3ds"];
+pub const MODEL_EXTENSIONS: &[&str] = &stagecraft_core::model_file::EXTENSIONS;
 
 /// What File > Import underlay offers.
 pub const UNDERLAY_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "pdf", "svg", "dxf", "dwg"];

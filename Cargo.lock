@@ -312,7 +312,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
  "x11rb",
 ]
 
@@ -1068,6 +1068,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-mesh"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=52fc6b5b3d2179239664136e84543231f8576f8d#52fc6b5b3d2179239664136e84543231f8576f8d"
+dependencies = [
+ "craft-opc",
+ "craft-xml",
+ "craft-zip",
+ "miniz_oxide 0.9.1",
+ "serde_json",
+]
+
+[[package]]
+name = "craft-opc"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=52fc6b5b3d2179239664136e84543231f8576f8d#52fc6b5b3d2179239664136e84543231f8576f8d"
+dependencies = [
+ "craft-xml",
+ "craft-zip",
+ "log",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-xml"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=52fc6b5b3d2179239664136e84543231f8576f8d#52fc6b5b3d2179239664136e84543231f8576f8d"
@@ -1594,7 +1617,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4486,7 +4509,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4981,6 +5004,7 @@ version = "0.1.0"
 dependencies = [
  "craft-atomic",
  "craft-dwg",
+ "craft-mesh",
  "craft-zip",
  "glam",
  "image",
@@ -5019,6 +5043,7 @@ dependencies = [
 name = "stagecraft-geom"
 version = "0.1.0"
 dependencies = [
+ "craft-zip",
  "earcutr",
  "glam",
  "roxmltree 0.20.0",
@@ -5250,7 +5275,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6250,7 +6275,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

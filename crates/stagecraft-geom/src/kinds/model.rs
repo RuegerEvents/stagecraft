@@ -1,4 +1,4 @@
-//! Model objects: meshes of embedded glTF/GLB, OBJ and 3DS files.
+//! Model objects: meshes of embedded glTF/GLB, OBJ, STL, PLY, FBX, 3MF and 3DS files.
 //!
 //! A part's file is read once per asset, unit scale and up axis and cached; the
 //! object's mesh (all parts in its local frame) is cached per part list. The plan is a
@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use glam::{DAffine3, DVec3, Mat4, Vec3};
 use stagecraft_core::model::{ModelPart, P2};
 use stagecraft_core::{Document, Object, ObjectKind};
-use stagecraft_gdtf::models::{RawMesh, gltf, obj, three_ds};
+use stagecraft_gdtf::models::{RawMesh, gltf};
 
 use crate::gdtf::{MAX_ENTRIES, append, directions, world_silhouette};
 use crate::{LineClass, MaterialClass, Mesh, PlanPrim, PlanStyle};
@@ -31,15 +31,10 @@ fn cache() -> &'static Mutex<Cache> {
     C.get_or_init(Default::default)
 }
 
-/// Reads a mesh file by extension (`glb`, `gltf`, `obj`, `3ds`), in its own axes and
-/// units (glTF already turned to z-up).
+/// Reads a mesh file by extension (`stagecraft_core::model_file::EXTENSIONS`), in its own
+/// units (glTF and FBX already turned to z-up).
 pub fn read_file(ext: &str, bytes: &[u8]) -> Result<RawMesh, String> {
-    match ext.to_ascii_lowercase().as_str() {
-        "glb" | "gltf" => gltf::load(bytes),
-        "3ds" => three_ds::load(bytes),
-        "obj" => obj::load(bytes),
-        other => Err(format!("unsupported model format `{other}`")),
-    }
+    stagecraft_core::model_file::read(ext, bytes)
 }
 
 /// The part's frame: `matrix` after scale and up turn.

@@ -243,7 +243,8 @@ width, plan/3D PNGs). Assumptions A1–A12 are in the script and as notes in the
 `stagecraft-mvr` (no StageCraft deps; README there) reads and writes MVR files;
 `stagecraft-core/src/mvr.rs` maps them to the document (`mvr.import {path,
 layer_mapping?}`, `mvr.export {path}`), `commands/mvr.rs` also has `model.import`
-(glb, gltf, obj, 3ds). Imported objects keep their MVR UUID and land at their MVR
+(glb, gltf, obj, stl, ply, fbx, 3mf through craft-mesh; 3ds through the GDTF reader;
+`model_file::read` is the one reader core and geom use). Imported objects keep their MVR UUID and land at their MVR
 world matrix; fixtures get their GDTF into the library, mode, FID/CID and
 multi-break patch; trusses become truss pieces (catalogue profile by name, else the
 closest cross-section); objects with geometry become `model` objects whose parts
