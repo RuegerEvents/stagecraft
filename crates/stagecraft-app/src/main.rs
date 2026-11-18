@@ -69,6 +69,7 @@ fn load_user_catalogues() {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     load_user_catalogues();
+    stagecraft_sheet::install();
     let Some(cmd) = cli.cmd else {
         let engine = match cli.file {
             Some(f) => Engine::open(&f).map_err(|e| anyhow!("{e}"))?,

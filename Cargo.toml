@@ -5,6 +5,7 @@ exclude = ["crates/stagecraft-gdtf", "crates/stagecraft-mvr", "crates/stagecraft
 members = [
     "crates/stagecraft-core",
     "crates/stagecraft-geom",
+    "crates/stagecraft-sheet",
     "crates/stagecraft-control",
     "crates/stagecraft-ui",
     "crates/stagecraft-app",
@@ -20,6 +21,7 @@ license = "MIT"
 stagecraft-core = { path = "crates/stagecraft-core" }
 stagecraft-control = { path = "crates/stagecraft-control" }
 stagecraft-geom = { path = "crates/stagecraft-geom" }
+stagecraft-sheet = { path = "crates/stagecraft-sheet" }
 stagecraft-ui = { path = "crates/stagecraft-ui" }
 anyhow = "1"
 earcutr = "0.5"

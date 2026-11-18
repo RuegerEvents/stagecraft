@@ -111,9 +111,9 @@ fn fonts() -> FontDefinitions {
     let mut add = |name: &str, bytes: &'static [u8]| {
         fonts.font_data.insert(name.into(), std::sync::Arc::new(FontData::from_static(bytes)));
     };
-    add("Roboto", include_bytes!("../assets/fonts/Roboto-Regular.ttf"));
-    add("Roboto Bold", include_bytes!("../assets/fonts/Roboto-Bold.ttf"));
-    add("Roboto Mono", include_bytes!("../assets/fonts/RobotoMono-Regular.ttf"));
+    add("Roboto", include_bytes!("../../../assets/fonts/Roboto-Regular.ttf"));
+    add("Roboto Bold", include_bytes!("../../../assets/fonts/Roboto-Bold.ttf"));
+    add("Roboto Mono", include_bytes!("../../../assets/fonts/RobotoMono-Regular.ttf"));
     // Ours first; egui's own stay behind them for symbols Roboto lacks.
     fonts.families.get_mut(&FontFamily::Proportional).expect("egui has it").insert(0, "Roboto".into());
     fonts.families.get_mut(&FontFamily::Monospace).expect("egui has it").insert(0, "Roboto Mono".into());
