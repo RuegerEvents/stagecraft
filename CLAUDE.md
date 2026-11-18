@@ -351,8 +351,11 @@ GUI: Calibrate tool (K), File > Import underlay…, inspector rows. Tests:
 
 `cargo test -p stagecraft-ui --test hall_a` builds the venue from
 `testdata/private/hall_a.drawio.svg` through commands only (skips without it)
-and writes `testdata/private/hall_a/` (documents, PDFs at 13 and 15 m portal
-width, plan/3D PNGs). Assumptions A1–A12 are in the script and as notes in the plan.
+and writes `testdata/private/hall_a/` (one document, one PDF, plan/3D/house/side
+PNGs; the 13 → 15 m portal check runs and is undone inside the test). The photos of the
+real hall are in `testdata/private/hall_a/photos/` (private; never commit or
+describe the people in them). Assumptions A1–A11 are in the script and as notes in the
+plan.
 
 ## MVR and imported models
 

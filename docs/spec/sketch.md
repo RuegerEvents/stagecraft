@@ -50,3 +50,12 @@ are wrong, the numbers count. The angled strips ("9m", "13m bis zur Mitte", rear
 "Breite 2,25m … ca. 1,80m") are walkways around the audience, about 2 m wide, at stage
 height. Mark every assumption in the plan. The result should be a parametric sketch,
 so changing e.g. the portal width moves what hangs on it.
+
+Round 2 (2026-11-18, photos of the hall, `testdata/private/hall_a/photos/`, private):
+the seating fans out round the stage, aisles widen towards the back, and the rear
+walkways form a V. "0,5" are the grey tormentors, "3,20" the concrete pillars beside the
+14 m opening; the stage front is a polygon; the rig is trusses. The test writes one set
+of outputs (`hall_a.stagecraft`, `.pdf`, plan/3D/house/side PNGs); the 13 → 15 m
+portal check runs inside it and is undone. Open: where "21 m" starts (read from the
+portal line, the only reading that gives the V with 9 m + 13 m), whether the loose-chair
+area rises (photos: flat), and the guessed sizes in notes A1–A11.
