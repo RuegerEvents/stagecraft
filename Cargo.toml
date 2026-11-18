@@ -42,7 +42,6 @@ egui-wgpu = "0.36.2"
 bytemuck = { version = "1", features = ["derive"] }
 egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-rfd = "0.16"
 clap = { version = "4.6", features = ["derive"] }
 dirs = "7"
 glam = { version = "0.34", features = ["serde"] }
@@ -60,6 +59,8 @@ gltf = { version = "1", default-features = false, features = ["utils", "names"] 
 ureq = { version = "3", features = ["cookies"] }
 security-framework = "3"
 zip = { version = "9", default-features = false, features = ["deflate"] }
+# storytold/craft-libs (MIT OR Apache-2.0), one revision for every crate.
+craft-dialogs = { git = "https://github.com/storytold/craft-libs", rev = "52fc6b5b3d2179239664136e84543231f8576f8d" }
 
 # Hidden-line removal runs on every sheet change; keep it fast in debug builds too.
 [profile.dev.package.stagecraft-hlr]

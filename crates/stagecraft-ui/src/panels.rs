@@ -9,11 +9,13 @@ use crate::i18n::{t, tf};
 use crate::state::{FileRequest, PanelKind, ThemePref, Tool, View};
 use crate::widgets::{self, Icon, button, edit_field, icon_button};
 
+/// New document; with unsaved changes the app asks first (the answer comes on a later frame).
 pub fn new_document(s: &mut Studio) {
-    if s.engine.dirty() && !crate::app::confirm_discard_or_test(s) {
-        return;
+    if s.engine.dirty() && s.ui.native_dialogs {
+        s.ui.file_request = Some(FileRequest::New);
+    } else {
+        let _ = s.run("doc.new", json!({ "discard": true }));
     }
-    let _ = s.run("doc.new", json!({ "discard": true }));
 }
 
 /// Save to the current file, or ask where.

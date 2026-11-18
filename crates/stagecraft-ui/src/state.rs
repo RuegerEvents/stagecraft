@@ -428,7 +428,8 @@ pub struct UiState {
     /// Label template the plan canvas draws fixture labels with (`None` = FIDs only).
     pub plan_labels: Option<Id>,
     pub shots: Vec<PendingShot>,
-    /// Set by the File menu; the app shows a native dialog outside the frame.
+    /// Set by the File menu; `Studio::file_dialogs` queues the dialog, which shows after the
+    /// frame and is answered on a later one.
     pub file_request: Option<FileRequest>,
     /// Native file and message dialogs (off in headless tests).
     pub native_dialogs: bool,
@@ -438,6 +439,8 @@ pub struct UiState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileRequest {
+    /// New document (asks before discarding changes).
+    New,
     Open,
     SaveAs,
     /// Export every sheet as one PDF.
@@ -450,7 +453,7 @@ pub enum FileRequest {
     ImportMvr,
     /// Write the document as `.mvr`.
     ExportMvr,
-    /// Import a 3D model (`.glb`, `.gltf`, `.obj`, `.3ds`).
+    /// Import a 3D model (`dialogs::MODEL_EXTENSIONS`).
     ImportModel,
     /// An image, PDF, SVG or DXF under the plan.
     ImportUnderlay,

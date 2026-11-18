@@ -274,6 +274,7 @@
   "meta.date": "Date",
   "meta.company": "Company",
   "status.exported": "Exported {path}",
+  "status.dialog_unavailable": "No file dialog could be shown: {why}",
   "status.mvr_imported": "MVR imported: {fixtures} fixtures, {trusses} truss pieces, {models} models ({warnings} warnings)",
   "sheets.none": "No sheets yet",
   "sheets.new": "New sheet",

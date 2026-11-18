@@ -12,6 +12,7 @@ pub mod app;
 pub mod canvas;
 pub mod commands;
 pub mod demo;
+pub mod dialogs;
 pub mod fuzzy;
 pub mod i18n;
 pub mod inspector;

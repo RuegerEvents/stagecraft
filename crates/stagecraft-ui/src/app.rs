@@ -21,12 +21,14 @@ pub struct Studio {
     /// Renders the 3D view into images for `rendered` sheet viewports. `None` without
     /// a GPU: those viewports keep a placeholder.
     pub offscreen: Option<view3d::offscreen::Offscreen>,
+    /// File and message dialogs: queued during the frame, answered on a later one.
+    pub dialogs: craft_dialogs::Dialogs<crate::dialogs::Then>,
 }
 
 impl Studio {
     pub fn new(engine: Engine) -> Self {
         stagecraft_sheet::install();
-        Self { engine, ui: UiState::default(), offscreen: None }
+        Self { engine, ui: UiState::default(), offscreen: None, dialogs: crate::dialogs::queue() }
     }
 
     /// Run a command of either registry. Errors also go to the status bar.
@@ -299,124 +301,6 @@ impl StageApp {
             ui.ctx().request_repaint();
         }
     }
-
-    fn file_dialogs(&mut self) {
-        let Some(req) = self.studio.ui.file_request.take() else { return };
-        let s = &mut self.studio;
-        let filter = |d: rfd::FileDialog| d.add_filter("StageCraft", &["stagecraft"]);
-        match req {
-            FileRequest::Open => {
-                if s.engine.dirty() && !confirm_discard_or_test(s) {
-                    return;
-                }
-                if let Some(path) = filter(rfd::FileDialog::new()).pick_file() {
-                    let _ = s.run("doc.open", json!({ "path": path, "discard": true }));
-                }
-            }
-            FileRequest::SaveAs => {
-                if let Some(path) = filter(rfd::FileDialog::new()).set_file_name("Untitled.stagecraft").save_file() {
-                    let _ = s.run("doc.save", json!({ "path": path }));
-                }
-            }
-            FileRequest::ExportPdf => {
-                let name = s
-                    .engine
-                    .path()
-                    .and_then(|p| p.file_stem())
-                    .map_or_else(|| "Sheets".to_owned(), |n| n.to_string_lossy().into_owned());
-                if let Some(path) =
-                    rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(format!("{name}.pdf")).save_file()
-                    && s.run("sheet.export_pdf", json!({ "path": path })).is_ok()
-                {
-                    s.ui.info(tf("status.exported", &[("path", &path.display())]));
-                }
-            }
-            FileRequest::ImportGdtf => {
-                if let Some(paths) = rfd::FileDialog::new().add_filter("GDTF", &["gdtf"]).pick_files() {
-                    let steps: Vec<Value> =
-                        paths.iter().map(|p| json!({ "command": "gdtf.import", "args": { "path": p } })).collect();
-                    if s.run("batch", json!({ "commands": steps })).is_ok() {
-                        s.ui.info(tf("library.imported", &[("n", &paths.len())]));
-                    }
-                }
-            }
-            FileRequest::ImportMvr => {
-                if let Some(path) = rfd::FileDialog::new().add_filter("MVR", &["mvr"]).pick_file()
-                    && let Ok(r) = s.run("mvr.import", json!({ "path": path }))
-                {
-                    s.ui.fit_pending = true;
-                    s.ui.view3d.fit_pending = true;
-                    let n = |k: &str| r[k].as_u64().unwrap_or(0).to_string();
-                    let warnings = r["warnings"].as_array().map_or(0, Vec::len).to_string();
-                    s.ui.info(tf(
-                        "status.mvr_imported",
-                        &[
-                            ("fixtures", &n("fixtures")),
-                            ("trusses", &n("trusses")),
-                            ("models", &n("models")),
-                            ("warnings", &warnings),
-                        ],
-                    ));
-                }
-            }
-            FileRequest::ExportMvr => {
-                let name = s
-                    .engine
-                    .path()
-                    .and_then(|p| p.file_stem())
-                    .map_or_else(|| "Untitled".to_owned(), |n| n.to_string_lossy().into_owned());
-                if let Some(path) =
-                    rfd::FileDialog::new().add_filter("MVR", &["mvr"]).set_file_name(format!("{name}.mvr")).save_file()
-                    && s.run("mvr.export", json!({ "path": path })).is_ok()
-                {
-                    s.ui.info(tf("status.exported", &[("path", &path.display())]));
-                }
-            }
-            FileRequest::ImportModel => {
-                if let Some(path) =
-                    rfd::FileDialog::new().add_filter("3D model", &["glb", "gltf", "obj", "3ds"]).pick_file()
-                {
-                    let mut args = json!({ "path": path });
-                    args["layer"] = s.active_layer_arg();
-                    if s.run("model.import", args).is_ok() {
-                        s.ui.view3d.fit_pending = true;
-                    }
-                }
-            }
-            FileRequest::ImportUnderlay => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Drawing", &["png", "jpg", "jpeg", "pdf", "svg", "dxf"])
-                    .pick_file()
-                    && let Ok(r) = s.run("underlay.import", json!({ "path": path }))
-                {
-                    s.ui.fit_pending = true;
-                    if let Ok(id) = serde_json::from_value::<stagecraft_core::Id>(r["id"].clone()) {
-                        let _ = s.run("selection.set", json!({ "ids": [id] }));
-                    }
-                    s.ui.info(t("status.underlay_imported"));
-                }
-            }
-            FileRequest::Logo => {
-                if let Some(path) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() {
-                    let _ = s.run("doc.set_meta", json!({ "logo_file": path }));
-                }
-            }
-        }
-    }
-}
-
-/// Ask before throwing away changes; headless (tests) always says yes.
-pub fn confirm_discard_or_test(s: &Studio) -> bool {
-    !s.ui.native_dialogs || confirm_discard()
-}
-
-pub fn confirm_discard() -> bool {
-    rfd::MessageDialog::new()
-        .set_title(t("dialog.discard.title"))
-        .set_description(t("dialog.discard.text"))
-        .set_buttons(rfd::MessageButtons::OkCancel)
-        .show()
-        == rfd::MessageDialogResult::Ok
 }
 
 fn save_png(image: &egui::ColorImage, path: &std::path::Path) -> Result<(), CmdError> {
@@ -432,10 +316,12 @@ impl eframe::App for StageApp {
         self.answer_calls(ctx);
     }
 
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.take_screenshots(ui);
         self.studio.show(ui);
-        self.file_dialogs();
+        // Never a blocking dialog here: see `dialogs.rs`.
+        self.studio.file_dialogs();
+        self.studio.dialogs.show_pending(Some(&*frame));
         let title = self.studio.title();
         if title != self.title {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -493,6 +379,8 @@ pub fn run(engine: Engine) -> Result<(), String> {
             };
             let mut studio = Studio::new(engine);
             studio.ui.native_dialogs = true;
+            let wake = ctx.clone();
+            studio.dialogs = craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint()));
             studio.offscreen = cc.wgpu_render_state.as_ref().map(view3d::offscreen::Offscreen::from_render_state);
             Ok(Box::new(StageApp { studio, server, _registration: registration, shot_requested: false, title }))
         }),
