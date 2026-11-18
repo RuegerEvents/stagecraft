@@ -323,7 +323,7 @@ fn export_pdf(ctx: &mut Ctx, a: ExportPdfArgs) -> CmdResult {
     }
     let ex = exporter().ok_or_else(|| CmdError::invalid("no sheet exporter is installed in this build"))?;
     let bytes = ex.pdf(doc, &ids).map_err(CmdError::invalid)?;
-    std::fs::write(&a.path, &bytes).map_err(|e| CmdError::io(format!("{}: {e}", a.path.display())))?;
+    crate::file::write_atomic(&a.path, &bytes)?;
     Ok(json!({ "path": a.path, "pages": ids.len(), "bytes": bytes.len() }))
 }
 
@@ -340,7 +340,7 @@ fn export_svg(ctx: &mut Ctx, a: ExportSvgArgs) -> CmdResult {
     let id = resolve_sheet(doc, &a.sheet)?;
     let ex = exporter().ok_or_else(|| CmdError::invalid("no sheet exporter is installed in this build"))?;
     let svg = ex.svg(doc, id).map_err(CmdError::invalid)?;
-    std::fs::write(&a.path, svg.as_bytes()).map_err(|e| CmdError::io(format!("{}: {e}", a.path.display())))?;
+    crate::file::write_atomic(&a.path, svg.as_bytes())?;
     Ok(json!({ "path": a.path, "bytes": svg.len() }))
 }
 
