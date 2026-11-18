@@ -31,8 +31,15 @@ fn own_labels(obj: &Object) -> bool {
     obj.style.labels != Some(false)
 }
 
-pub fn proscenium_plan(w: &DAffine3, obj: &Object, _style: &PlanStyle) -> Vec<PlanPrim> {
-    let ObjectKind::Proscenium { width, depth, frame, iron, show_iron, .. } = obj.kind else { return Vec::new() };
+pub fn proscenium_plan(
+    doc: &stagecraft_core::Document,
+    w: &DAffine3,
+    obj: &Object,
+    _style: &PlanStyle,
+) -> Vec<PlanPrim> {
+    let ObjectKind::Proscenium { width, depth, frame, iron, show_iron, keep_clear, .. } = obj.kind else {
+        return Vec::new();
+    };
     let (hw, f) = (width / 2.0, frame);
     let mut out = vec![
         PlanPrim::Polygon {
@@ -53,10 +60,32 @@ pub fn proscenium_plan(w: &DAffine3, obj: &Object, _style: &PlanStyle) -> Vec<Pl
             vec![to_plan_2d(w, [-hw - f, iron]), to_plan_2d(w, [hw + f, iron])],
             LineClass::Centre,
         ));
+        // the keep-clear strip under it, hatched at 45°, across the opening
+        if keep_clear > 0.0 {
+            let (y0, y1) = (iron - keep_clear / 2.0, iron + keep_clear / 2.0);
+            out.push(PlanPrim::Polyline { points: rect(w, -hw, y0, hw, y1), closed: true, line: LineClass::Thin });
+            let step = 200.0;
+            let mut c = -keep_clear;
+            while c < 2.0 * hw {
+                // the line x = -hw + c + (y - y0), clipped to the strip
+                let (mut a, mut b) = ([-hw + c, y0], [-hw + c + keep_clear, y1]);
+                if a[0] < -hw {
+                    a = [-hw, y0 + (-hw - a[0])];
+                }
+                if b[0] > hw {
+                    b = [hw, y1 - (b[0] - hw)];
+                }
+                if b[0] > a[0] {
+                    out.push(PlanPrim::line(vec![to_plan_2d(w, a), to_plan_2d(w, b)], LineClass::Thin));
+                }
+                c += step;
+            }
+        }
         if own_labels(obj) {
+            let key = if keep_clear > 0.0 { "iron_keep_clear" } else { "iron" };
             out.push(PlanPrim::Text {
                 pos: to_plan_2d(w, [hw + f + 150.0, iron]),
-                text: "Iron".into(),
+                text: stagecraft_core::sheet::text::tr(doc.meta.sheet_language, key).into(),
                 height: LABEL_HEIGHT,
                 rotation: 0.0,
                 anchor: TextAnchor::Left,

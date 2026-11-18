@@ -26,6 +26,8 @@ const CATALOG: &[(&str, &str, &str)] = &[
     ("fixture", "fixture", "Gerät"),
     ("seats", "seats", "Sitzplätze"),
     ("seat", "seat", "Sitzplatz"),
+    ("iron", "Safety curtain", "Eiserner Vorhang"),
+    ("iron_keep_clear", "Safety curtain — keep clear", "Eiserner Vorhang — freihalten"),
     ("generic_fixture", "Generic fixture", "Scheinwerfer (allgemein)"),
     ("channels", "ch", "Kan."),
     ("col_fid", "FID", "FID"),

@@ -91,6 +91,12 @@ pub(super) fn register(r: &mut Registry) {
         "Add a reference dimension between points of any objects or sketches; it measures live",
         dim_add_reference,
     );
+    r.add(
+        "dimension.set_tags",
+        Kind::Edit,
+        "Tag a reference dimension (sheets can show only tagged dimensions or hide them)",
+        dim_set_tags,
+    );
     r.add("dimension.set_value", Kind::Edit, "Change a driving dimension; everything attached follows", dim_set_value);
     r.add(
         "dimension.set_driving",
@@ -839,6 +845,31 @@ struct DimAddRefArgs {
     /// Layer the dimension belongs to (hidden and deleted with it). Default: the
     /// layer of the first object anchor, else the first layer.
     layer: Option<String>,
+    /// Tag ids or names (unknown names are created), e.g. `["regie"]`: viewports can
+    /// show only dimensions with a tag or hide them.
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct DimTagsArgs {
+    /// A reference dimension: its UUID or name.
+    id: String,
+    /// Tag ids or names; unknown names are created. Replaces the dimension's tags.
+    tags: Vec<String>,
+}
+
+fn dim_set_tags(ctx: &mut Ctx, a: DimTagsArgs) -> CmdResult {
+    let doc = ctx.doc();
+    let id = doc
+        .dimensions
+        .values()
+        .find(|d| d.id.to_string() == a.id || d.name.as_deref() == Some(a.id.as_str()))
+        .map(|d| d.id)
+        .ok_or_else(|| CmdError::not_found("reference dimension", &a.id))?;
+    let tags = super::tag::ensure_tags(ctx.doc_mut(), &a.tags)?;
+    ctx.doc_mut().dimensions.get_mut(&id).expect("found").tags = tags.clone();
+    Ok(json!({ "id": id, "tags": tags }))
 }
 
 fn dim_add_reference(ctx: &mut Ctx, a: DimAddRefArgs) -> CmdResult {
@@ -867,8 +898,12 @@ fn dim_add_reference(ctx: &mut Ctx, a: DimAddRefArgs) -> CmdResult {
         label_offset: a.label_offset,
         name: a.name,
         layer: l,
+        tags: Vec::new(),
     };
     let value = d.measure(doc).map(|m| m.2);
+    let tags = super::tag::ensure_tags(ctx.doc_mut(), &a.tags)?;
+    let mut d = d;
+    d.tags = tags;
     let id = d.id;
     ctx.doc_mut().dimensions.insert(id, d);
     Ok(json!({ "id": id, "value": value }))

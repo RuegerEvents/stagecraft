@@ -359,6 +359,7 @@ pub static META: &[Meta] = &[
     m("dimension.list", Sketch, "list").hidden(),
     m("dimension.add", Sketch, "dimension").hidden(),
     m("dimension.add_reference", Sketch, "dimension").hidden(),
+    m("dimension.set_tags", Sketch, "dimension").hidden(),
     m("dimension.move_label", Sketch, "dimension").hidden(),
     m("dimension.remove", Sketch, "dimension").hidden(),
     m("ui.dimension", Sketch, "dimension").hidden(),

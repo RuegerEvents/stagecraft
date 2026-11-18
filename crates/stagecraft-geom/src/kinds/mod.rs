@@ -51,7 +51,7 @@ pub fn plan_at(doc: &Document, w: &DAffine3, obj: &Object, style: &PlanStyle) ->
         ObjectKind::Wall { .. } => wall::plan(w, obj, style),
         ObjectKind::Truss { .. } => truss::plan(w, obj, style),
         ObjectKind::Fixture { .. } => fixture::plan(doc, w, obj, style),
-        ObjectKind::Proscenium { .. } => stage::proscenium_plan(w, obj, style),
+        ObjectKind::Proscenium { .. } => stage::proscenium_plan(doc, w, obj, style),
         ObjectKind::Curtain { .. } => stage::curtain_plan(w, obj, style),
         ObjectKind::Masking { .. } => stage::masking_plan(w, obj, style),
         ObjectKind::Batten { .. } => stage::batten_plan(w, obj, style),

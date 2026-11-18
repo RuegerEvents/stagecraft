@@ -74,6 +74,10 @@ pub struct RefDimension {
     pub name: Option<String>,
     /// Layer it belongs to: hidden with it, deleted with it.
     pub layer: Id,
+    /// Tags, so sheets can pick dimensions (a viewport's `dimension_tags`) or leave them
+    /// out (`hidden_tags`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<Id>,
 }
 
 pub fn v2(p: P2) -> Vec2 {

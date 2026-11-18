@@ -265,6 +265,9 @@ read as `m_sup_mm`): `m_sup_mm` writes the mm digit
 as a Unicode superscript, and every renderer (PDF, SVG, Sheets mode via
 `render::text_runs`, plan canvas via `sketch_ui::dim_text_job`) draws superscript
 runs smaller and raised. Vector viewports are
+Plan viewports pick dimensions: `dimension_tags` shows only reference dimensions with
+one of those tags (`dimension.add_reference {tags}`, `dimension.set_tags`), `hidden_tags`
+also hides tagged dimensions, `dimension_names` writes "name value".
 `elevation`, `section` (cut faces hatched by material) and `plan_3d` (top view from
 meshes, optional cut height, labels as in `plan`); `hidden_lines` adds dashed
 hidden edges, `tag_lines` restyles objects by tag. Core cannot depend on it, so
@@ -353,7 +356,8 @@ GUI: Calibrate tool (K), File > Import underlay…, inspector rows. Tests:
 `cargo test -p stagecraft-ui --test hall_a` builds the venue from
 `testdata/private/hall_a.drawio.svg` through commands only (skips without it)
 and writes `testdata/private/hall_a/` (one document, one PDF, plan/3D/house/side
-PNGs; the 13 → 15 m portal check runs and is undone inside the test). The photos of the
+PNGs, `hall_a-plan.pdf` and `hall_a-regie.pdf`; the 13 → 15 m portal check runs
+and is undone inside the test). The photos of the
 real hall are in `testdata/private/hall_a/photos/` (private; never commit or
 describe the people in them). Assumptions A1–A11 are in the script and as notes in the
 plan.

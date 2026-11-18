@@ -599,6 +599,17 @@ pub(crate) fn stage_fields(ui: &mut Ui, s: &mut Studio, ty: &str, objs: &[&Objec
                 c,
                 "iron",
             );
+            num(
+                ui,
+                s,
+                objs,
+                sel,
+                "inspector.keep_clear",
+                "pr_kc",
+                f!(ObjectKind::Proscenium { keep_clear, .. } => *keep_clear),
+                c,
+                "keep_clear",
+            );
         }
         "curtain" => {
             let c = "curtain.update";

@@ -137,6 +137,10 @@ struct ProsceniumArgs {
     /// Cut the frame's outer upper corners at 45° by this much, mm. Default 0.
     #[serde(default)]
     outer_chamfer: f64,
+    /// Keep-clear strip under the iron (safety curtain), centred on its line, mm.
+    /// Default 0 (none).
+    #[serde(default)]
+    keep_clear: f64,
 }
 
 fn d10000() -> f64 {
@@ -158,6 +162,7 @@ fn proscenium(ctx: &mut Ctx, a: ProsceniumArgs) -> CmdResult {
     }
     non_negative("chamfer", a.chamfer)?;
     non_negative("outer_chamfer", a.outer_chamfer)?;
+    non_negative("keep_clear", a.keep_clear)?;
     let p = Placement { position: a.position, rotation: [0.0, 0.0, a.rotation] };
     let kind = ObjectKind::Proscenium {
         width: a.width,
@@ -168,6 +173,7 @@ fn proscenium(ctx: &mut Ctx, a: ProsceniumArgs) -> CmdResult {
         show_iron: a.iron.is_some(),
         chamfer: a.chamfer,
         outer_chamfer: a.outer_chamfer,
+        keep_clear: a.keep_clear,
     };
     insert(ctx, a.common, "Proscenium", p, kind)
 }
@@ -191,20 +197,24 @@ struct ProsceniumUpdateArgs {
     chamfer: Option<f64>,
     /// 45° cut of the frame's outer upper corners, mm (0 = square).
     outer_chamfer: Option<f64>,
+    /// Keep-clear strip under the iron, mm (0 = none).
+    keep_clear: Option<f64>,
 }
 
 fn proscenium_update(ctx: &mut Ctx, a: ProsceniumUpdateArgs) -> CmdResult {
     opt_positive(&[("width", a.width), ("height", a.height), ("depth", a.depth), ("frame", a.frame)])?;
-    for (what, v) in [("chamfer", a.chamfer), ("outer_chamfer", a.outer_chamfer)] {
+    for (what, v) in [("chamfer", a.chamfer), ("outer_chamfer", a.outer_chamfer), ("keep_clear", a.keep_clear)] {
         if let Some(v) = v {
             non_negative(what, v)?;
         }
     }
     let o = kind_mut(ctx, a.id, "proscenium")?;
-    let ObjectKind::Proscenium { width, height, depth, frame, iron, show_iron, chamfer, outer_chamfer } = &mut o.kind
+    let ObjectKind::Proscenium { width, height, depth, frame, iron, show_iron, chamfer, outer_chamfer, keep_clear } =
+        &mut o.kind
     else {
         unreachable!()
     };
+    set(keep_clear, a.keep_clear);
     set(chamfer, a.chamfer);
     set(outer_chamfer, a.outer_chamfer);
     set(width, a.width);
@@ -405,6 +415,9 @@ struct WingSetArgs {
     fullness: f64,
     /// `#RRGGBB`. Default #1a1a1a (black molton).
     color: Option<String>,
+    /// Make borders (one per wing above the opening). Default true; false for legs only.
+    #[serde(default = "yes")]
+    borders: bool,
     /// Hang each border on the batten nearest its wing (within 400 mm in y) instead of
     /// keeping it in the set. Default true.
     #[serde(default = "yes")]
@@ -484,6 +497,9 @@ fn wingset(ctx: &mut Ctx, a: WingSetArgs) -> CmdResult {
             };
             let pl = Placement { position: [sx, y, a.height], ..Default::default() };
             legs.push(super::id_of(&insert(ctx, c, "Leg", pl, kind)?));
+        }
+        if !a.borders {
+            continue;
         }
         let c = Common {
             name: Some(format!("Border {n}")),

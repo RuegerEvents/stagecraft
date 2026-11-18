@@ -516,13 +516,25 @@ pub fn viewport_dims(doc: &Document, vp: &Viewport) -> Vec<stagecraft_geom::dims
     let shown = |l: &Id| !vp.hidden_layers.contains(l) && doc.layers.get(l).is_some_and(|l| l.visible);
     let st = stagecraft_geom::dims::DimStyle::for_scale(1.0 / vp.scale, 1.2).with_format(LengthFormat::of(&doc.meta));
     let mut dims = Vec::new();
-    if vp.sketch_dimensions {
+    let only_tagged = !vp.dimension_tags.is_empty();
+    if vp.sketch_dimensions && !only_tagged {
         for (layer, s) in doc.sketches.iter().filter(|(l, _)| shown(l)) {
             dims.extend(stagecraft_geom::dims::sketch_dims(*layer, s, &st));
         }
     }
     if vp.reference_dimensions {
-        dims.extend(stagecraft_geom::dims::reference_dims(doc, &st, |d| shown(&d.layer)));
+        dims.extend(stagecraft_geom::dims::reference_dims(doc, &st, |d| {
+            shown(&d.layer)
+                && !d.tags.iter().any(|t| vp.hidden_tags.contains(t))
+                && (!only_tagged || d.tags.iter().any(|t| vp.dimension_tags.contains(t)))
+        }));
+    }
+    if vp.dimension_names {
+        for d in &mut dims {
+            if let Some(n) = &d.name {
+                d.text = format!("{n} {}", stagecraft_geom::dims::format_shown(d.value, d.angle, &st.format));
+            }
+        }
     }
     dims
 }

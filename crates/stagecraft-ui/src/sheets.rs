@@ -1046,6 +1046,7 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
             for (key, field, on) in [
                 ("sheets.sketch_dimensions", "sketch_dimensions", vp.sketch_dimensions),
                 ("sheets.reference_dimensions", "reference_dimensions", vp.reference_dimensions),
+                ("sheets.dimension_names", "dimension_names", vp.dimension_names),
             ] {
                 let mut v = on;
                 crate::widgets::prop_label(ui, t(key));
@@ -1075,6 +1076,25 @@ fn viewport_fields(ui: &mut Ui, s: &mut Studio, doc: &Document, vp: &Viewport, s
                         hidden.push(tag.id);
                     }
                     up(s, json!({ "hidden_tags": hidden }));
+                }
+            }
+        });
+    }
+    if !doc.tags.is_empty() && matches!(vp.view, ViewKind::Plan | ViewKind::PlanFrom3d { .. }) {
+        crate::widgets::section(ui, t("sheets.dimension_tags"));
+        ui.horizontal_wrapped(|ui| {
+            for tag in doc.tags.values() {
+                let mut on = vp.dimension_tags.contains(&tag.id);
+                let r = ui.checkbox(&mut on, &tag.name);
+                widgets::name(&r, egui::Role::CheckBox, format!("Viewport dimension tag {}", tag.name));
+                if r.changed() {
+                    let mut tags: Vec<Id> = vp.dimension_tags.clone();
+                    if on {
+                        tags.push(tag.id);
+                    } else {
+                        tags.retain(|x| *x != tag.id);
+                    }
+                    up(s, json!({ "dimension_tags": tags }));
                 }
             }
         });

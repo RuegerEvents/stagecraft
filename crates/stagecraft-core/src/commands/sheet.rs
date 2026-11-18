@@ -478,6 +478,13 @@ struct VpCreateArgs {
     /// Elevations, sections, plan_3d: draw hidden edges dashed. Default false.
     #[serde(default)]
     hidden_lines: bool,
+    /// Plan viewports: show only the reference dimensions with one of these tags (ids
+    /// or names). Default: all dimensions.
+    #[serde(default)]
+    dimension_tags: Vec<String>,
+    /// Plan viewports: write named dimensions as "name value". Default false.
+    #[serde(default)]
+    dimension_names: bool,
 }
 
 fn d50() -> f64 {
@@ -498,6 +505,7 @@ fn vp_create(ctx: &mut Ctx, a: VpCreateArgs) -> CmdResult {
     let crop = a.crop.as_ref().map(check_crop).transpose()?;
     let hidden_tags = tag_ids(doc, &a.hidden_tags)?;
     let hidden_layers = layer_ids(doc, &a.hidden_layers)?;
+    let dimension_tags = tag_ids(doc, &a.dimension_tags)?;
     let label_template = a.label_template.as_deref().map(|r| resolve_label(doc, r)).transpose()?;
     let sheet = &doc.sheets[&sid];
     let [w, h] = sheet.size();
@@ -520,6 +528,8 @@ fn vp_create(ctx: &mut Ctx, a: VpCreateArgs) -> CmdResult {
         scale_bar: !matches!(view, ViewKind::FixtureList | ViewKind::Rendered { .. }),
         sketch_dimensions: true,
         reference_dimensions: true,
+        dimension_tags,
+        dimension_names: a.dimension_names,
         underlays: false,
     };
     let id = vp.id;
@@ -558,6 +568,11 @@ struct VpUpdateArgs {
     /// Replace the hidden tags (ids or names).
     hidden_tags: Option<Vec<String>>,
     hidden_layers: Option<Vec<String>>,
+    /// Plan viewports: show only reference dimensions with one of these tags (ids or
+    /// names); empty = all.
+    dimension_tags: Option<Vec<String>>,
+    /// Plan viewports: write named dimensions as "name value".
+    dimension_names: Option<bool>,
     /// Label template id or name; empty string = no labels.
     label_template: Option<String>,
     /// Line class → pen width mm; replaces the map (empty map = defaults).
@@ -596,6 +611,7 @@ fn vp_update(ctx: &mut Ctx, a: VpUpdateArgs) -> CmdResult {
     let crop = a.crop.as_ref().map(check_crop).transpose()?;
     let tags = a.hidden_tags.as_deref().map(|t| tag_ids(doc, t)).transpose()?;
     let layers = a.hidden_layers.as_deref().map(|t| layer_ids(doc, t)).transpose()?;
+    let dim_tags = a.dimension_tags.as_deref().map(|t| tag_ids(doc, t)).transpose()?;
     let label = match a.label_template.as_deref() {
         None => None,
         Some("") => Some(None),
@@ -642,6 +658,12 @@ fn vp_update(ctx: &mut Ctx, a: VpUpdateArgs) -> CmdResult {
     }
     if let Some(l) = layers {
         v.hidden_layers = l;
+    }
+    if let Some(t) = dim_tags {
+        v.dimension_tags = t;
+    }
+    if let Some(b) = a.dimension_names {
+        v.dimension_names = b;
     }
     if let Some(l) = label {
         v.label_template = l;

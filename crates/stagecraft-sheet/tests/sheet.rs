@@ -137,6 +137,28 @@ fn the_legend_counts_the_seats_in_its_plans() {
     assert!(t.iter().any(|x| x == "7 fixtures · 17 seats"), "{t:?}");
 }
 
+#[test]
+fn viewports_pick_dimensions_by_tag() {
+    let (mut e, s) = rig();
+    let at = |x: f64, y: f64| json!({ "type": "point", "at": [x, y, 0] });
+    run(&mut e, "dimension.add_reference", json!({ "from": at(0.0, 0.0), "to": at(3000.0, 0.0), "tags": ["regie"] }));
+    run(&mut e, "dimension.add_reference", json!({ "from": at(0.0, 1000.0), "to": at(4000.0, 1000.0) }));
+    let sheet = e.doc().sheets[&s].clone();
+    let vp = sheet.viewports[0].id;
+    let count = |e: &Engine| {
+        let vp = e.doc().sheets[&s].viewports.iter().find(|v| v.id == vp).unwrap().clone();
+        stagecraft_sheet::compose::viewport_dims(e.doc(), &vp).len()
+    };
+    assert_eq!(count(&e), 2);
+    run(&mut e, "viewport.update", json!({ "viewport": vp, "dimension_tags": ["regie"] }));
+    assert_eq!(count(&e), 1);
+    run(&mut e, "viewport.update", json!({ "viewport": vp, "dimension_tags": [], "hidden_tags": ["regie"] }));
+    assert_eq!(count(&e), 1);
+    // deleting the tag frees the dimension and the viewport
+    run(&mut e, "tag.delete", json!({ "tag": "regie" }));
+    assert_eq!(count(&e), 2);
+}
+
 fn t_count(prims: &[Prim], want: &str) -> usize {
     let mut t = Vec::new();
     texts(prims, &mut t);

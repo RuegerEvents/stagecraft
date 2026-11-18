@@ -363,6 +363,10 @@ pub enum ObjectKind {
         /// The frame's outer upper corners cut at 45° by this much, mm (0 = square).
         #[serde(default)]
         outer_chamfer: f64,
+        /// Depth of the strip under the iron that must be kept clear, centred on the
+        /// iron line, mm (0 = none). Drawn hatched while the iron line shows.
+        #[serde(default)]
+        keep_clear: f64,
     },
     /// A curtain hanging from its top edge. Origin: centre of the top edge; the fabric
     /// runs along local x and hangs down (-z).
