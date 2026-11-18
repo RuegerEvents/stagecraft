@@ -545,9 +545,11 @@ pub fn viewport_dims(doc: &Document, vp: &Viewport) -> Vec<stagecraft_geom::dims
     });
     if vp.dimension_names {
         for d in &mut dims {
-            if let Some(n) = &d.name {
-                d.text = format!("{n} {}", stagecraft_geom::dims::format_shown(d.value, d.angle, &st.format));
-            }
+            let v = stagecraft_geom::dims::format_shown(d.value, d.angle, &st.format);
+            d.text = match &d.name {
+                Some(n) => format!("{n} {v}"),
+                None => v,
+            };
         }
     }
     dims
