@@ -36,7 +36,7 @@ commands (`kind: "ui"`), and `execute` runs them: `ui.state`, `ui.set_tool`,
 `projection`, `fov`, `orbit`, `zoom`, `fit`), `ui.section` (3D: `axis` + `offset`,
 `origin` + `normal`, `box {min,max}`, `off`, `hatch`), `ui.set_theme`,
 `ui.toggle_panel`, `ui.set_tag_visible`, `ui.set_active_layer`, `ui.set_snap`,
-`ui.set_tool_options`, `ui.palette`, `ui.screenshot {path}`. They change only what
+`ui.set_tool_options`, `ui.palette`, `ui.tutorial` (start, next, back, stop), `ui.screenshot {path}`. They change only what
 the window shows, not the document, and are not undoable. `ui.state` reports the 3D
 camera (`camera3d`) and section too. `ui.screenshot` answers once the next frame is
 captured, with `{path, width, height}` in physical pixels; it includes the 3D view.

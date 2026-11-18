@@ -120,7 +120,12 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
 - Give clickable things an accessible name (`widgets::name`); tests find them so.
   Table cells are named `"<Column> <row>"`, e.g. `FID 1`.
 - Tools sit in `panels::tool_groups`; tool options (`ToolOptions`,
-  `ui.set_tool_options`) show on the options row below the tool bar. One-click
+  `ui.set_tool_options`, saved per user in `dock::Prefs.tools`) show on the options row
+  below the tool bar, with `panels::hint` (what the gesture expects next: first corner,
+  next corner, "close the floor"). After a tool creates something the status bar says
+  what to do next (`next.<tool>` catalog keys, `tools::created_message`). Heights the
+  user types (tool options, Inspector) are above the object's layer elevation; floors
+  show "Top height", walls "Base height", ceilings "Underside height". One-click
   stage tools go through `place_stage` in `tools.rs`, with ghosts from `stage_ghost`.
   Inspector fields for stage kinds are in `inspector::stage_fields` (helpers `num`,
   `choice`, `flag`, `colour`), loads in `load_section`. The table's "Fly bars" view
@@ -134,10 +139,23 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   `run` does it from eframe's creation context; headless tests build their own
   render state (see `tests/screens.rs`), otherwise the 3D view stays empty.
   `ui.set_view` switches plan / 3d / split (⌘1/⌘2/⌘3); `ui.camera` and
-  `ui.section` drive the rest. ⌘4 is the Sheets mode.
+  `ui.section` drive the rest. ⌘4 is the Sheets mode. The 3D camera follows the
+  model's bounds (`View3d::follow`) until the user orbits, pans or zooms.
+
+- Tutorial (`src/tutorial.rs`): the dockable Tutorial panel (hidden by default, opens
+  above the inspector; Help > Tutorial, `ui.tutorial {action: start|next|back|stop}`)
+  walks "Build a basic stage" in twelve `STEPS`. Each step has catalog texts
+  `tutorial.<id>.title/.text`, a key cap, a `done` check on the document/UI (it moves
+  on by itself; after Back or Skip a done step waits for Next) and `targets`
+  (accessible names or panel tabs). `widgets::name` and the tool buttons call
+  `tutorial::mark`, so the first target on screen gets a pulsing accent outline
+  (`tutorial::paint`, after the frame). `tests/tutorial.rs` walks all steps through
+  the GUI (screens `60-67-tutorial-*` with `STAGECRAFT_SCREENSHOTS`); floors in the
+  GUI are tested in `tests/floor.rs`.
 
 - The library panel (`src/library.rs`) lists fixture types (pick one for the fixture
-  tool, assign a symbol, import files); the GDTF Share panel (`library::share_panel`)
+  tool, assign a symbol, import files, "Demo fixtures" adds the bundled demo GDTFs);
+  the GDTF Share panel (`library::share_panel`)
   searches GDTF Share.
   Requests run on worker threads behind the `ShareBackend` trait; the UI polls a
   channel in `Studio::show`, so the network never blocks a frame. Tests swap in a
@@ -205,7 +223,8 @@ renders the demo document (`demo.rs`, a small proscenium theatre with battens,
 curtains, wings, truss, platforms) in light and dark to PNG, with the macOS chrome (no
 menu row, window buttons painted in), including 3D iso,
 front, sections, a truss close-up, the stage from the house, the fly bar list and
-split, a rearranged dock layout with a floating panel (`40-dock-float-*`). The overview shots hide the `ceiling` tag, which would cover the house. With
+split, a rearranged dock layout with a floating panel (`40-dock-float-*`), the
+tutorial panel (`41-43-tutorial-*`). The overview shots hide the `ceiling` tag, which would cover the house. With
 `testdata/private/vectorworks/sample_show.mvr` present it also renders that
 import in plan and 3D (`26-mvr-*`, `27-mvr-*`).
 
