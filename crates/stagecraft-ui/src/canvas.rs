@@ -87,7 +87,7 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
 
 /// Screen points per paper mm for plan labels: label sizes are paper mm, as on a
 /// sheet, so they keep their size on screen while zooming.
-pub const LABEL_PX_PER_MM: f64 = 3.2;
+pub const LABEL_PX_PER_MM: f64 = 4.5;
 
 /// Fixture labels with a template, placed as on a sheet (same rotation modes and
 /// collision avoidance), in the canvas colours.

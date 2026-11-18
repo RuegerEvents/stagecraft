@@ -30,7 +30,8 @@ A wrong token is `-32001`.
 `stagecraft` without a subcommand opens the GUI, which runs the same server with
 `mode: "gui"`. There, `commands` and `describe` also list the GUI's own `ui.*`
 commands (`kind: "ui"`), and `execute` runs them: `ui.state`, `ui.set_tool`,
-`ui.set_view` (`plan`, `3d`, `split`), `ui.zoom`, `ui.pan`, `ui.zoom_to_fit`,
+`ui.set_view` (`plan`, `3d`, `split`, `sheets`), `ui.sheet` (Sheets mode: `sheet`,
+`viewport`, `editor`, `fit`), `ui.set_label_template` (labels in the plan canvas), `ui.zoom`, `ui.pan`, `ui.zoom_to_fit`,
 `ui.camera` (3D: `view` top/front/back/side/left/iso, `eye`, `target`,
 `projection`, `fov`, `orbit`, `zoom`, `fit`), `ui.section` (3D: `axis` + `offset`,
 `origin` + `normal`, `box {min,max}`, `off`, `hatch`), `ui.set_theme`,

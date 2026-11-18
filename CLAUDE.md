@@ -16,7 +16,7 @@ UX. Commits are GPG-signed.
 
 - `stagecraft-core` holds the document and every command. No UI, no sockets, no clock.
   It must keep building for `wasm32-unknown-unknown`
-  (`cargo check -p stagecraft-core -p stagecraft-geom --target wasm32-unknown-unknown`).
+  (`cargo check -p stagecraft-core -p stagecraft-geom -p stagecraft-sheet --target wasm32-unknown-unknown`).
 - **Every action is a command** registered in `crates/stagecraft-core/src/commands/`.
   The GUI never mutates the document directly. A new feature without a command is not
   done.
@@ -92,7 +92,36 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   `run` does it from eframe's creation context; headless tests build their own
   render state (see `tests/screens.rs`), otherwise the 3D view stays empty.
   `ui.set_view` switches plan / 3d / split (⌘1/⌘2/⌘3); `ui.camera` and
-  `ui.section` drive the rest.
+  `ui.section` drive the rest. ⌘4 is the Sheets mode.
+
+- Sheets mode (`src/sheets.rs`, ⌘4): the page from `stagecraft_sheet::compose`,
+  cached by journal length; drags become `viewport.update` / `label.move` on
+  release; the inspector shows sheet, viewport, title block fields and label
+  templates. `ui.sheet` and `ui.set_label_template` drive it; the plan canvas draws
+  labels with the same placement code (`canvas::draw_labels`).
+
+## Sheets (`stagecraft-sheet`)
+
+The document holds `sheets`, `label_templates`, `title_blocks` (model in
+`stagecraft-core/src/sheet.rs`, commands in `commands/sheet.rs`); object attributes
+(`gel`, `circuit`, `focus`, `note` …) are `Object.attrs`. `stagecraft-sheet` composes
+a sheet into `Prim`s in paper mm (origin lower left, y up): `compose.rs` (frame,
+viewports, titles + scale bars, legend, title block placeholders, fixture list),
+`labels.rs` (pure label layout: three rotation modes, per-field greedy collision
+avoidance, leaders), `view.rs` (`VectorViewSource` for elevations/sections;
+`FallbackSource` draws mesh outlines and section cuts without hidden-line removal,
+to be replaced by `stagecraft-hlr`), `render.rs` (krilla PDF with embedded Roboto,
+SVG). Core cannot depend on it, so `sheet.export_pdf`/`export_svg` call an exporter
+that `stagecraft_sheet::install()` registers (the app's `main` and `Studio::new` do).
+Rendered viewports take images from `stagecraft_sheet::set_raster`; nothing fills it
+yet, so they print a placeholder. Fonts live in `assets/fonts/` for GUI and PDF.
+
+```
+STAGECRAFT_SHEETS=/some/dir cargo test -p stagecraft-sheet --test sheet
+```
+
+writes the test sheets as PDF/SVG/PNG; the screens test also writes
+`demo-sheets.pdf` (the demo's two sheets).
 
 Look at the screens after UI changes:
 
@@ -123,4 +152,5 @@ cargo run -p stagecraft-app -- exec ui.screenshot '{"path":"/tmp/s.png"}'
 cargo run -p stagecraft-app -- commands
 cargo run -p stagecraft-app -- serve /tmp/plan.stagecraft
 cargo run -p stagecraft-app -- exec object.list
+cargo run -p stagecraft-app -- exec sheet.export_pdf '{"path":"/tmp/s.pdf"}' --file plan.stagecraft
 ```

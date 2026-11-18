@@ -874,6 +874,8 @@ fn document_fields(ui: &mut Ui, s: &mut Studio) {
             ("meta.venue", "venue", meta.venue),
             ("meta.drawn_by", "drawn_by", meta.drawn_by),
             ("meta.revision", "revision", meta.revision),
+            ("meta.date", "date", meta.date),
+            ("meta.company", "company", meta.company),
         ] {
             if let Some(v) = field(ui, key, field_name, Some(v)) {
                 let _ = s.run("doc.set_meta", json!({ field_name: v }));
