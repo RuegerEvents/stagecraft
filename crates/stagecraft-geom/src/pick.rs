@@ -26,7 +26,7 @@ pub fn objects_bounds(doc: &Document, ids: impl IntoIterator<Item = Id>, style: 
 /// Platforms sit on floors; ceilings come last. The canvas draws in the reverse order.
 pub fn rank(kind: &ObjectKind) -> u8 {
     match kind {
-        ObjectKind::Fixture { .. } | ObjectKind::Hoist { .. } => 0,
+        ObjectKind::Fixture { .. } | ObjectKind::Hoist { .. } | ObjectKind::Note { .. } => 0,
         ObjectKind::Truss { .. }
         | ObjectKind::TrussNode { .. }
         | ObjectKind::Batten { .. }
@@ -39,7 +39,14 @@ pub fn rank(kind: &ObjectKind) -> u8 {
         ObjectKind::Floor { .. } => 4,
         ObjectKind::Ceiling { .. } => 5,
         ObjectKind::WingSet { .. } | ObjectKind::TrussRun { .. } | ObjectKind::Group { .. } => 6,
+        // Underlays lie below everything and are picked last.
+        ObjectKind::Underlay { .. } => 7,
     }
+}
+
+/// Locked underlays cannot be picked or box-selected.
+pub fn pickable(o: &Object) -> bool {
+    !matches!(o.kind, ObjectKind::Underlay { locked: true, .. })
 }
 
 /// Distance from `p` to the object's plan in mm; 0 inside filled areas.
@@ -52,7 +59,7 @@ pub fn distance(prims: &[PlanPrim], p: P2) -> f64 {
 pub fn pick(doc: &Document, ids: impl IntoIterator<Item = Id>, p: P2, tolerance: f64, style: &PlanStyle) -> Option<Id> {
     let mut best: Option<(u8, f64, Id)> = None;
     for id in ids {
-        let Some(o) = doc.objects.get(&id) else { continue };
+        let Some(o) = doc.objects.get(&id).filter(|o| pickable(o)) else { continue };
         let prims = plan(doc, o, style);
         if bounds(&prims).distance(p) > tolerance {
             continue;
@@ -87,7 +94,7 @@ pub fn in_box(
 ) -> Vec<Id> {
     ids.into_iter()
         .filter(|id| {
-            let Some(o) = doc.objects.get(id) else { return false };
+            let Some(o) = doc.objects.get(id).filter(|o| pickable(o)) else { return false };
             let prims = plan(doc, o, style);
             let b = bounds(&prims);
             match mode {

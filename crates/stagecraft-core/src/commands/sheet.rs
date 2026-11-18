@@ -524,6 +524,7 @@ fn vp_create(ctx: &mut Ctx, a: VpCreateArgs) -> CmdResult {
         scale_bar: !matches!(view, ViewKind::FixtureList | ViewKind::Rendered { .. }),
         sketch_dimensions: true,
         reference_dimensions: true,
+        underlays: false,
     };
     let id = vp.id;
     ctx.doc_mut().sheets.get_mut(&sid).expect("resolved").viewports.push(vp);
@@ -563,6 +564,8 @@ struct VpUpdateArgs {
     sketch_dimensions: Option<bool>,
     /// Plan viewports: draw reference dimensions between objects.
     reference_dimensions: Option<bool>,
+    /// Plan viewports: draw underlays.
+    underlays: Option<bool>,
     /// Forget all hand-dragged label positions of this viewport.
     #[serde(default)]
     reset_labels: bool,
@@ -648,6 +651,9 @@ fn vp_update(ctx: &mut Ctx, a: VpUpdateArgs) -> CmdResult {
     }
     if let Some(b) = a.reference_dimensions {
         v.reference_dimensions = b;
+    }
+    if let Some(b) = a.underlays {
+        v.underlays = b;
     }
     if a.reset_labels {
         v.label_offsets.clear();

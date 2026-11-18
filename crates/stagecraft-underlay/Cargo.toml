@@ -1,0 +1,22 @@
+[package]
+name = "stagecraft-underlay"
+description = "StageCraft underlays: images, PDF pages and SVGs to rasters, DXF to plain linework. Pure Rust."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+# Builds for wasm32-unknown-unknown: no files, no processes, fonts embedded.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+resvg = { version = "0.50", default-features = false, features = ["text", "raster-images"] }
+hayro = "0.9"
+dxf = "0.6.2"
+
+# The dxf crate makes uuid v4s; the browser build needs a JS source of randomness.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+uuid = { workspace = true, features = ["js"] }

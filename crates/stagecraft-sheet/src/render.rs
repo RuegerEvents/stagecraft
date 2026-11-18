@@ -117,17 +117,23 @@ fn svg_prims(prims: &[Prim], h: f64, clip: &mut usize, out: &mut String) {
                     esc(text)
                 );
             }
-            Prim::Image { min, max, data } => {
+            Prim::Image { min, max, angle, opacity, data } => {
                 let (mime, bytes) = match data {
                     ImageData::Encoded(b) if data.is_jpeg() => ("image/jpeg", b.as_ref().clone()),
                     ImageData::Encoded(b) => ("image/png", b.as_ref().clone()),
                     ImageData::Rgba { width, height, pixels } => ("image/png", encode_png(*width, *height, pixels)),
                 };
+                let extra = if *angle != 0.0 {
+                    format!(" transform=\"rotate({:.4} {:.3} {:.3})\"", -angle, min[0], y(min[1]))
+                } else {
+                    String::new()
+                };
+                let op = if *opacity < 1.0 { format!(" opacity=\"{opacity:.3}\"") } else { String::new() };
                 let _ = writeln!(
                     out,
-                    "<image x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" preserveAspectRatio=\"none\" href=\"data:{mime};base64,{}\"/>",
+                    "<image x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" preserveAspectRatio=\"none\"{extra}{op} href=\"data:{mime};base64,{}\"/>",
                     min[0],
-                    y(max[1]),
+                    y(min[1] + (max[1] - min[1])),
                     max[0] - min[0],
                     max[1] - min[1],
                     b64(&bytes)
@@ -244,7 +250,7 @@ fn pdf_prims(s: &mut Surface, prims: &[Prim], h: f64, fonts: &Fonts) {
                 s.draw_text(Point::from_xy(0.0, 0.0), font, (em(*size) * PT) as f32, text, false, TextDirection::Auto);
                 s.pop();
             }
-            Prim::Image { min, max, data } => {
+            Prim::Image { min, max, angle, opacity, data } => {
                 let img = match data {
                     ImageData::Encoded(b) if data.is_jpeg() => Image::from_jpeg(b.as_ref().clone().into(), true),
                     ImageData::Encoded(b) => Image::from_png(b.as_ref().clone().into(), true),
@@ -253,11 +259,22 @@ fn pdf_prims(s: &mut Surface, prims: &[Prim], h: f64, fonts: &Fonts) {
                     }
                 };
                 let Ok(img) = img else { continue };
-                let (x, y) = pt([min[0], max[1]]);
-                let size = Size::from_wh(((max[0] - min[0]) * PT) as f32, ((max[1] - min[1]) * PT) as f32);
-                let Some(size) = size else { continue };
-                s.push_transform(&Transform::from_translate(x, y));
+                let (x, y) = pt(*min);
+                let (w, h) = (((max[0] - min[0]) * PT) as f32, ((max[1] - min[1]) * PT) as f32);
+                let Some(size) = Size::from_wh(w, h) else { continue };
+                // Counter-clockwise on paper is clockwise in the y-down page space.
+                let (sn, cs) = (-angle).to_radians().sin_cos();
+                s.push_transform(&Transform::from_row(cs as f32, sn as f32, -sn as f32, cs as f32, x, y));
+                s.push_transform(&Transform::from_translate(0.0, -h));
+                let faded = *opacity < 1.0;
+                if faded {
+                    s.push_opacity(NormalizedF32::new(opacity.clamp(0.0, 1.0) as f32).unwrap_or(NormalizedF32::ONE));
+                }
                 s.draw_image(img, size);
+                if faded {
+                    s.pop();
+                }
+                s.pop();
                 s.pop();
             }
             Prim::Clip { min, max, prims } => {

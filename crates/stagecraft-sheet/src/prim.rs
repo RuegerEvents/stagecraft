@@ -125,9 +125,14 @@ pub enum Prim {
         bold: bool,
         color: Rgb,
     },
+    /// The picture fills the box `min`–`max`, turned by `angle` degrees
+    /// counter-clockwise about `min`.
     Image {
         min: P2,
         max: P2,
+        angle: f64,
+        /// 0 to 1.
+        opacity: f64,
         data: ImageData,
     },
     /// Children clipped to a rectangle.

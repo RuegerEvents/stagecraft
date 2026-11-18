@@ -105,6 +105,7 @@ pub fn shown_ids(doc: &Document, vp: &Viewport) -> Vec<Id> {
         .filter(|o| doc.layers.get(&o.layer).is_none_or(|l| l.visible))
         .filter(|o| !vp.hidden_layers.contains(&o.layer))
         .filter(|o| !o.tags.iter().any(|t| vp.hidden_tags.contains(t)))
+        .filter(|o| vp.underlays || !matches!(o.kind, ObjectKind::Underlay { .. }))
         .map(|o| (stagecraft_geom::pick::rank(&o.kind), o.id))
         .collect();
     v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
@@ -200,7 +201,37 @@ fn plan_prims(doc: &Document, vp: &Viewport, ids: &[Id]) -> Vec<(Id, Vec<PlanPri
     ids.iter().filter_map(|id| doc.objects.get(id)).map(|o| (o.id, stagecraft_geom::plan(doc, o, &style))).collect()
 }
 
-fn plan_to_prims(vp: &Viewport, m: &Mapping, prims: &[PlanPrim], over: Option<&TagLines>, out: &mut Vec<Prim>) {
+/// Asset bytes as image data, shared between composes.
+fn asset_image(doc: &Document, hash: &str) -> Option<ImageData> {
+    use std::sync::{Arc, Mutex};
+    static CACHE: Mutex<Option<HashMap<String, Arc<Vec<u8>>>>> = Mutex::new(None);
+    let mut guard = CACHE.lock().ok()?;
+    let cache = guard.get_or_insert_with(HashMap::new);
+    if let Some(b) = cache.get(hash) {
+        return Some(ImageData::Encoded(b.clone()));
+    }
+    let bytes = Arc::new(doc.assets.get(hash)?.data.as_slice().to_vec());
+    if cache.len() > 16 {
+        cache.clear();
+    }
+    cache.insert(hash.to_owned(), bytes.clone());
+    Some(ImageData::Encoded(bytes))
+}
+
+/// Grey of an underlay's lines on paper: black faded towards white by opacity.
+fn faded(opacity: f64) -> Rgb {
+    let g = (255.0 * (1.0 - opacity.clamp(0.0, 1.0))).round() as u8;
+    Rgb(g, g, g)
+}
+
+fn plan_to_prims(
+    doc: &Document,
+    vp: &Viewport,
+    m: &Mapping,
+    prims: &[PlanPrim],
+    over: Option<&TagLines>,
+    out: &mut Vec<Prim>,
+) {
     let pen_for = |vp: &Viewport, c: LineClass| pen_with(vp, c, over);
     let tp = |v: &[P2]| v.iter().map(|p| m.to_paper(*p)).collect::<Vec<_>>();
     for p in prims {
@@ -248,6 +279,14 @@ fn plan_to_prims(vp: &Viewport, m: &Mapping, prims: &[PlanPrim], over: Option<&T
                     bold: false,
                     color: Rgb::BLACK,
                 })
+            }
+            PlanPrim::Image { corners, asset, opacity } => {
+                let Some(data) = asset_image(doc, asset) else { continue };
+                let [a, b, _, d] = corners.map(|c| m.to_paper(c));
+                let w = (b[0] - a[0]).hypot(b[1] - a[1]);
+                let h = (d[0] - a[0]).hypot(d[1] - a[1]);
+                let angle = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
+                out.push(Prim::Image { min: a, max: [a[0] + w, a[1] + h], angle, opacity: *opacity, data });
             }
         }
     }
@@ -367,7 +406,18 @@ fn compose_viewport(doc: &Document, vp: &Viewport, inputs: &Inputs) -> Option<Co
     match vp.view {
         ViewKind::Plan => {
             for (id, prims) in plan_prims(doc, vp, &ids) {
-                plan_to_prims(vp, &m, &prims, tag_lines(doc, vp, id), &mut inner);
+                let start = inner.len();
+                plan_to_prims(doc, vp, &m, &prims, tag_lines(doc, vp, id), &mut inner);
+                // Underlay linework is drawn faded, like on screen.
+                if let Some(ObjectKind::Underlay { opacity, .. }) = doc.objects.get(&id).map(|o| &o.kind) {
+                    for p in &mut inner[start..] {
+                        match p {
+                            Prim::Path { pen: Some(pen), .. } => pen.color = faded(*opacity),
+                            Prim::Text { color, .. } => *color = faded(*opacity),
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
         ViewKind::Elevation { .. } | ViewKind::Section { .. } | ViewKind::PlanFrom3d { .. } => {
@@ -410,7 +460,9 @@ fn compose_viewport(doc: &Document, vp: &Viewport, inputs: &Inputs) -> Option<Co
             }
         }
         ViewKind::Rendered { .. } => match inputs.rasters.get(&vp.id) {
-            Some(img) => inner.push(Prim::Image { min: rect[0], max: rect[1], data: img.clone() }),
+            Some(img) => {
+                inner.push(Prim::Image { min: rect[0], max: rect[1], angle: 0.0, opacity: 1.0, data: img.clone() })
+            }
             None => {
                 let grey = Pen { width: 0.25, dash: None, color: Rgb(150, 150, 150) };
                 inner.push(Prim::rect(rect[0], rect[1], Some(grey.clone()), Some(Rgb(246, 246, 246))));
@@ -716,7 +768,7 @@ fn title_block(doc: &Document, sheet: &Sheet, tb: &TitleBlock, origin: P2, out: 
                 let k = (bw / w as f64).min(bh / h as f64);
                 let (iw, ih) = (w as f64 * k, h as f64 * k);
                 let lo = at([min[0] + (bw - iw) / 2.0, min[1] + (bh - ih) / 2.0]);
-                out.push(Prim::Image { min: lo, max: [lo[0] + iw, lo[1] + ih], data });
+                out.push(Prim::Image { min: lo, max: [lo[0] + iw, lo[1] + ih], angle: 0.0, opacity: 1.0, data });
             }
         }
     }

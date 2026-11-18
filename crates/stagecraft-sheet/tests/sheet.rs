@@ -274,3 +274,57 @@ fn plan_viewports_draw_sketch_and_reference_dimensions() {
     texts(&compose(e.doc(), sh, &inputs).unwrap().prims, &mut t);
     assert!(!t.iter().any(|x| x == "10.00" || x == "(5.00)"), "{t:?}");
 }
+
+fn images(prims: &[Prim]) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    for p in prims {
+        match p {
+            Prim::Image { angle, opacity, .. } => out.push((*angle, *opacity)),
+            Prim::Clip { prims, .. } => out.extend(images(prims)),
+            _ => {}
+        }
+    }
+    out
+}
+
+#[test]
+fn underlays_and_notes_on_plan_viewports() {
+    stagecraft_sheet::install();
+    let mut e = Engine::new();
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200"><rect width="300" height="200" fill="#ddd"/></svg>"##;
+    let u = id(&run(
+        &mut e,
+        "underlay.import",
+        json!({ "data_base64": stagecraft_core::sheet::base64_encode(svg.as_bytes()), "file_name": "u.svg", "opacity": 0.4 }),
+    ));
+    run(&mut e, "object.rotate", json!({ "ids": [u], "angle": 30, "pivot": [0, 0, 0] }));
+    run(&mut e, "note.create", json!({ "text": "Assumption: stage 1 m high", "at": [0, -1000], "frame": true }));
+    let sh = id(&run(
+        &mut e,
+        "sheet.create",
+        json!({ "name": "U", "number": "U-1", "paper": "a4", "orientation": "landscape" }),
+    ));
+    let vp = id(&run(
+        &mut e,
+        "viewport.create",
+        json!({ "sheet": sh, "view": "plan", "scale": 100, "position": [140, 110] }),
+    ));
+    let rasters = Default::default();
+    let inputs = Inputs { source: &stagecraft_sheet::FallbackSource, rasters: &rasters };
+    let page = compose(e.doc(), sh, &inputs).unwrap();
+    assert!(images(&page.prims).is_empty(), "underlays are off on sheets by default");
+    let mut t = Vec::new();
+    texts(&page.prims, &mut t);
+    assert!(t.iter().any(|x| x == "Assumption: stage 1 m high"), "{t:?}");
+    run(&mut e, "viewport.update", json!({ "viewport": vp, "underlays": true }));
+    let page = compose(e.doc(), sh, &inputs).unwrap();
+    let imgs = images(&page.prims);
+    assert_eq!(imgs.len(), 1);
+    assert!((imgs[0].0 - 30.0).abs() < 1e-6 && (imgs[0].1 - 0.4).abs() < 1e-9, "{imgs:?}");
+    let dir = std::env::var("STAGECRAFT_SHEETS").unwrap_or_else(|_| tempdir());
+    std::fs::create_dir_all(&dir).unwrap();
+    run(&mut e, "sheet.export_pdf", json!({ "path": format!("{dir}/underlay.pdf"), "sheet": sh }));
+    run(&mut e, "sheet.export_svg", json!({ "path": format!("{dir}/underlay.svg"), "sheet": sh }));
+    let svg_out = std::fs::read_to_string(format!("{dir}/underlay.svg")).unwrap();
+    assert!(svg_out.contains("rotate(-30.0000") && svg_out.contains("opacity=\"0.400\""));
+}

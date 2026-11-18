@@ -98,6 +98,7 @@ struct DeleteArgs {
 
 fn delete(ctx: &mut Ctx, a: DeleteArgs) -> CmdResult {
     ensure_exists(ctx.doc(), &a.ids)?;
+    super::annotate::ensure_unlocked(ctx.doc(), &a.ids)?;
     let doc = ctx.doc();
     let mut doomed: Vec<Id> = Vec::new();
     for &id in &a.ids {
@@ -183,6 +184,7 @@ struct MoveArgs {
 
 fn move_by(ctx: &mut Ctx, a: MoveArgs) -> CmdResult {
     ensure_exists(ctx.doc(), &a.ids)?;
+    super::annotate::ensure_unlocked(ctx.doc(), &a.ids)?;
     let t = DAffine3::from_translation(DVec3::from_array(a.delta));
     transform_world(ctx.doc_mut(), &a.ids, |w| t * w)?;
     Ok(json!({}))
@@ -200,6 +202,7 @@ struct RotateArgs {
 
 fn rotate(ctx: &mut Ctx, a: RotateArgs) -> CmdResult {
     ensure_exists(ctx.doc(), &a.ids)?;
+    super::annotate::ensure_unlocked(ctx.doc(), &a.ids)?;
     let doc = ctx.doc();
     let pivot = match a.pivot {
         Some(p) => DVec3::from_array(p),
@@ -227,6 +230,7 @@ struct SetPlacementArgs {
 
 fn set_placement(ctx: &mut Ctx, a: SetPlacementArgs) -> CmdResult {
     object(ctx.doc(), a.id)?;
+    super::annotate::ensure_unlocked(ctx.doc(), &[a.id])?;
     let o = ctx.doc_mut().objects.get_mut(&a.id).expect("checked");
     if let Some(p) = a.position {
         o.placement.position = p;

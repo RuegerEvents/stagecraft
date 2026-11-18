@@ -199,7 +199,7 @@ fn fill_rings(painter: &Painter, cam: &PaperCam, rings: &[Vec<P2>], fill: Color3
 
 /// A texture for a sheet image (rendered 3D view, logo), cached by the identity of
 /// its bytes, which stay shared while the image is unchanged.
-fn texture(ctx: &egui::Context, data: &ImageData) -> Option<egui::TextureHandle> {
+pub(crate) fn texture(ctx: &egui::Context, data: &ImageData) -> Option<egui::TextureHandle> {
     use std::collections::HashMap;
     use std::sync::Mutex;
     static CACHE: Mutex<Option<HashMap<usize, egui::TextureHandle>>> = Mutex::new(None);
@@ -233,6 +233,19 @@ fn texture(ctx: &egui::Context, data: &ImageData) -> Option<egui::TextureHandle>
     let t = ctx.load_texture(format!("sheet-image-{key}"), img, egui::TextureOptions::LINEAR);
     cache.insert(key, t.clone());
     Some(t)
+}
+
+/// A texture stretched over a screen quad: lower left, lower right, upper right, upper
+/// left corner of the picture.
+pub fn image_quad(painter: &Painter, tex: egui::TextureId, c: [egui::Pos2; 4], opacity: f32) {
+    let tint = Color32::from_white_alpha((opacity.clamp(0.0, 1.0) * 255.0) as u8);
+    let mut mesh = egui::epaint::Mesh::with_texture(tex);
+    for (p, uv) in c.iter().zip([[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]) {
+        mesh.vertices.push(egui::epaint::Vertex { pos: *p, uv: egui::pos2(uv[0], uv[1]), color: tint });
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 /// Draw composed primitives (paper mm) on screen.
@@ -291,14 +304,15 @@ pub fn paint_prims(painter: &Painter, cam: &PaperCam, prims: &[Prim]) {
                 let top_left = base + up * asc;
                 painter.add(Shape::Text(TextShape::new(top_left, galley, colour(*color)).with_angle(a)));
             }
-            Prim::Image { min, max, data } => {
-                let r = Rect::from_two_pos(cam.to_screen(*min), cam.to_screen(*max));
+            Prim::Image { min, max, angle, opacity, data } => {
+                let (w, h) = (max[0] - min[0], max[1] - min[1]);
+                let (sn, cs) = angle.to_radians().sin_cos();
+                let at = |u: f64, v: f64| cam.to_screen([min[0] + u * cs - v * sn, min[1] + u * sn + v * cs]);
+                let corners = [at(0.0, 0.0), at(w, 0.0), at(w, h), at(0.0, h)];
                 match texture(painter.ctx(), data) {
-                    Some(t) => {
-                        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                        painter.image(t.id(), r, uv, Color32::WHITE);
-                    }
+                    Some(t) => image_quad(painter, t.id(), corners, *opacity as f32),
                     None => {
+                        let r = Rect::from_two_pos(cam.to_screen(*min), cam.to_screen(*max));
                         painter.rect_filled(r, 0.0, Color32::from_gray(232));
                     }
                 }

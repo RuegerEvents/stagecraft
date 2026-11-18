@@ -11,6 +11,7 @@ glam.workspace = true
 stagecraft-gdtf.workspace = true
 stagecraft-mvr.workspace = true
 stagecraft-sketch.workspace = true
+stagecraft-underlay.workspace = true
 sha2.workspace = true
 imbl.workspace = true
 schemars = { workspace = true, features = ["uuid1"] }
@@ -23,6 +24,8 @@ zip.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 zip.workspace = true
+glam.workspace = true
+image.workspace = true
 
 # The browser build needs a JS source of randomness for uuid v4.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]

@@ -3,6 +3,7 @@
 //! Argument structs are the public API for AIs: their doc comments end up in the JSON
 //! schema, so say units and defaults there.
 
+mod annotate;
 pub(crate) mod create;
 mod doc;
 pub(crate) mod fixture;
@@ -37,6 +38,7 @@ pub(crate) fn register(r: &mut Registry) {
     sheet::register(r);
     mvr::register(r);
     sketch::register(r);
+    annotate::register(r);
     r.add::<crate::engine::BatchArgs>(
         "batch",
         crate::command::Kind::Meta,

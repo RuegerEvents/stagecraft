@@ -17,6 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 earcutr.workspace = true
+stagecraft-underlay.workspace = true
 
 [dev-dependencies]
 stagecraft-mvr.workspace = true

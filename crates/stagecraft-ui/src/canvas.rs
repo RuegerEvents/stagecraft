@@ -83,6 +83,14 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             None
         };
         let prims = stagecraft_geom::plan(doc, o, &style);
+        // Underlays: pictures from the assets, linework faded by their opacity.
+        let colour = match &o.kind {
+            stagecraft_core::ObjectKind::Underlay { opacity, .. } => {
+                draw_images(&painter, &s.ui.camera, doc, &prims);
+                colour.or(Some(pal.line.gamma_multiply(*opacity as f32)))
+            }
+            _ => colour,
+        };
         draw_prims(&painter, &s.ui.camera, &pal, &prims, colour, 1.0);
     }
 
@@ -243,6 +251,40 @@ fn draw_grid(p: &Painter, cam: &Camera, pal: &Palette) {
     }
 }
 
+/// The picture primitives of an object (underlays), textured from the document's assets.
+pub fn draw_images(p: &Painter, cam: &Camera, doc: &Document, prims: &[PlanPrim]) {
+    for prim in prims {
+        let PlanPrim::Image { corners, asset, opacity } = prim else { continue };
+        let Some(a) = doc.assets.get(asset) else { continue };
+        let data = stagecraft_sheet::ImageData::Encoded(std::sync::Arc::new(a.data.as_slice().to_vec()));
+        let Some(t) = image_texture(p.ctx(), asset, &data) else { continue };
+        crate::sheets::image_quad(p, t.id(), corners.map(|c| cam.to_screen(c)), *opacity as f32);
+    }
+}
+
+/// Underlay textures by asset hash (decoding a 4k PNG takes a while; do it once).
+fn image_texture(ctx: &egui::Context, hash: &str, data: &stagecraft_sheet::ImageData) -> Option<egui::TextureHandle> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<HashMap<String, Option<egui::TextureHandle>>>> = Mutex::new(None);
+    let mut guard = CACHE.lock().ok()?;
+    let cache = guard.get_or_insert_with(HashMap::new);
+    if let Some(t) = cache.get(hash) {
+        return t.clone();
+    }
+    let stagecraft_sheet::ImageData::Encoded(bytes) = data else { return None };
+    let t = image::load_from_memory(bytes).ok().map(|d| {
+        let d = d.to_rgba8();
+        let img = egui::ColorImage::from_rgba_unmultiplied([d.width() as usize, d.height() as usize], d.as_raw());
+        ctx.load_texture(format!("underlay-{hash}"), img, egui::TextureOptions::LINEAR)
+    });
+    if cache.len() > 16 {
+        cache.clear();
+    }
+    cache.insert(hash.to_owned(), t.clone());
+    t
+}
+
 /// Draw plan primitives. `colour` overrides line colours (selection, previews);
 /// `alpha` fades fills for ghosts.
 pub fn draw_prims(p: &Painter, cam: &Camera, pal: &Palette, prims: &[PlanPrim], colour: Option<Color32>, alpha: f32) {
@@ -294,13 +336,33 @@ pub fn draw_prims(p: &Painter, cam: &Camera, pal: &Palette, prims: &[PlanPrim], 
                     .collect();
                 p.add(Shape::line(v, stroke(*line)));
             }
-            PlanPrim::Text { pos, text, height, .. } => {
+            PlanPrim::Text { pos, text, height, rotation, anchor } => {
                 let px = (*height * cam.scale) as f32 * 1.3;
-                if px >= 7.0 {
-                    let font = theme::proportional(px.min(28.0));
-                    p.text(cam.to_screen(*pos), Align2::CENTER_CENTER, text, font, colour.unwrap_or(pal.text));
+                let c = colour.unwrap_or(pal.text);
+                match anchor {
+                    // Symbol labels: capped so they stay labels when zooming in.
+                    stagecraft_geom::TextAnchor::Center if *rotation == 0.0 => {
+                        if px >= 7.0 {
+                            let font = theme::proportional(px.min(28.0));
+                            p.text(cam.to_screen(*pos), Align2::CENTER_CENTER, text, font, c);
+                        }
+                    }
+                    // Notes and drawing text scale with the plan, like on paper.
+                    _ => {
+                        if px >= 4.0 {
+                            let galley = p.layout_no_wrap(text.clone(), theme::proportional(px), c);
+                            let size = galley.size();
+                            let a = -(rotation.to_radians() as f32);
+                            let dx = if *anchor == stagecraft_geom::TextAnchor::Center { -size.x / 2.0 } else { 0.0 };
+                            let (sn, cs) = a.sin_cos();
+                            let off = egui::vec2(dx * cs + size.y / 2.0 * sn, dx * sn - size.y / 2.0 * cs);
+                            let at = cam.to_screen(*pos) + off;
+                            p.add(egui::epaint::TextShape::new(at, galley, c).with_angle(a));
+                        }
+                    }
                 }
             }
+            PlanPrim::Image { .. } => {}
         }
     }
 }

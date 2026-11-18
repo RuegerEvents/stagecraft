@@ -20,7 +20,7 @@ pub(super) fn register(r: &mut Registry) {
     r.add("model.import", Kind::Edit, "Import a 3D model (.glb, .gltf, .obj, .3ds) as a model object", model_import);
 }
 
-fn read_input(
+pub(crate) fn read_input(
     path: &Option<PathBuf>,
     data: &Option<String>,
     name: &Option<String>,

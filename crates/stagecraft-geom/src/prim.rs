@@ -76,6 +76,16 @@ pub enum PlanPrim {
         rotation: f64,
         anchor: TextAnchor,
     },
+    /// A picture from the document's assets (PNG or JPEG) stretched over a
+    /// parallelogram: `corners` are where its lower left, lower right, upper right and
+    /// upper left corners land, world mm.
+    Image {
+        corners: [P2; 4],
+        /// SHA-256 of the asset.
+        asset: String,
+        /// 0 to 1.
+        opacity: f64,
+    },
 }
 
 impl PlanPrim {
@@ -90,6 +100,7 @@ impl PlanPrim {
             PlanPrim::Polyline { points, .. } | PlanPrim::Polygon { points, .. } => {
                 points.iter().for_each(|p| b.add(*p));
             }
+            PlanPrim::Image { corners, .. } => corners.iter().for_each(|p| b.add(*p)),
             PlanPrim::Circle { center, radius, .. } | PlanPrim::Arc { center, radius, .. } => {
                 b.add([center[0] - radius, center[1] - radius]);
                 b.add([center[0] + radius, center[1] + radius]);
@@ -125,6 +136,13 @@ impl PlanPrim {
             }
             PlanPrim::Arc { center, radius, .. } => (math::dist(*center, p) - radius).abs(),
             PlanPrim::Text { .. } => self.extent().distance(p),
+            PlanPrim::Image { corners, .. } => {
+                if math::point_in_polygon(corners, p) {
+                    0.0
+                } else {
+                    math::polyline_distance(corners, true, p)
+                }
+            }
         }
     }
 
@@ -155,6 +173,7 @@ impl PlanPrim {
             PlanPrim::Text { pos, text, height, rotation, anchor } => {
                 PlanPrim::Text { pos: f(pos), text, height, rotation, anchor }
             }
+            PlanPrim::Image { corners, asset, opacity } => PlanPrim::Image { corners: corners.map(&f), asset, opacity },
         }
     }
 }

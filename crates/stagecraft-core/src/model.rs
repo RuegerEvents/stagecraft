@@ -19,8 +19,9 @@ pub type P3 = [f64; 3];
 ///
 /// 1: block 1–7 documents. 2: embedded assets (`assets/` in the ZIP) and the fixture
 /// type library. 3: layer sketches, sketch-backed walls/floors and reference
-/// dimensions. Older files load unchanged (the new maps start empty).
-pub const FORMAT_VERSION: u32 = 3;
+/// dimensions. 4: underlays (image, PDF, SVG, DXF assets) and notes. Older files load
+/// unchanged (the new maps start empty).
+pub const FORMAT_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Document {
@@ -417,6 +418,66 @@ pub enum ObjectKind {
         /// Local bounding box `[min, max]`, mm, measured at import.
         bounds: [P3; 2],
     },
+    /// A drawing under the plan: an image, a PDF page, an SVG or a DXF. A point
+    /// `(u, v)` of the source (y up) sits at local `(u · scale, v · scale)` mm; the
+    /// placement moves and turns it. Drawn below everything, never in 3D.
+    Underlay {
+        format: UnderlayFormat,
+        /// SHA-256 of the imported file in the document's assets.
+        source: String,
+        /// What the plan shows for images, PDFs and SVGs: a PNG or JPEG asset (for
+        /// images the source itself). The picture spans `extent`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raster: Option<String>,
+        /// DXF: the flattened linework as a JSON asset (`stagecraft_underlay::Linework`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        linework: Option<String>,
+        /// PDF page, 1-based.
+        #[serde(default = "one")]
+        page: u32,
+        /// `[min, max]` of the content in source units (pixels, PDF points, SVG units,
+        /// DXF drawing units), y up.
+        extent: [P2; 2],
+        /// mm per source unit.
+        scale: f64,
+        /// 0 (invisible) to 1.
+        opacity: f64,
+        /// Locked underlays cannot be picked, moved, turned, calibrated or deleted.
+        #[serde(default)]
+        locked: bool,
+    },
+    /// A text note in the plan (assumptions, remarks). Origin: the upper left corner of
+    /// the first line; lines run along local +x.
+    Note {
+        /// Text; `\n` starts a new line.
+        text: String,
+        /// Cap height, mm in the model (250 = 2.5 mm on paper at 1:100).
+        height: f64,
+        /// Wrap lines longer than this, mm; 0 = only at `\n`.
+        #[serde(default)]
+        width: f64,
+        /// Draw a box around the text.
+        #[serde(default)]
+        frame: bool,
+        /// End of a leader line in local mm (relative to the origin), if any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        leader: Option<P2>,
+    },
+}
+
+fn one() -> u32 {
+    1
+}
+
+/// Where an underlay comes from.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UnderlayFormat {
+    /// PNG or JPEG.
+    Image,
+    Pdf,
+    Svg,
+    Dxf,
 }
 
 /// One mesh file of a model object.
@@ -460,11 +521,13 @@ impl ObjectKind {
             ObjectKind::Ceiling { .. } => "ceiling",
             ObjectKind::Group { .. } => "group",
             ObjectKind::Model { .. } => "model",
+            ObjectKind::Underlay { .. } => "underlay",
+            ObjectKind::Note { .. } => "note",
         }
     }
 
     /// Every type name, for docs and filters.
-    pub const TYPE_NAMES: [&'static str; 17] = [
+    pub const TYPE_NAMES: [&'static str; 19] = [
         "floor",
         "wall",
         "truss",
@@ -482,7 +545,15 @@ impl ObjectKind {
         "ceiling",
         "group",
         "model",
+        "underlay",
+        "note",
     ];
+
+    /// Underlays and notes: plan annotations without a body. They have no mesh, no
+    /// weight and are not exported to MVR.
+    pub fn is_annotation(&self) -> bool {
+        matches!(self, ObjectKind::Underlay { .. } | ObjectKind::Note { .. })
+    }
 
     /// Groups hold children and draw nothing.
     pub fn is_group(&self) -> bool {

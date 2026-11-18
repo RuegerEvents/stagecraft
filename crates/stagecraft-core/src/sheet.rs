@@ -222,6 +222,10 @@ pub struct Viewport {
     /// Plan viewports: draw the reference dimensions between objects.
     #[serde(default = "yes")]
     pub reference_dimensions: bool,
+    /// Plan viewports: draw underlays (images, PDFs, SVGs, DXFs under the plan).
+    /// Default false: sheets show the drawn plan, not the drawing it was traced from.
+    #[serde(default)]
+    pub underlays: bool,
 }
 
 /// How a viewport draws the lines of objects with one tag.

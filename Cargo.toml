@@ -8,6 +8,7 @@ members = [
     "crates/stagecraft-mvr",
     "crates/stagecraft-sheet",
     "crates/stagecraft-sketch",
+    "crates/stagecraft-underlay",
     "crates/stagecraft-control",
     "crates/stagecraft-ui",
     "crates/stagecraft-app",
@@ -28,6 +29,7 @@ stagecraft-sheet = { path = "crates/stagecraft-sheet" }
 stagecraft-hlr = { path = "crates/stagecraft-hlr" }
 stagecraft-mvr = { path = "crates/stagecraft-mvr" }
 stagecraft-sketch = { path = "crates/stagecraft-sketch" }
+stagecraft-underlay = { path = "crates/stagecraft-underlay" }
 stagecraft-ui = { path = "crates/stagecraft-ui" }
 anyhow = "1"
 ezpz = "0.2.29"
@@ -39,7 +41,7 @@ eframe = "0.36.2"
 egui-wgpu = "0.36.2"
 bytemuck = { version = "1", features = ["derive"] }
 egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 rfd = "0.16"
 clap = { version = "4.6", features = ["derive"] }
 dirs = "7"
@@ -70,4 +72,29 @@ opt-level = 2
 [profile.dev.package.faer]
 opt-level = 3
 [profile.dev.package.ezpz]
+opt-level = 3
+
+# Underlay rasterising (SVG, PDF) and PNG decoding: seconds instead of tens of seconds
+# unoptimised.
+[profile.dev.package.resvg]
+opt-level = 3
+[profile.dev.package.usvg]
+opt-level = 3
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.hayro]
+opt-level = 3
+[profile.dev.package.hayro-interpret]
+opt-level = 3
+[profile.dev.package.hayro-syntax]
+opt-level = 3
+[profile.dev.package.vello_cpu]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
 opt-level = 3

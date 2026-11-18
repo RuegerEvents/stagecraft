@@ -768,7 +768,7 @@ impl Exporter<'_> {
             k if k.is_group() => {}
             _ => m.geometries = self.mesh_geometry(o),
         }
-        for c in doc.children(o.id) {
+        for c in doc.children(o.id).into_iter().filter(|c| !doc.objects[c].kind.is_annotation()) {
             let child = self.object(&doc.objects[&c]);
             m.children.push(child);
         }
@@ -793,7 +793,8 @@ pub fn export(doc: &Document) -> Result<(Vec<u8>, Value), CmdError> {
     for l in doc.layers_sorted() {
         let mut layer = mvr::Layer::new(l.id, l.name.clone());
         layer.matrix = mvr::Matrix::translation(0.0, 0.0, l.elevation);
-        for o in doc.objects.values().filter(|o| o.parent.is_none() && o.layer == l.id) {
+        // Underlays and notes are plan annotations; MVR has no place for them.
+        for o in doc.objects.values().filter(|o| o.parent.is_none() && o.layer == l.id && !o.kind.is_annotation()) {
             let mo = ex.object(o);
             layer.children.push(mo);
         }
