@@ -5,8 +5,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::draw::{Axis, Endpoint, LinePlan};
 use crate::error::SolveError;
-use crate::model::{ConstraintId, ConstraintKind, EdgeGeom, EdgeId, ItemRef, Measure, Sketch, Vec2};
+use crate::model::{ConstraintId, ConstraintKind, EdgeGeom, EdgeId, ItemRef, Measure, PointId, Sketch, Vec2};
 use crate::solve::{DragTarget, SolveOptions, Solved, solve_sketch};
 
 /// One edit of a sketch.
@@ -75,6 +76,11 @@ pub enum Edit {
     SetConstruction {
         id: EdgeId,
         construction: bool,
+    },
+    /// Draw a line from a plan made by [`infer_line`](crate::infer_line): new or
+    /// snapped end points, point-on-line, horizontal/vertical and a length dimension.
+    DrawLine {
+        plan: LinePlan,
     },
     /// Several edits as one step (solved once at the end).
     Batch {
@@ -162,6 +168,7 @@ fn apply_structural(s: &mut Sketch, edit: &Edit, c: &mut Collected) -> Result<()
         Edit::SetConstruction { id, construction } => {
             s.edge_mut(*id).ok_or(SolveError::Missing(ItemRef::Edge(*id)))?.construction = *construction;
         }
+        Edit::DrawLine { plan } => draw_line(s, plan, c)?,
         Edit::Batch { edits } => {
             for e in edits {
                 apply_structural(s, e, c)?;
@@ -189,4 +196,53 @@ impl Sketch {
         *self = solved.sketch.clone();
         Ok(solved)
     }
+}
+
+fn endpoint(s: &mut Sketch, e: &Endpoint, c: &mut Collected) -> Result<PointId, SolveError> {
+    match *e {
+        Endpoint::Existing { point } => {
+            if s.point(point).is_none() {
+                return Err(SolveError::Missing(ItemRef::Point(point)));
+            }
+            Ok(point)
+        }
+        Endpoint::New { at, on_line } => {
+            if let Some(line) = on_line
+                && s.line_ends(line).is_none()
+            {
+                return Err(SolveError::Missing(ItemRef::Edge(line)));
+            }
+            let id = s.add_point(at);
+            c.created.push(ItemRef::Point(id));
+            if let Some(line) = on_line {
+                let k = s.add_constraint(ConstraintKind::PointOnLine { point: id, line });
+                c.created.push(ItemRef::Constraint(k));
+                c.culprits.push(k);
+            }
+            Ok(id)
+        }
+    }
+}
+
+fn draw_line(s: &mut Sketch, plan: &LinePlan, c: &mut Collected) -> Result<(), SolveError> {
+    let a = endpoint(s, &plan.start, c)?;
+    let b = endpoint(s, &plan.end, c)?;
+    let line = s.add_line(a, b);
+    c.created.push(ItemRef::Edge(line));
+    let constrain = |s: &mut Sketch, c: &mut Collected, kind| {
+        let k = s.add_constraint(kind);
+        c.created.push(ItemRef::Constraint(k));
+        c.culprits.push(k);
+    };
+    match plan.axis {
+        Some(Axis::Horizontal) => constrain(s, c, ConstraintKind::Horizontal { a, b }),
+        Some(Axis::Vertical) => constrain(s, c, ConstraintKind::Vertical { a, b }),
+        None => {}
+    }
+    if let Some(len) = plan.length {
+        let k = s.add_dimension(Measure::Length { line }, len);
+        c.created.push(ItemRef::Constraint(k));
+        c.culprits.push(k);
+    }
+    Ok(())
 }
