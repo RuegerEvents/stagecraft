@@ -7,7 +7,8 @@
 # right-click → Open, or: xattr -dr com.apple.quarantine /Applications/StageCraft.app
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+# The sources to build: STAGECRAFT_ROOT, else the checkout this script is in.
+cd "${STAGECRAFT_ROOT:-$(dirname "$0")/..}"
 VERSION="${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}"
 VERSION="${VERSION#v}"
 APP_NAME="StageCraft"
@@ -61,6 +62,16 @@ STAGE="$DIST/dmg"
 rm -rf "$STAGE" && mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+# An explicit size and file system: left to itself, hdiutil on GitHub's macOS runners
+# misjudges the image and fails with "No space left on device". Retried, since it can
+# also fail with "Resource busy" right after the copy.
+SIZE_MB=$(( $(du -sm "$STAGE" | cut -f1) * 13 / 10 + 20 ))
+for attempt in 1 2 3; do
+  if hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -fs HFS+ -size "${SIZE_MB}m" -ov -format UDZO "$DMG" >/dev/null; then
+    break
+  fi
+  [ "$attempt" = 3 ] && exit 1
+  sleep 5
+done
 rm -rf "$STAGE"
 echo "$DMG"

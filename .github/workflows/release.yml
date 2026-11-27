@@ -83,10 +83,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
+      # The packaging script of the workflow's own commit, so a rebuild of an older tag
+      # gets its fixes.
+      - uses: actions/checkout@v4
+        with:
+          path: .packaging
+          sparse-checkout: scripts
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
-      - run: scripts/macos-dmg.sh "$TAG"
+      - uses: Swatinem/rust-cache@v2
+      - run: STAGECRAFT_ROOT="$PWD" .packaging/scripts/macos-dmg.sh "$TAG"
       - run: gh release upload "$TAG" dist/*.dmg --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
