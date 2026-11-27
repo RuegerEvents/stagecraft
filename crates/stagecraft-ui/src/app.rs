@@ -450,6 +450,19 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
+/// The app icon (`assets/app-icon/`, drawn in `stagecraft.svg`) for the window and the Dock
+/// when StageCraft runs outside its bundle.
+fn app_icon() -> egui::IconData {
+    let png = include_bytes!("../../../assets/app-icon/stagecraft-256.png");
+    match image::load_from_memory(png) {
+        Ok(img) => {
+            let img = img.to_rgba8();
+            egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() }
+        }
+        Err(_) => egui::IconData::default(),
+    }
+}
+
 /// Open the window. The control server listens on 127.0.0.1 and announces itself with
 /// mode "gui", so `stagecraft exec` and MCP drive this window.
 pub fn run(engine: Engine) -> Result<(), String> {
@@ -457,7 +470,8 @@ pub fn run(engine: Engine) -> Result<(), String> {
     let viewport = egui::ViewportBuilder::default()
         .with_title(title.clone())
         .with_inner_size([1440.0, 900.0])
-        .with_min_inner_size([900.0, 560.0]);
+        .with_min_inner_size([900.0, 560.0])
+        .with_icon(app_icon());
     // macOS: a full-size content view whose top 28 pt are the title row (`chrome::title_row`,
     // AppKit centres the window buttons in it), as craft-window decides for every Craft app. Elsewhere the desktop draws the
     // frame: StageCraft has no caption buttons of its own. `STAGECRAFT_TITLEBAR=system` or
