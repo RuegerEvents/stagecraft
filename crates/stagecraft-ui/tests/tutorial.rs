@@ -281,6 +281,8 @@ fn the_tutorial_builds_a_basic_stage_through_the_gui() {
     tour.points_at("New sheet");
     tour.click("New sheet");
     for v in ["plan", "section_y", "rendered"] {
+        tour.points_at("Add viewport");
+        tour.click("Add viewport");
         tour.points_at(&format!("Add viewport {v}"));
         tour.click(&format!("Add viewport {v}"));
     }

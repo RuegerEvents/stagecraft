@@ -240,7 +240,10 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   bundled demo GDTFs); the GDTF Share panel (`library::share_panel`) searches GDTF Share
   into the same kind of list (fixture, maker, modes, `Add <rid>` or ✓ when the library has
   it; a picked row shows revision, date, modes, GDTF version, author, rating and size).
-  Both use `listview.rs` (header, group and entry rows in the table's look).
+  Both use `listview.rs` (header, group and entry rows in the table's look), as do the
+  Sheets panel (sheets: no., name, viewports, paper; viewports: name, view, scale; the
+  "Viewports" heading's + menu holds `Add viewport <view>`) and the Tags panel (eye, tag,
+  objects, delete); the Layers header uses the same `panel_dark` strip.
   Requests run on worker threads behind the `ShareBackend` trait; the UI polls a
   channel in `Studio::show`, so the network never blocks a frame. Tests swap in a
   mock (`ui.library.set_backend`). On this Mac LuLu holds new binaries' connections

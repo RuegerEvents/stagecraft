@@ -6,6 +6,7 @@ use stagecraft_core::{Id, Layer};
 
 use crate::app::Studio;
 use crate::i18n::{t, tf};
+use crate::listview::{self, Col};
 use crate::state::{FileRequest, Tool};
 use crate::widgets::{self, Icon, edit_field, icon_button};
 
@@ -230,9 +231,12 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
     let u = crate::lengths::of(s);
     let layers: Vec<Layer> = s.engine.doc().layers_sorted().into_iter().cloned().collect();
     let active = s.ui.active_layer.or(layers.first().map(|l| l.id));
-    ui.horizontal(|ui| {
+    // The header in the lists' look: a `panel_dark` strip under the column titles.
+    let strip = ui.painter().add(egui::Shape::Noop);
+    let header = ui.horizontal(|ui| {
+        ui.set_min_height(20.0);
         ui.add_space(46.0);
-        ui.label(RichText::new(t("layers.name")).small().weak());
+        ui.label(RichText::new(t("layers.name")).small().color(crate::theme::of(ui).text2));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if icon_button(ui, Icon::Plus, "Add layer").on_hover_text(t("layers.add")).clicked() {
                 let n = s.engine.doc().layers.len() + 1;
@@ -245,9 +249,16 @@ pub fn layers(ui: &mut Ui, s: &mut Studio) {
                 let _ = s.run("layer.create", json!({ "name": name }));
             }
             ui.add_space(42.0);
-            ui.label(RichText::new(tf("layers.elevation", &[("unit", &u.label())])).small().weak());
+            ui.label(
+                RichText::new(tf("layers.elevation", &[("unit", &u.label())]))
+                    .small()
+                    .color(crate::theme::of(ui).text2),
+            );
         });
     });
+    let rect = header.response.rect.expand2(egui::vec2(0.0, 1.0));
+    let rect = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), rect.y_range());
+    ui.painter().set(strip, egui::Shape::rect_filled(rect, 0.0, crate::theme::of(ui).panel_dark));
     for (i, l) in layers.iter().enumerate() {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -329,22 +340,41 @@ pub fn tags(ui: &mut Ui, s: &mut Studio) {
     if tags.is_empty() {
         ui.label(RichText::new(t("tags.none")).weak());
     }
-    for (id, name, n) in tags {
-        ui.horizontal(|ui| {
-            let vis = !s.ui.hidden_tags.contains(&id);
-            if widgets::eye_toggle(ui, vis, &format!("Show tag {name}")).clicked() {
-                let _ = s.run("ui.set_tag_visible", json!({ "tag": id, "visible": !vis }));
-            }
-            ui.label(&name);
-            ui.label(RichText::new(n.to_string()).color(crate::theme::of(ui).text3));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon_button(ui, Icon::Close, &format!("Delete tag {name}")).on_hover_text(t("tags.delete")).clicked()
-                {
-                    let _ = s.run("tag.delete", json!({ "tag": id }));
-                }
-            });
-        });
+    let cols = [
+        Col::fixed("", 26.0),
+        Col::fill(t("tags.col_tag")),
+        Col::number(t("tags.col_objects"), 56.0),
+        Col::fixed("", 26.0),
+    ];
+    if !tags.is_empty() {
+        listview::header(ui, &cols);
     }
+    for (id, name, n) in tags {
+        let vis = !s.ui.hidden_tags.contains(&id);
+        let (_, cells, ink) = listview::row(ui, &cols, false, &format!("Tag {name}"));
+        let ink = if vis { ink } else { crate::theme::of(ui).text3 };
+        let eye = ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(cells[0])
+                .layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)),
+            |ui| widgets::eye_toggle(ui, vis, &format!("Show tag {name}")),
+        );
+        if eye.inner.clicked() {
+            let _ = s.run("ui.set_tag_visible", json!({ "tag": id, "visible": !vis }));
+        }
+        listview::cell(ui, cells[1], &name, ink, false);
+        listview::cell_dim(ui, cells[2], &n.to_string(), ink, false, true);
+        let del = ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(cells[3])
+                .layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)),
+            |ui| icon_button(ui, Icon::Close, &format!("Delete tag {name}")).on_hover_text(t("tags.delete")),
+        );
+        if del.inner.clicked() {
+            let _ = s.run("tag.delete", json!({ "tag": id }));
+        }
+    }
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
         let id = egui::Id::unique("new_tag");
         if let Some(name) = crate::widgets::edit_field_hint(ui, id, "", 140.0, "New tag", t("tags.new_hint"))

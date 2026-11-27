@@ -210,7 +210,8 @@ pub const STEPS: [Step; 12] = [
             } else {
                 return Vec::new();
             };
-            vec![w(format!("Add viewport {next}")), Target::Panel(PanelKind::Sheets)]
+            // The entry in the open + menu, else the + itself.
+            vec![w(format!("Add viewport {next}")), w("Add viewport"), Target::Panel(PanelKind::Sheets)]
         },
     },
     Step {

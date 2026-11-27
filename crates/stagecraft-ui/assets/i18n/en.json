@@ -987,5 +987,14 @@
   "share.rating": "Rating",
   "share.file": "File",
   "share.in_library": "✓ In this document's library",
-  "share.add_to_library": "Add to library"
+  "share.add_to_library": "Add to library",
+  "sheets.col_number": "No.",
+  "sheets.col_name": "Name",
+  "sheets.col_viewports": "VP",
+  "sheets.col_paper": "Paper",
+  "sheets.col_view": "View",
+  "sheets.col_scale": "Scale",
+  "sheets.no_viewports": "No viewports yet.",
+  "tags.col_tag": "Tag",
+  "tags.col_objects": "Objects"
 }

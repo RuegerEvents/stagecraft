@@ -22,6 +22,7 @@ use std::sync::Arc;
 use crate::app::Studio;
 use crate::i18n::{t, tf};
 use crate::lengths::fmt_number;
+use crate::listview::{self, Col};
 use crate::theme;
 use crate::widgets::{self, Icon, button, edit_field, icon_button};
 use crate::zoom;
@@ -789,56 +790,78 @@ pub fn list_panel(ui: &mut Ui, s: &mut Studio) {
             new_sheet(s);
         }
     }
-    for sh in doc.sheets_sorted() {
-        let text = format!("{}  {}", sh.number, sh.name);
-        let r = ui.selectable_label(cur == Some(sh.id), text);
-        widgets::name(&r, egui::Role::Button, format!("Sheet {}", sh.number));
-        if r.clicked() {
-            let _ = s.run("ui.sheet", json!({ "sheet": sh.id }));
-            // The sheet itself in the Inspector (its title block fields), not a viewport.
-            s.ui.sheets.viewport = None;
+    if !doc.sheets.is_empty() {
+        let cols = [
+            Col::fixed(t("sheets.col_number"), 54.0),
+            Col::fill(t("sheets.col_name")),
+            Col::number(t("sheets.col_viewports"), 34.0),
+            Col::fixed(t("sheets.col_paper"), 50.0),
+        ];
+        listview::header(ui, &cols);
+        for sh in doc.sheets_sorted() {
+            let on = cur == Some(sh.id);
+            let (r, cells, ink) = listview::row(ui, &cols, on, &format!("Sheet {}", sh.number));
+            listview::cell(ui, cells[0], &sh.number, ink, false);
+            listview::cell(ui, cells[1], &sh.name, ink, false);
+            listview::cell_dim(ui, cells[2], &sh.viewports.len().to_string(), ink, on, true);
+            let paper =
+                format!("{} {}", sh.paper.name(), if sh.orientation == Orientation::Portrait { "▯" } else { "▭" });
+            listview::cell_dim(ui, cells[3], &paper, ink, on, false);
+            if r.clicked() {
+                let _ = s.run("ui.sheet", json!({ "sheet": sh.id }));
+                // The sheet itself in the Inspector (its title block fields), not a viewport.
+                s.ui.sheets.viewport = None;
+            }
         }
     }
     let Some(cur) = cur else { return };
-    crate::widgets::section(ui, t("sheets.add_viewport"));
-    ui.horizontal_wrapped(|ui| {
-        for (key, view) in [
-            ("sheets.view.plan", "plan"),
-            ("sheets.view.plan_3d", "plan_3d"),
-            ("sheets.view.front", "front"),
-            ("sheets.view.side", "left"),
-            ("sheets.view.section", "section_y"),
-            ("sheets.view.rendered", "rendered"),
-            ("sheets.view.list", "fixture_list"),
-        ] {
-            if button(ui, t(key), &format!("Add viewport {view}")).clicked() {
-                let [w, h] = doc.sheets[&cur].size();
-                let scale = if matches!(view, "plan" | "plan_3d" | "front" | "left" | "section_y") { 100 } else { 50 };
-                let label = doc.label_templates.values().next().map(|t| t.id);
-                // New viewports take the next free quarter of the paper (clockwise from top
-                // left, clear of the title block), so a few added in a row do not stack.
-                let slots = [[0.27, 0.66], [0.68, 0.66], [0.27, 0.3], [0.55, 0.3]];
-                let [fx, fy] = slots[doc.sheets[&cur].viewports.len() % slots.len()];
-                let mut args = json!({ "sheet": cur, "view": view, "scale": scale, "position": [w * fx, h * fy] });
-                if matches!(view, "plan" | "plan_3d")
-                    && let Some(l) = label
-                {
-                    args["label_template"] = json!(l);
+    // "Viewports" with a + whose menu adds each kind of view.
+    ui.add_space(4.0);
+    widgets::rule(ui);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(t("sheets.viewports")).font(theme::bold(12.0)).color(theme::of(ui).text));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let r = icon_button(ui, Icon::Plus, "Add viewport").on_hover_text(t("sheets.add_viewport"));
+            egui::Popup::menu(&r).show(|ui| {
+                for (key, view) in [
+                    ("sheets.view.plan", "plan"),
+                    ("sheets.view.plan_3d", "plan_3d"),
+                    ("sheets.view.front", "front"),
+                    ("sheets.view.side", "left"),
+                    ("sheets.view.section", "section_y"),
+                    ("sheets.view.rendered", "rendered"),
+                    ("sheets.view.list", "fixture_list"),
+                ] {
+                    let b = ui.button(t(key));
+                    widgets::name(&b, egui::Role::Button, format!("Add viewport {view}"));
+                    if b.clicked() {
+                        add_viewport(s, &doc, cur, view);
+                        ui.close();
+                    }
                 }
-                if let Ok(v) = s.run("viewport.create", args) {
-                    s.ui.sheets.viewport = v["id"].as_str().and_then(|x| x.parse().ok());
-                }
-            }
-        }
+            });
+        });
     });
-    crate::widgets::section(ui, t("sheets.viewports"));
+    ui.add_space(3.0);
+    let cols = [
+        Col::fill(t("sheets.col_name")),
+        Col::fixed(t("sheets.col_view"), 86.0),
+        Col::number(t("sheets.col_scale"), 52.0),
+    ];
+    listview::header(ui, &cols);
+    if doc.sheets[&cur].viewports.is_empty() {
+        listview::empty(ui, t("sheets.no_viewports"));
+    }
     for vp in &doc.sheets[&cur].viewports {
-        let text = match vp.view {
-            ViewKind::FixtureList | ViewKind::Rendered { .. } => vp.name.clone(),
-            _ => format!("{}  1:{}", vp.name, vp.scale),
+        let on = s.ui.sheets.viewport == Some(vp.id);
+        let (r, cells, ink) = listview::row(ui, &cols, on, &format!("Viewport {}", vp.name));
+        listview::cell(ui, cells[0], &vp.name, ink, false);
+        listview::cell_dim(ui, cells[1], t(view_key(&vp.view)), ink, on, false);
+        let scale = match vp.view {
+            ViewKind::FixtureList | ViewKind::Rendered { .. } => "–".to_owned(),
+            _ => format!("1:{}", vp.scale),
         };
-        let r = ui.selectable_label(s.ui.sheets.viewport == Some(vp.id), text);
-        widgets::name(&r, egui::Role::Button, format!("Viewport {}", vp.name));
+        listview::cell_dim(ui, cells[2], &scale, ink, on, true);
         if r.clicked() {
             s.ui.sheets.viewport = Some(vp.id);
         }
@@ -846,6 +869,41 @@ pub fn list_panel(ui: &mut Ui, s: &mut Studio) {
             s.ui.sheets.viewport = Some(vp.id);
             s.ui.sheets.editor = true;
         }
+    }
+}
+
+/// The catalog key naming a viewport's kind of view.
+fn view_key(v: &ViewKind) -> &'static str {
+    match v {
+        ViewKind::Plan => "sheets.view.plan",
+        ViewKind::PlanFrom3d { .. } => "sheets.view.plan_3d",
+        ViewKind::Elevation { side: Side::Front } => "sheets.view.front",
+        ViewKind::Elevation { side: Side::Back } => "sheets.view.back",
+        ViewKind::Elevation { side: Side::Left } => "sheets.view.side",
+        ViewKind::Elevation { side: Side::Right } => "sheets.view.side_right",
+        ViewKind::Section { .. } => "sheets.view.section",
+        ViewKind::Rendered { .. } => "sheets.view.rendered",
+        ViewKind::FixtureList => "sheets.view.list",
+    }
+}
+
+/// A new viewport of `view` on sheet `sheet`, picked for the Inspector.
+fn add_viewport(s: &mut Studio, doc: &Document, sheet: Id, view: &str) {
+    let [w, h] = doc.sheets[&sheet].size();
+    let scale = if matches!(view, "plan" | "plan_3d" | "front" | "left" | "section_y") { 100 } else { 50 };
+    let label = doc.label_templates.values().next().map(|t| t.id);
+    // New viewports take the next free quarter of the paper (clockwise from top
+    // left, clear of the title block), so a few added in a row do not stack.
+    let slots = [[0.27, 0.66], [0.68, 0.66], [0.27, 0.3], [0.55, 0.3]];
+    let [fx, fy] = slots[doc.sheets[&sheet].viewports.len() % slots.len()];
+    let mut args = json!({ "sheet": sheet, "view": view, "scale": scale, "position": [w * fx, h * fy] });
+    if matches!(view, "plan" | "plan_3d")
+        && let Some(l) = label
+    {
+        args["label_template"] = json!(l);
+    }
+    if let Ok(v) = s.run("viewport.create", args) {
+        s.ui.sheets.viewport = v["id"].as_str().and_then(|x| x.parse().ok());
     }
 }
 

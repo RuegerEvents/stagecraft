@@ -767,7 +767,11 @@ fn sheet_panel_buttons_create_sheets_and_viewports() {
     h.get_by_label("Create sheet").click();
     h.run();
     assert_eq!(h.state().engine.doc().sheets.len(), 1);
+    h.get_by_label("Add viewport").click();
+    h.run();
     h.get_by_label("Add viewport plan").click();
+    h.run();
+    h.get_by_label("Add viewport").click();
     h.run();
     h.get_by_label("Add viewport fixture_list").click();
     h.run();
