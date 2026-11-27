@@ -9,7 +9,8 @@ use stagecraft_core::{Engine, Id, ObjectKind};
 use stagecraft_ui::Studio;
 
 fn harness(engine: Engine) -> Harness<'static, Studio> {
-    let mut h = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
+    let mut h = Harness::builder()
+        .with_context_setup(stagecraft_ui::framework::install_headless)
         // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
         // asks for one more frame; closing a modal can take six.
         .with_max_steps(8)
@@ -1006,7 +1007,8 @@ fn tools_sit_in_the_palette_and_tool_bar_commands_that_do_not_fit_go_into_a_menu
     assert!(h.query_by_label("Tool Ceiling").is_some());
     // A narrow window: the tool bar's last groups move into the ⋯ menu; the palette stays
     // in the layout (craft-ui may fold its column to an icon).
-    let mut h = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
+    let mut h = Harness::builder()
+        .with_context_setup(stagecraft_ui::framework::install_headless)
         .with_max_steps(8)
         .with_size(vec2(600.0, 700.0))
         .build_ui_state(|ui, s: &mut Studio| s.show(ui), Studio::new(stagecraft_ui::demo::engine()));

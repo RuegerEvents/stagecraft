@@ -233,10 +233,14 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   (`onboarding.rs`: egui modal Start tutorial / Not now / Don't ask again, answer in
   `Prefs.onboarding`; only `run` calls `Studio::offer_tutorial`, so tests stay quiet).
 
-- The library panel (`src/library.rs`) lists fixture types (pick one for the fixture
-  tool, assign a symbol, import files, "Demo fixtures" adds the bundled demo GDTFs);
-  the GDTF Share panel (`library::share_panel`)
-  searches GDTF Share.
+- The library panel (`src/library.rs`) lists fixture types as a list grouped by
+  manufacturer (symbol, type, modes, kg, fixtures using it; filter field; a row named
+  `Fixture type <key>` picks the type for the fixture tool, and mode, symbol, weight,
+  power and size of the picked type show below; import files, "Demo fixtures" adds the
+  bundled demo GDTFs); the GDTF Share panel (`library::share_panel`) searches GDTF Share
+  into the same kind of list (fixture, maker, modes, `Add <rid>` or ✓ when the library has
+  it; a picked row shows revision, date, modes, GDTF version, author, rating and size).
+  Both use `listview.rs` (header, group and entry rows in the table's look).
   Requests run on worker threads behind the `ShareBackend` trait; the UI polls a
   channel in `Studio::show`, so the network never blocks a frame. Tests swap in a
   mock (`ui.library.set_backend`). On this Mac LuLu holds new binaries' connections

@@ -51,7 +51,8 @@ fn title_left(left: f32, width: f32, text_w: f32) -> f32 {
 pub fn move_area(ui: &mut Ui, rect: egui::Rect) -> Response {
     let resp = ui.interact(rect, ui.scope_id().with("move_area"), egui::Sense::CLICK | egui::Sense::DRAG);
     let top = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p)).and_then(|p| ui.ctx().layer_id_at(p));
-    let covered = top.is_some_and(|top| if top == ui.layer_id() { !resp.hovered() } else { top.order == egui::Order::Middle });
+    let covered =
+        top.is_some_and(|top| if top == ui.layer_id() { !resp.hovered() } else { top.order == egui::Order::Middle });
     if covered {
         craft_ui::shell::title_bar::set_window_movable(ui.ctx(), false);
     }

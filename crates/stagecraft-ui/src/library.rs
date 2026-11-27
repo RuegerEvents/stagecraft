@@ -18,6 +18,7 @@ use stagecraft_gdtf::share::{self, ShareClient, ShareEntry, ShareError};
 
 use crate::app::Studio;
 use crate::i18n::{t, tf};
+use crate::listview::{self, Col};
 use crate::widgets;
 
 /// Where GDTF Share data comes from.
@@ -135,6 +136,10 @@ pub struct Job {
 #[derive(Default)]
 pub struct LibraryState {
     pub query: String,
+    /// Narrows the document's fixture types in the Library panel.
+    pub filter: String,
+    /// The GDTF Share revision whose details show under the list.
+    pub selected: Option<u64>,
     pub list: Option<Arc<Vec<ShareEntry>>>,
     pub jobs: Vec<Job>,
     /// Last outcome; `true` = error.
@@ -264,9 +269,8 @@ fn sample(key: &str) -> Object {
     }
 }
 
-/// Paint a type's plan symbol into a small square.
-fn symbol_preview(ui: &mut Ui, doc: &Document, key: &str) {
-    let (rect, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
+/// Paint a type's plan symbol into `rect` in `fg`.
+fn symbol_preview(ui: &Ui, doc: &Document, key: &str, rect: egui::Rect, fg: egui::Color32) {
     let Some(sym) = stagecraft_geom::gdtf::symbol(doc, &sample(key)) else { return };
     let (lo, hi) = sym.bounds;
     let k = ((rect.width() - 4.0) as f64 / (hi[0] - lo[0]).max(1e-6))
@@ -274,7 +278,6 @@ fn symbol_preview(ui: &mut Ui, doc: &Document, key: &str) {
     let mid = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
     let c = rect.center();
     let to = |p: &[f64; 2]| egui::pos2(c.x + ((p[0] - mid[0]) * k) as f32, c.y - ((p[1] - mid[1]) * k) as f32);
-    let fg = ui.visuals().text_color();
     let bg = ui.visuals().extreme_bg_color;
     let p = ui.painter();
     for prim in &sym.prims {
@@ -314,18 +317,28 @@ fn add_demo_types(s: &mut Studio, files: &[&(&str, &[u8])]) {
     }
 }
 
+/// The Library panel: the document's fixture types as a list grouped by manufacturer
+/// (symbol, type, modes, weight, fixtures using it); a click picks the type for the fixture
+/// tool, and the picked type's mode and symbol are set below the list.
 pub fn show(ui: &mut Ui, s: &mut Studio) {
     let doc = s.engine.doc().clone();
     ui.horizontal(|ui| {
+        let missing: Vec<_> = crate::demo::DEMO_GDTFS
+            .iter()
+            .filter(|(file, _)| !doc.fixture_types.contains_key(file.trim_end_matches(".gdtf")))
+            .collect();
+        let buttons = if missing.is_empty() { 70.0 } else { 180.0 };
+        let r = ui.add(
+            egui::TextEdit::singleline(&mut s.ui.library.filter)
+                .hint_text(t("library.filter_hint"))
+                .desired_width((ui.available_width() - buttons).max(60.0)),
+        );
+        widgets::name(&r, Role::TextInput, "Filter fixture types");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if widgets::button(ui, t("library.import"), "Import GDTF").on_hover_text(t("library.import_tip")).clicked()
             {
                 s.ui.file_request = Some(crate::state::FileRequest::ImportGdtf);
             }
-            let missing: Vec<_> = crate::demo::DEMO_GDTFS
-                .iter()
-                .filter(|(file, _)| !doc.fixture_types.contains_key(file.trim_end_matches(".gdtf")))
-                .collect();
             if !missing.is_empty()
                 && widgets::button(ui, t("library.demo"), "Demo fixtures")
                     .on_hover_text(t("library.demo_tip"))
@@ -335,92 +348,133 @@ pub fn show(ui: &mut Ui, s: &mut Studio) {
             }
         });
     });
+    ui.add_space(4.0);
+    let cols = [
+        Col::fixed("", 28.0),
+        Col::fill(t("library.col_type")),
+        Col::number(t("library.col_modes"), 54.0),
+        Col::number(t("library.col_kg"), 44.0),
+        Col::number(t("library.col_used"), 40.0),
+    ];
+    listview::header(ui, &cols);
     if doc.fixture_types.is_empty() {
         ui.label(RichText::new(t("library.empty")).weak());
+        return;
     }
-    let counts = |key: &str| {
+    let used = |key: &str| {
         doc.objects
             .values()
             .filter(|o| matches!(&o.kind, ObjectKind::Fixture { gdtf: Some(k), .. } if k == key))
             .count()
     };
-    for ft in doc.fixture_types.values() {
+    let filter = s.ui.library.filter.trim().to_lowercase();
+    let mut types: Vec<_> = doc
+        .fixture_types
+        .values()
+        .filter(|ft| filter.split_whitespace().all(|w| ft.display_name().to_lowercase().contains(w)))
+        .collect();
+    types.sort_by_key(|ft| (ft.manufacturer.to_lowercase(), ft.name.to_lowercase()));
+    if types.is_empty() {
+        listview::empty(ui, t("share.no_hits"));
+    }
+    let mut maker: Option<&str> = None;
+    for ft in &types {
+        if maker != Some(ft.manufacturer.as_str()) {
+            maker = Some(ft.manufacturer.as_str());
+            listview::group(ui, if ft.manufacturer.is_empty() { t("library.no_maker") } else { &ft.manufacturer });
+        }
         let active = s.ui.options.fixture_type == ft.key;
-        ui.horizontal(|ui| {
-            symbol_preview(ui, &doc, &ft.key);
-            let r = ui.selectable_label(active, ft.display_name());
-            widgets::name(&r, Role::Button, format!("Fixture type {}", ft.key));
-            if r.on_hover_text(t("library.pick_tip")).clicked() {
-                let key = if active { "" } else { ft.key.as_str() };
-                let _ = s.run("ui.set_tool_options", json!({ "fixture_type": key }));
-                if !active {
-                    s.ui.set_tool(crate::state::Tool::Fixture);
-                }
+        let (r, cells, ink) = listview::row(ui, &cols, active, &format!("Fixture type {}", ft.key));
+        symbol_preview(ui, &doc, &ft.key, cells[0].shrink(2.0), ink);
+        listview::cell(ui, cells[1], &ft.name, ink, false);
+        listview::cell_dim(ui, cells[2], &ft.modes.len().to_string(), ink, active, true);
+        let kg = ft.weight_kg.map_or_else(|| "–".to_owned(), crate::lengths::fmt_number);
+        listview::cell_dim(ui, cells[3], &kg, ink, active, true);
+        listview::cell_dim(ui, cells[4], &used(&ft.key).to_string(), ink, active, true);
+        if r.on_hover_text(format!(
+            "{}\n{}",
+            if ft.long_name.is_empty() { &ft.name } else { &ft.long_name },
+            t("library.pick_tip")
+        ))
+        .clicked()
+        {
+            let key = if active { "" } else { ft.key.as_str() };
+            let _ = s.run("ui.set_tool_options", json!({ "fixture_type": key }));
+            if !active {
+                s.ui.set_tool(crate::state::Tool::Fixture);
             }
-        });
-        let weight = ft.weight_kg.map(|w| format!("{w:.1} kg")).unwrap_or_else(|| t("library.no_weight").to_owned());
-        let n = counts(&ft.key);
-        ui.label(
-            RichText::new(format!(
-                "{} · {weight} · {}",
-                tf("library.modes", &[("n", &ft.modes.len())]),
-                tf("library.fixtures", &[("n", &n)])
-            ))
-            .weak()
-            .small(),
-        );
-        if active {
-            egui::Grid::new(("library_type", &ft.key)).num_columns(2).show(ui, |ui| {
-                crate::widgets::prop_label(ui, t("inspector.mode"));
-                let cur = ft.mode_or_first(
-                    (!s.ui.options.fixture_mode.is_empty()).then_some(s.ui.options.fixture_mode.as_str()),
-                );
-                let shown = cur.map(|m| format!("{} · {} ch", m.name, m.footprint_text())).unwrap_or_default();
-                let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("library_mode", &ft.key))
-                    .selected_text(shown)
-                    .show_ui(ui, |ui| {
-                        for m in &ft.modes {
-                            let label = format!("{} · {} ch", m.name, m.footprint_text());
-                            if ui.selectable_label(cur.is_some_and(|c| c.name == m.name), label).clicked() {
-                                let _ = s.run("ui.set_tool_options", json!({ "fixture_mode": m.name }));
-                            }
-                        }
-                    });
-                widgets::name(&r.response, egui::Role::ComboBox, format!("Mode {}", ft.key));
-                ui.end_row();
-                crate::widgets::prop_label(ui, t("library.symbol"));
-                let auto = if ft.has_plan_svg { t("library.symbol_gdtf") } else { t("library.symbol_silhouette") };
-                let shown = ft.symbol.clone().map_or_else(|| auto.to_owned(), |n| t(&format!("symbol.{n}")).to_owned());
-                let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("library_symbol", &ft.key))
-                    .selected_text(shown)
-                    .show_ui(ui, |ui| {
-                        if ui.selectable_label(ft.symbol.is_none(), auto).clicked() {
-                            let _ = s.run("symbol.assign", json!({ "gdtf_type": ft.key, "symbol": "" }));
-                        }
-                        for (name, _) in stagecraft_core::fixture_type::SYMBOLS {
-                            let mut label = t(&format!("symbol.{name}")).to_owned();
-                            if ft.suggested_symbol.as_deref() == Some(name) {
-                                label.push_str(" ★");
-                            }
-                            if ui.selectable_label(ft.symbol.as_deref() == Some(name), label).clicked() {
-                                let _ = s.run("symbol.assign", json!({ "gdtf_type": ft.key, "symbol": name }));
-                            }
-                        }
-                    });
-                widgets::name(&r.response, egui::Role::ComboBox, format!("Symbol {}", ft.key));
-                ui.end_row();
-            });
         }
     }
+    let Some(ft) = doc.fixture_types.get(&s.ui.options.fixture_type) else { return };
+    ui.add_space(6.0);
+    widgets::section(ui, ft.display_name());
+    egui::Grid::new(("library_type", &ft.key)).num_columns(2).spacing(vec2(8.0, 4.0)).show(ui, |ui| {
+        crate::widgets::prop_label(ui, t("inspector.mode"));
+        let cur =
+            ft.mode_or_first((!s.ui.options.fixture_mode.is_empty()).then_some(s.ui.options.fixture_mode.as_str()));
+        let shown = cur.map(|m| format!("{} · {} ch", m.name, m.footprint_text())).unwrap_or_default();
+        let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("library_mode", &ft.key))
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                for m in &ft.modes {
+                    let label = format!("{} · {} ch", m.name, m.footprint_text());
+                    if ui.selectable_label(cur.is_some_and(|c| c.name == m.name), label).clicked() {
+                        let _ = s.run("ui.set_tool_options", json!({ "fixture_mode": m.name }));
+                    }
+                }
+            });
+        widgets::name(&r.response, egui::Role::ComboBox, format!("Mode {}", ft.key));
+        ui.end_row();
+        crate::widgets::prop_label(ui, t("library.symbol"));
+        let auto = if ft.has_plan_svg { t("library.symbol_gdtf") } else { t("library.symbol_silhouette") };
+        let shown = ft.symbol.clone().map_or_else(|| auto.to_owned(), |n| t(&format!("symbol.{n}")).to_owned());
+        let r = crate::widgets::combo_w(ui.available_width() - 8.0, ("library_symbol", &ft.key))
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(ft.symbol.is_none(), auto).clicked() {
+                    let _ = s.run("symbol.assign", json!({ "gdtf_type": ft.key, "symbol": "" }));
+                }
+                for (name, _) in stagecraft_core::fixture_type::SYMBOLS {
+                    let mut label = t(&format!("symbol.{name}")).to_owned();
+                    if ft.suggested_symbol.as_deref() == Some(name) {
+                        label.push_str(" ★");
+                    }
+                    if ui.selectable_label(ft.symbol.as_deref() == Some(name), label).clicked() {
+                        let _ = s.run("symbol.assign", json!({ "gdtf_type": ft.key, "symbol": name }));
+                    }
+                }
+            });
+        widgets::name(&r.response, egui::Role::ComboBox, format!("Symbol {}", ft.key));
+        ui.end_row();
+        let u = crate::lengths::of(s);
+        let info = |ui: &mut Ui, label: &str, value: String| {
+            crate::widgets::prop_label(ui, label);
+            ui.label(RichText::new(value).color(crate::theme::of(ui).text2));
+            ui.end_row();
+        };
+        let weight = ft
+            .weight_kg
+            .map_or_else(|| t("library.no_weight").to_owned(), |w| format!("{} kg", crate::lengths::fmt_number(w)));
+        info(ui, t("library.weight"), weight);
+        if let Some(w) = ft.power_w {
+            info(ui, t("library.power"), format!("{} W", crate::lengths::fmt_number(w)));
+        }
+        if ft.size_mm.iter().any(|v| *v > 0.0) {
+            let [x, y, z] = ft.size_mm;
+            info(ui, t("library.size"), format!("{} × {} × {}", u.fixed(x), u.fixed(y), u.with_unit(z)));
+        }
+    });
 }
 
-/// The GDTF Share panel: search the cached list, add revisions to the document.
+/// The GDTF Share panel: search the cached list, a list of hits (fixture, maker, last
+/// change, add), and the picked revision's details below it.
 pub fn share_panel(ui: &mut Ui, s: &mut Studio) {
     let mut search = false;
-    ui.horizontal_wrapped(|ui| {
-        let w = (ui.available_width() - 70.0).clamp(120.0, 260.0);
+    ui.horizontal(|ui| {
         let r = ui.add(
-            egui::TextEdit::singleline(&mut s.ui.library.query).hint_text(t("share.search_hint")).desired_width(w),
+            egui::TextEdit::singleline(&mut s.ui.library.query)
+                .hint_text(t("share.search_hint"))
+                .desired_width((ui.available_width() - 100.0).max(80.0)),
         );
         widgets::name(&r, Role::TextInput, "Search GDTF Share");
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -429,8 +483,7 @@ pub fn share_panel(ui: &mut Ui, s: &mut Studio) {
         if widgets::button(ui, t("share.search"), "Search GDTF Share now").clicked() {
             search = true;
         }
-        if widgets::button(ui, t("share.refresh"), "Refresh GDTF Share list")
-            .on_hover_text(t("share.refresh_tip"))
+        if crate::chrome::icon(ui, "Refresh GDTF Share list", "refresh-cw", 22.0, 16.0, false, t("share.refresh_tip"))
             .clicked()
         {
             s.ui.library.load_list(true);
@@ -444,42 +497,115 @@ pub fn share_panel(ui: &mut Ui, s: &mut Studio) {
     for j in &lib.jobs {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(format!("{} {} s", j.label, j.started.elapsed().as_secs()));
+            ui.label(RichText::new(format!("{} {} s", j.label, j.started.elapsed().as_secs())).small());
         });
     }
     if !lib.jobs.is_empty() {
         ui.ctx().request_repaint_after(Duration::from_millis(250));
     }
     if let Some((m, err)) = &lib.message {
-        let mut text = RichText::new(m).small();
-        if *err {
-            text = text.color(crate::theme::of(ui).warning);
-        }
-        ui.label(text);
+        let c = crate::theme::of(ui);
+        ui.label(RichText::new(m).small().color(if *err { c.warning } else { c.text2 }));
     }
-    if lib.list.is_none() && lib.jobs.is_empty() && lib.message.is_none() {
+    ui.add_space(4.0);
+    let cols = [
+        Col::fill(t("share.col_fixture")),
+        Col::fixed(t("share.col_maker"), 84.0),
+        Col::number(t("share.col_modes"), 54.0),
+        Col::fixed("", 26.0),
+    ];
+    listview::header(ui, &cols);
+    if lib.list.is_none() && lib.jobs.is_empty() {
         ui.label(RichText::new(t("share.hint")).weak().small());
+        return;
     }
-    let hits = lib.hits(40);
+    let hits = lib.hits(200);
     if lib.list.is_some() && !lib.query.trim().is_empty() && hits.is_empty() {
-        ui.label(RichText::new(t("share.no_hits")).weak());
+        listview::empty(ui, t("share.no_hits"));
     }
+    // In the library already: the same fixture type GUID, or the same maker and name.
+    let owned: std::collections::HashSet<String> = s
+        .engine
+        .doc()
+        .fixture_types
+        .values()
+        .flat_map(|ft| [ft.fixture_type_id.to_lowercase(), format!("{}@{}", ft.manufacturer, ft.name).to_lowercase()])
+        .collect();
+    let have = |e: &ShareEntry| {
+        (!e.uuid.is_empty() && owned.contains(&e.uuid.to_lowercase()))
+            || owned.contains(&format!("{}@{}", e.manufacturer, e.fixture).to_lowercase())
+    };
     let mut add: Option<ShareEntry> = None;
-    for e in hits {
-        ui.horizontal(|ui| {
-            let r = widgets::button(ui, t("share.add"), &format!("Add {}", e.rid)).on_hover_text(t("share.add_tip"));
-            if r.clicked() {
+    let mut pick: Option<u64> = None;
+    for e in &hits {
+        let selected = s.ui.library.selected == Some(e.rid);
+        let (r, cells, ink) = listview::row(ui, &cols, selected, &format!("Share {} {}", e.manufacturer, e.fixture));
+        listview::cell(ui, cells[0], &e.fixture, ink, false);
+        listview::cell_dim(ui, cells[1], &e.manufacturer, ink, selected, false);
+        listview::cell_dim(ui, cells[2], &e.modes.len().to_string(), ink, selected, true);
+        let have = have(e);
+        let b = cells[3].shrink2(vec2(3.0, 2.0));
+        if have {
+            let p = ui.painter();
+            p.text(b.center(), egui::Align2::CENTER_CENTER, "✓", egui::FontId::proportional(crate::theme::BODY), ink);
+        } else {
+            let br = ui.interact(b, ui.scope_id().with(("share_add", e.rid)), Sense::click());
+            widgets::name(&br, Role::Button, format!("Add {}", e.rid));
+            if br.hovered() {
+                ui.painter().rect_filled(b, 3.0, crate::theme::of(ui).pressed);
+            }
+            crate::icons::paint(ui, b, "plus", 12.0, ink);
+            if br.on_hover_text(t("share.add_tip")).clicked() {
                 add = Some(e.clone());
             }
-            let modes: Vec<String> = e.modes.iter().map(|m| format!("{} ({})", m.name, m.dmx_footprint)).collect();
-            ui.label(format!("{} {}", e.manufacturer, e.fixture)).on_hover_text(format!(
-                "{}\n{}: {}\n{}",
-                e.revision,
-                t("library.modes_label"),
-                modes.join(", "),
-                tf("share.size", &[("kb", &(e.filesize / 1024))])
-            ));
+        }
+        if r.clicked() {
+            pick = Some(e.rid);
+        }
+    }
+    if let Some(rid) = pick {
+        s.ui.library.selected = if s.ui.library.selected == Some(rid) { None } else { Some(rid) };
+    }
+    if let Some(e) = hits.iter().find(|e| Some(e.rid) == s.ui.library.selected) {
+        ui.add_space(6.0);
+        widgets::section(ui, format!("{} {}", e.manufacturer, e.fixture));
+        egui::Grid::new(("share_entry", e.rid)).num_columns(2).spacing(vec2(8.0, 3.0)).show(ui, |ui| {
+            // Rows without a value (an old upload has no creator or GDTF version) are left out.
+            let info = |ui: &mut Ui, label: &str, value: String| {
+                if value.trim().is_empty() {
+                    return;
+                }
+                crate::widgets::prop_label(ui, label);
+                ui.add(egui::Label::new(RichText::new(value).color(crate::theme::of(ui).text2)).wrap());
+                ui.end_row();
+            };
+            info(ui, t("share.revision"), e.revision.clone());
+            if e.last_modified > 0 {
+                info(ui, t("share.changed"), listview::date(e.last_modified));
+            }
+            let modes: Vec<String> = e.modes.iter().map(|m| format!("{} ({} ch)", m.name, m.dmx_footprint)).collect();
+            info(ui, t("library.modes_label"), modes.join("\n"));
+            info(ui, t("share.gdtf_version"), e.version.clone());
+            let by = if e.creator.is_empty() || e.creator == e.uploader {
+                e.uploader.clone()
+            } else {
+                format!("{} / {}", e.creator, e.uploader)
+            };
+            info(ui, t("share.by"), by);
+            if e.rating > 0.0 {
+                info(ui, t("share.rating"), format!("{:.1} / 5", e.rating));
+            }
+            info(ui, t("share.file"), tf("share.size", &[("kb", &(e.filesize / 1024))]));
         });
+        ui.add_space(4.0);
+        if have(e) {
+            ui.label(RichText::new(t("share.in_library")).color(crate::theme::of(ui).text2));
+        } else if widgets::button(ui, t("share.add_to_library"), &format!("Add to library {}", e.rid))
+            .on_hover_text(t("share.add_tip"))
+            .clicked()
+        {
+            add = Some(e.clone());
+        }
     }
     if let Some(e) = add {
         s.ui.library.add(e);

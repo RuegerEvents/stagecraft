@@ -58,7 +58,12 @@ impl egui::Plugin for FrameHook {
     }
 }
 
-fn install_with(ctx: &Context, shell: ShellInfo, windows: Arc<dyn craft_window::system::WindowSystem>, frame: Option<Decision>) {
+fn install_with(
+    ctx: &Context,
+    shell: ShellInfo,
+    windows: Arc<dyn craft_window::system::WindowSystem>,
+    frame: Option<Decision>,
+) {
     // Before the runtime's own plugin, so its input is in place when the runtime's hooks run.
     ctx.add_plugin(FrameHook);
     let mut spec = craft_ui::InstallSpec::new(shell, windows).app_id("stagecraft");

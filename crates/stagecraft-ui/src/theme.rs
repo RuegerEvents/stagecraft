@@ -241,8 +241,13 @@ fn suite(base: Tokens) -> Tokens {
         return base;
     };
     let mode = if base.dark { Mode::Dark } else { Mode::Light };
-    let appearance =
-        Appearance { mode, contrast: Contrast::Standard, size: Size::Compact, text_size: TextSize::Small, reduced_motion: false };
+    let appearance = Appearance {
+        mode,
+        contrast: Contrast::Standard,
+        size: Size::Compact,
+        text_size: TextSize::Small,
+        reduced_motion: false,
+    };
     let c = craft_theme::resolve(theme, appearance, None).tokens.color;
     let col = |r: craft_theme::Rgba| {
         let [r, g, b, a] = r.0;
@@ -292,7 +297,8 @@ fn suite(base: Tokens) -> Tokens {
         *c = neutral(*c);
     }
     let sc = &mut t.scene;
-    for c in [&mut sc.background, &mut sc.generic, &mut sc.wall, &mut sc.metal, &mut sc.grid_minor, &mut sc.grid_major] {
+    for c in [&mut sc.background, &mut sc.generic, &mut sc.wall, &mut sc.metal, &mut sc.grid_minor, &mut sc.grid_major]
+    {
         *c = neutral(*c);
     }
     t

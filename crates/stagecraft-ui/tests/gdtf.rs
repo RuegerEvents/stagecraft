@@ -16,7 +16,8 @@ use stagecraft_ui::Studio;
 use stagecraft_ui::library::ShareBackend;
 
 fn harness(engine: Engine) -> Harness<'static, Studio> {
-    let mut h = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
+    let mut h = Harness::builder()
+        .with_context_setup(stagecraft_ui::framework::install_headless)
         // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
         // asks for one more frame; closing a modal can take six.
         .with_max_steps(8)

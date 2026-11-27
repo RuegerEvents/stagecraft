@@ -24,6 +24,7 @@ pub mod icons;
 pub mod inspector;
 pub mod lengths;
 pub mod library;
+pub mod listview;
 pub mod menu;
 pub mod onboarding;
 pub mod palette;

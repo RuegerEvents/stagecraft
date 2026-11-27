@@ -875,8 +875,7 @@ fn float_panel(c: &mut UiCtx, a: FloatArgs) -> CmdResult {
         crate::dock::set_visible(ws, a.panel, true).map_err(CmdError::invalid_args)?;
     }
     let rect = egui::Rect::from_min_size(egui::pos2(a.x, a.y), egui::vec2(a.width, a.height));
-    crate::dock::apply(ws, vec![craft_behavior::dock::Action::float(a.panel, rect)])
-        .map_err(CmdError::invalid_args)?;
+    crate::dock::apply(ws, vec![craft_behavior::dock::Action::float(a.panel, rect)]).map_err(CmdError::invalid_args)?;
     Ok(json!({ "panel": a.panel, "rect": [a.x, a.y, a.width, a.height] }))
 }
 

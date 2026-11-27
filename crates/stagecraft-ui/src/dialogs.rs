@@ -5,7 +5,6 @@
 
 use std::path::PathBuf;
 
-
 use craft_dialogs::{Answer, Dialogs, FileDialog, Message, MessageButtons, MessageLevel, MessageResult};
 use serde_json::{Value, json};
 

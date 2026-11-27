@@ -411,8 +411,9 @@ impl eframe::App for StageApp {
         {
             if let Some(menu) = &mut self.native_menu {
                 let studio = &self.studio;
-                let clashes =
-                    menu.sync_with(&EveryPass, || craft_menu::mac_layout(&crate::menu::bar(studio), &crate::menu::options()));
+                let clashes = menu.sync_with(&EveryPass, || {
+                    craft_menu::mac_layout(&crate::menu::bar(studio), &crate::menu::options())
+                });
                 for c in clashes {
                     eprintln!("stagecraft: menu shortcut clash: {c:?}");
                 }

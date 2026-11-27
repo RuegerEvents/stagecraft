@@ -1,9 +1,7 @@
 //! The plan canvas: camera, grid, objects, overlays. Interaction is in [`crate::tools`].
 
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
-use egui::{
-    Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, Shape, Stroke, Ui, vec2,
-};
+use egui::{Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, Shape, Stroke, Ui, vec2};
 use stagecraft_core::{Document, Id};
 use stagecraft_geom::{Detail, LineClass, PlanPrim, PlanStyle, math};
 

@@ -65,8 +65,12 @@ pub fn default_layout() -> Layout<PanelKind> {
             Group::new(vec![Inspector], 0),
         ],
     );
-    let centre =
-        Node::split(Axis::Y, SplitSize::FixedSecond(TABLE_HEIGHT), Node::tabs(vec![Canvas], 0), Node::tabs(vec![Table], 0));
+    let centre = Node::split(
+        Axis::Y,
+        SplitSize::FixedSecond(TABLE_HEIGHT),
+        Node::tabs(vec![Canvas], 0),
+        Node::tabs(vec![Table], 0),
+    );
     Layout::new(
         Some(Node::split(
             Axis::X,
@@ -184,7 +188,14 @@ impl MemoProps for PanelIcon {
 }
 
 impl Glyph for PanelIcon {
-    fn paint(&self, painter: &egui::Painter, _tokens: &UiTokens, rect: egui::Rect, color: egui::Color32, _mirrored: bool) {
+    fn paint(
+        &self,
+        painter: &egui::Painter,
+        _tokens: &UiTokens,
+        rect: egui::Rect,
+        color: egui::Color32,
+        _mirrored: bool,
+    ) {
         let size = if rect.height() >= 16.0 { 16.0 } else { 12.0 };
         let rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
         crate::icons::paint_with(painter, painter.ctx(), rect, self.0, size, color);

@@ -9,8 +9,7 @@
 
 use egui::epaint::{Mesh, TextShape, Vertex, WHITE_UV};
 use egui::{
-    Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, RichText, Shape, Stroke, Ui,
-    vec2,
+    Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, RichText, Shape, Stroke, Ui, vec2,
 };
 use serde_json::{Value, json};
 use stagecraft_core::model::P2;

@@ -50,7 +50,8 @@ fn harness_ppp(
     studio.ui.inset_title_bar = true;
     let (renderer, off) = renderer();
     studio.offscreen = Some(off);
-    let mut h = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
+    let mut h = Harness::builder()
+        .with_context_setup(stagecraft_ui::framework::install_headless)
         // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
         // asks for one more frame; closing a modal can take six.
         .with_max_steps(8)

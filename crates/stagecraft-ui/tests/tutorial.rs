@@ -22,7 +22,8 @@ const W: f32 = 1440.0;
 fn harness(shots: bool) -> Harness<'static, Studio> {
     let mut studio = Studio::new(Engine::new());
     studio.ui.theme = ThemePref::Light;
-    let mut b = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
+    let mut b = Harness::builder()
+        .with_context_setup(stagecraft_ui::framework::install_headless)
         .with_max_steps(8)
         .with_size(vec2(W, 900.0))
         // Real frame times, so separate clicks are not double clicks.
@@ -352,7 +353,8 @@ fn back_and_skip_move_by_hand_and_ui_tutorial_reports() {
 fn a_fresh_profile_is_offered_the_tutorial_once() {
     use stagecraft_ui::onboarding::TutorialOffer;
     let build = |studio: Studio| {
-        let mut h = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
+        let mut h = Harness::builder()
+            .with_context_setup(stagecraft_ui::framework::install_headless)
             .with_max_steps(8)
             .with_size(egui::vec2(1400.0, 900.0))
             .build_ui_state(|ui, s: &mut Studio| s.show(ui), studio);
