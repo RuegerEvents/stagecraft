@@ -127,8 +127,11 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
   `framework::other_focus`; widgets name themselves with `egui::Role` (kittest fails on unnamed inputs
   and on missing glyphs, so give every combo box and checkbox a name).
 - Look (Craft suite, like CADCraft): `theme.rs` holds `Tokens::DARK` / `Tokens::LIGHT`
-  (chrome, `plan` canvas palette, `scene` 3D palette, axis colours); every widget reads
-  them (`theme::of(ui)`, `theme::tokens(dark)`), no colours elsewhere. Inter 11.5 pt
+  (chrome, `plan` canvas palette, `scene` 3D palette, axis colours); `Tokens::of` takes the
+  chrome colours from the suite's default craft theme (`craft.artcraft`, neutral greys, the
+  same the dock resolves) and makes the canvas greys neutral, so edit the base tokens only
+  for what the theme does not give. Every widget reads them (`theme::of(ui)`,
+  `theme::tokens(dark)`), no colours elsewhere. Inter 11.5 pt
   (`theme::BODY`) plus a DejaVu cut for arrows and ⌘ ⇧ ⌥; 19 pt rows. System/Light/Dark via
   `ui.set_theme`. Sheets stay white paper. Property lists: `widgets::prop_label` (right-
   aligned label column), full-width fields, `widgets::combo_w` (chevron), `widgets::section`.

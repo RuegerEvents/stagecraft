@@ -221,9 +221,88 @@ impl Tokens {
         },
     };
 
+    /// The tokens StageCraft paints with: [`Tokens::DARK`] / [`Tokens::LIGHT`] with the chrome
+    /// taken from the Craft suite's theme ([`suite`]), so StageCraft's own widgets and the
+    /// dock craft-ui draws are one family.
     pub fn of(dark: bool) -> &'static Tokens {
-        if dark { &Tokens::DARK } else { &Tokens::LIGHT }
+        static DARK: std::sync::OnceLock<Tokens> = std::sync::OnceLock::new();
+        static LIGHT: std::sync::OnceLock<Tokens> = std::sync::OnceLock::new();
+        if dark { DARK.get_or_init(|| suite(Tokens::DARK)) } else { LIGHT.get_or_init(|| suite(Tokens::LIGHT)) }
     }
+}
+
+/// `base` with its chrome from the suite's default theme (`craft.artcraft`, the one the
+/// craft-ui runtime resolves the dock from) and the canvas greys made neutral, so nothing
+/// is tinted blue next to the theme's plain greys. The plan's and the 3D view's object
+/// colours stay StageCraft's.
+fn suite(base: Tokens) -> Tokens {
+    use craft_theme::{Appearance, Contrast, Mode, Size, TextSize};
+    let Some(theme) = craft_theme::builtins().iter().find(|t| t.id.as_str() == craft_theme::SUITE_DEFAULT) else {
+        return base;
+    };
+    let mode = if base.dark { Mode::Dark } else { Mode::Light };
+    let appearance =
+        Appearance { mode, contrast: Contrast::Standard, size: Size::Compact, text_size: TextSize::Small, reduced_motion: false };
+    let c = craft_theme::resolve(theme, appearance, None).tokens.color;
+    let col = |r: craft_theme::Rgba| {
+        let [r, g, b, a] = r.0;
+        Color32::from_rgba_unmultiplied(r, g, b, a)
+    };
+    let mut t = base;
+    t.bar = col(c.surface.chrome);
+    t.panel = col(c.surface.panel);
+    t.panel_dark = col(c.surface.background);
+    t.separator = col(c.line.divider);
+    t.text = col(c.text.normal);
+    t.text2 = col(c.text.muted);
+    t.text3 = col(c.text.faint);
+    t.icon = col(c.text.muted);
+    t.field = col(c.surface.sunken);
+    t.control = col(c.surface.control);
+    t.hover = col(c.state.hover);
+    t.pressed = col(c.state.pressed);
+    t.tab_active = col(c.state.selected);
+    t.accent = col(c.accent.solid);
+    t.on_accent = col(c.text.on_accent);
+    t.select_bg = col(c.accent.strong);
+    t.toggle_on = col(c.accent.solid);
+    t.pal_bg = col(c.surface.raised);
+    t.pal_row = col(c.state.hover);
+    t.pal_border = col(c.line.border);
+    t.pal_footer = col(c.surface.background);
+    t.chip = col(c.surface.control);
+    t.desk = col(c.surface.canvas);
+    t.canvas_chip = neutral(t.canvas_chip);
+    let p = &mut t.plan;
+    for c in [
+        &mut p.canvas,
+        &mut p.grid_minor,
+        &mut p.grid_major,
+        &mut p.line,
+        &mut p.text,
+        &mut p.floor,
+        &mut p.wall,
+        &mut p.body,
+        &mut p.masking,
+        &mut p.deck,
+        &mut p.sketch,
+        &mut p.dim_reference,
+        &mut p.ink,
+    ] {
+        *c = neutral(*c);
+    }
+    let sc = &mut t.scene;
+    for c in [&mut sc.background, &mut sc.generic, &mut sc.wall, &mut sc.metal, &mut sc.grid_minor, &mut sc.grid_major] {
+        *c = neutral(*c);
+    }
+    t
+}
+
+/// The grey of `c`'s lightness (Rec. 601 luma), alpha kept.
+fn neutral(c: Color32) -> Color32 {
+    let [r, g, b, a] = c.to_srgba_unmultiplied();
+    let y = (0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)).round() as u8;
+    Color32::from_rgba_unmultiplied(y, y, y, a)
 }
 
 /// The tokens of the theme `ui` shows.
@@ -493,7 +572,7 @@ mod tests {
 
     #[test]
     fn text_reads_on_every_surface() {
-        for t in [Tokens::DARK, Tokens::LIGHT] {
+        for t in [*Tokens::of(true), *Tokens::of(false)] {
             for bg in [t.bar, t.panel, t.field, t.control, t.plan.canvas] {
                 let d = (luminance(t.text) - luminance(bg)).abs();
                 assert!(d > 0.45, "dark {}: text on {bg:?} only {d}", t.dark);
