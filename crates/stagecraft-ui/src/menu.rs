@@ -139,7 +139,7 @@ pub fn bar(s: &Studio) -> MenuBar {
             .map(|p| {
                 node(
                     with("ui.toggle_panel", json!({ "panel": p }), crate::dock::label(p))
-                        .check(s.ui.layout.layout.contains(&p)),
+                        .check(s.ui.layout.layout().contains(&p)),
                 )
             })
             .collect(),
@@ -154,7 +154,7 @@ pub fn bar(s: &Studio) -> MenuBar {
         ],
     )
     .role(MenuRole::Help);
-    let mut bar = MenuBar { menus: vec![file, edit, view, insert, window, help], documents: Vec::new() };
+    let mut bar = MenuBar::new(vec![file, edit, view, insert, window, help]);
     bar.tag_item(&CommandRef::new("app.about"), ItemRole::About);
     bar.tag_submenu(MenuRole::View, t("menu.theme"), ItemRole::Appearance);
     bar
@@ -171,16 +171,21 @@ pub fn laid_out(s: &Studio) -> craft_menu::Layout {
 
 /// What may run from the menus this frame.
 pub fn gate(s: &Studio, ctx: &egui::Context) -> Gate {
-    Gate { modal: s.ui.palette.open, recording_shortcut: false, text_editing: ctx.text_edit_focused() }
+    Gate::default().modal(s.ui.palette.open).text_editing(ctx.text_edit_focused())
 }
 
 /// The in-window menu bar (Windows, Linux, web, headless tests).
 pub fn show_in_window(ui: &mut egui::Ui, s: &mut Studio) {
-    let laid = laid_out(s);
-    let label = |english: &'static str| english.to_owned();
-    let chosen = MenuBarUi::new(&laid.bar).gate(gate(s, ui.ctx())).label(&label).show(ui);
-    for c in chosen {
-        run(s, &c);
+    // The picks come back as fired commands (`framework::take_menu_picks`).
+    // Off macOS the target is this platform; on a Mac (headless tests) Windows', since the
+    // Mac's menus are the system bar's and the in-window bar would show none.
+    let target = if Target::current() == Target::Mac { Target::Windows } else { Target::current() };
+    let bar = craft_ui::contract::Tracked::new(craft_menu::layout(&bar(s), target, &options()).bar);
+    {
+        use craft_ui::contract::ShowContainer as _;
+        craft_ui::layout_components::Stack::new().show(ui, |ui, _| {
+            MenuBarUi::new(&bar).target(target).show(ui);
+        });
     }
 }
 

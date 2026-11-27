@@ -26,6 +26,8 @@ pub struct Studio {
     /// Per-user settings: panel layout, theme and tool options. In memory unless [`Studio::with_prefs`]
     /// got a store on disk.
     pub prefs: craft_settings::SettingsStore<crate::dock::Prefs>,
+    /// The workspace the dock shows and the panels' specs, kept across frames.
+    pub(crate) dock: crate::dock::Live,
 }
 
 impl Studio {
@@ -44,7 +46,7 @@ impl Studio {
             tool_columns: prefs.get().tool_palette.columns,
             ..Default::default()
         };
-        Self { engine, ui, offscreen: None, dialogs: crate::dialogs::queue(), prefs }
+        Self { engine, ui, offscreen: None, dialogs: crate::dialogs::queue(), prefs, dock: Default::default() }
     }
 
     /// Run a command of either registry. Errors also go to the status bar.
@@ -129,11 +131,9 @@ impl Studio {
             return;
         }
         theme::set_preference(ui.ctx(), self.ui.theme);
-        // Tab and arrows belong to the typed dimension or the table, not to egui's
-        // focus cycling, while those take keys.
-        let drawing = crate::hud::kind(self).is_some();
-        if (drawing || self.ui.table.focused) && ui.memory(|m| m.focused().is_none()) {
-            ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+        // The in-window menu bar's picks (on macOS the native menu's come from `StageApp`).
+        for c in crate::framework::take_menu_picks(ui.ctx()) {
+            crate::menu::run(self, &c);
         }
         crate::library::poll(self);
         crate::tutorial::update(self);
@@ -252,7 +252,7 @@ fn shortcuts(ui: &mut Ui, s: &mut Studio) {
             let _ = s.run("ui.set_view", json!({ "view": view }));
         }
     }
-    let text_focus = ui.ctx().memory(|m| m.focused().is_some()) || s.ui.table.focused;
+    let text_focus = crate::framework::other_focus(ui.ctx()) || s.ui.table.focused;
     if text_focus {
         return;
     }
@@ -296,9 +296,6 @@ pub struct StageApp {
     /// The macOS menu bar, when AppKit took it.
     #[cfg(target_os = "macos")]
     native_menu: Option<craft_menu::NativeMenu>,
-    /// What `NSWindow.movable` was last set to (inset title bar).
-    #[cfg(target_os = "macos")]
-    movable: Option<bool>,
     /// Close already sent after the user confirmed.
     closing: bool,
     /// Filled by the screenshot callback once the frame arrives.
@@ -374,31 +371,30 @@ fn save_png(image: &egui::ColorImage, path: &std::path::Path) -> Result<(), CmdE
 
 impl eframe::App for StageApp {
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        let _ = raw_input;
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
-            menu.raw_input(raw_input);
+            menu.poll(_ctx);
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = raw_input;
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.answer_calls(ctx);
-        // Quit and the close button: ask first when there are unsaved changes; the answer
-        // comes on a later frame and closes the window again.
-        let ui = &mut self.studio.ui;
-        if ui.quit_confirmed && !self.closing {
+        // Quit and the close button: ask first when there are unsaved changes. The runtime
+        // holds the close while the question is up; the answer closes the window again.
+        if self.studio.ui.quit_confirmed && !self.closing {
             self.closing = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        } else if ctx.input(|i| i.viewport().close_requested())
-            && self.studio.engine.dirty()
-            && !ui.quit_confirmed
-            && ui.native_dialogs
-        {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ui.file_request = Some(FileRequest::Quit);
         }
-        craft_quit::on_close_request(ctx);
+        let dirty = self.studio.engine.dirty();
+        let ui = &mut self.studio.ui;
+        crate::framework::close_path(ctx, || {
+            let hold = dirty && !ui.quit_confirmed && ui.native_dialogs;
+            if hold {
+                ui.file_request = Some(FileRequest::Quit);
+            }
+            hold
+        });
     }
 
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
@@ -414,10 +410,12 @@ impl eframe::App for StageApp {
         #[cfg(target_os = "macos")]
         {
             if let Some(menu) = &mut self.native_menu {
-                menu.sync(craft_menu::mac_layout(&crate::menu::bar(&self.studio), &crate::menu::options()));
-            }
-            if self.studio.ui.inset_title_bar {
-                craft_window::title_bar::sync_movable(ui.ctx(), &mut self.movable);
+                let studio = &self.studio;
+                let clashes =
+                    menu.sync_with(&EveryPass, || craft_menu::mac_layout(&crate::menu::bar(studio), &crate::menu::options()));
+                for c in clashes {
+                    eprintln!("stagecraft: menu shortcut clash: {c:?}");
+                }
             }
         }
         // Never a blocking dialog here: see `dialogs.rs`.
@@ -434,6 +432,16 @@ impl eframe::App for StageApp {
         if let Err(e) = self.studio.prefs.flush() {
             eprintln!("stagecraft: could not save settings: {e}");
         }
+    }
+}
+
+/// A menu key that changes every pass: the native menu is laid out again each frame, as
+/// the menus read the document and the UI state.
+struct EveryPass;
+
+impl craft_ui::contract::MemoProps for EveryPass {
+    fn key(&self, key: &mut craft_ui::contract::MemoKey) {
+        key.changes_every_pass();
     }
 }
 
@@ -464,6 +472,7 @@ pub fn run(engine: Engine) -> Result<(), String> {
         options,
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
+            crate::framework::install(&ctx, inset.then(|| decision.clone()));
             theme::apply(&ctx);
             match &cc.wgpu_render_state {
                 Some(rs) => view3d::gpu::install(rs),
@@ -500,7 +509,7 @@ pub fn run(engine: Engine) -> Result<(), String> {
             // First launch (or "Not now" last time): offer the tutorial.
             studio.offer_tutorial();
             let wake = ctx.clone();
-            studio.dialogs = craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint()));
+            studio.dialogs = craft_dialogs::Dialogs::new(craft_dialogs::Wake::new(move || wake.request_repaint()));
             studio.offscreen = cc.wgpu_render_state.as_ref().map(view3d::offscreen::Offscreen::from_render_state);
             #[cfg(target_os = "macos")]
             let native_menu = {
@@ -523,8 +532,6 @@ pub fn run(engine: Engine) -> Result<(), String> {
                 shot_slot: Default::default(),
                 #[cfg(target_os = "macos")]
                 native_menu,
-                #[cfg(target_os = "macos")]
-                movable: None,
                 closing: false,
                 title,
             }))

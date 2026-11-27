@@ -937,7 +937,7 @@ pub fn fit_widths(cols: &[Col], user: &std::collections::BTreeMap<Col, f32>, ava
 /// Keys while the table has focus and no cell is being edited.
 fn keys(ui: &mut Ui, s: &mut Studio, rows: &[Id], cols: &[Col]) {
     let st = &s.ui.table;
-    if !st.focused || st.editing.is_some() || s.ui.palette.open || ui.ctx().memory(|m| m.focused().is_some()) {
+    if !st.focused || st.editing.is_some() || s.ui.palette.open || crate::framework::other_focus(ui.ctx()) {
         return;
     }
     let Some((cid, cc)) = st.cursor else { return };

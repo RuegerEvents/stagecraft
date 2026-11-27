@@ -4,7 +4,7 @@
 //! its event handler (a file dragged over the window) and abort the app.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+
 
 use craft_dialogs::{Answer, Dialogs, FileDialog, Message, MessageButtons, MessageLevel, MessageResult};
 use serde_json::{Value, json};
@@ -25,7 +25,7 @@ pub enum Then {
 /// The dialog queue. The app gives it a wake-up that repaints; tests answer through
 /// [`Dialogs::set_override`].
 pub fn queue() -> Dialogs<Then> {
-    Dialogs::new(Arc::new(|| {}))
+    Dialogs::new(craft_dialogs::Wake::none())
 }
 
 impl Studio {

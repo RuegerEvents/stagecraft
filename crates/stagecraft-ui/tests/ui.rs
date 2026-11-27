@@ -9,7 +9,7 @@ use stagecraft_core::{Engine, Id, ObjectKind};
 use stagecraft_ui::Studio;
 
 fn harness(engine: Engine) -> Harness<'static, Studio> {
-    let mut h = Harness::builder()
+    let mut h = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
         // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
         // asks for one more frame; closing a modal can take six.
         .with_max_steps(8)
@@ -922,7 +922,7 @@ fn a_metre_project_shows_and_takes_metres_everywhere() {
 // ---- docking ---------------------------------------------------------------------
 
 fn floating_panels(h: &Harness<'static, Studio>) -> Vec<stagecraft_ui::state::PanelKind> {
-    h.state().ui.layout.layout.floating.iter().flat_map(|w| w.panels().copied().collect::<Vec<_>>()).collect()
+    h.state().ui.layout.layout().floating.iter().flat_map(|w| w.panels().copied().collect::<Vec<_>>()).collect()
 }
 
 #[test]
@@ -932,9 +932,9 @@ fn panels_hide_float_move_and_reset() {
     // Hidden and shown again, the tags panel goes back into its group.
     run(&mut h, "ui.toggle_panel", json!({ "panel": "tags", "visible": false }));
     assert_eq!(run(&mut h, "ui.state", Value::Null)["panels"]["tags"], false);
-    assert!(h.query_by_label("Tags").is_none());
+    assert!(h.query_by_role_and_label(egui::accesskit::Role::Tab, "Tags").is_none());
     run(&mut h, "ui.toggle_panel", json!({ "panel": "tags" }));
-    assert!(h.query_by_label("Tags").is_some());
+    assert!(h.query_by_role_and_label(egui::accesskit::Role::Tab, "Tags").is_some());
     // The canvas cannot be closed.
     assert!(h.state_mut().run("ui.toggle_panel", json!({ "panel": "canvas", "visible": false })).is_err());
 
@@ -944,8 +944,8 @@ fn panels_hide_float_move_and_reset() {
     assert!(h.query_by_label("Fixture type StageCraft Demo@Spot 300").is_some());
 
     // A tab dragged onto the inspector's tab strip joins that group.
-    let tags = h.get_by_label("Tags").rect().center();
-    let inspector = h.get_by_label("Inspector").rect();
+    let tags = h.get_by_role_and_label(egui::accesskit::Role::Tab, "Tags").rect().center();
+    let inspector = h.get_by_role_and_label(egui::accesskit::Role::Tab, "Inspector").rect();
     let target = egui::pos2(inspector.right() + 40.0, inspector.center().y);
     drag(&mut h, tags, target);
     let ws = run(&mut h, "ui.layout", Value::Null);
@@ -964,7 +964,7 @@ fn panels_hide_float_move_and_reset() {
 
     // View > Reset Layout.
     run(&mut h, "ui.reset_layout", Value::Null);
-    assert_eq!(h.state().ui.layout.layout, stagecraft_ui::dock::default_workspace().layout);
+    assert_eq!(h.state().ui.layout.layout(), stagecraft_ui::dock::default_workspace().layout());
     assert!(floating_panels(&h).is_empty());
 }
 
@@ -982,7 +982,7 @@ fn the_in_window_menus_run_commands() {
     h.run();
     h.get_by_role_and_label(egui::accesskit::Role::MenuItemCheckBox, "Table").click();
     h.run();
-    assert!(!h.state().ui.layout.layout.contains(&stagecraft_ui::state::PanelKind::Table));
+    assert!(!h.state().ui.layout.layout().contains(&stagecraft_ui::state::PanelKind::Table));
     // Every item names a command one of the registries (or the app) runs.
     let bar = stagecraft_ui::menu::bar(h.state());
     assert!(bar.items().len() > 40);
@@ -1006,14 +1006,14 @@ fn tools_sit_in_the_palette_and_tool_bar_commands_that_do_not_fit_go_into_a_menu
     assert!(h.query_by_label("Tool Ceiling").is_some());
     // A narrow window: the tool bar's last groups move into the ⋯ menu; the palette stays
     // in the layout (craft-ui may fold its column to an icon).
-    let mut h = Harness::builder()
+    let mut h = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
         .with_max_steps(8)
         .with_size(vec2(600.0, 700.0))
         .build_ui_state(|ui, s: &mut Studio| s.show(ui), Studio::new(stagecraft_ui::demo::engine()));
     h.run();
     assert!(h.query_by_label("Toolbar Tutorial").is_none());
     assert!(h.query_by_label("Toolbar Save").is_some());
-    assert!(h.state().ui.layout.layout.contains(&stagecraft_ui::state::PanelKind::Tools));
+    assert!(h.state().ui.layout.layout().contains(&stagecraft_ui::state::PanelKind::Tools));
     h.get_by_label("More commands").click();
     h.run();
     h.get_by_label("Menu Tutorial").click();

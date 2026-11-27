@@ -16,7 +16,7 @@ use stagecraft_ui::Studio;
 use stagecraft_ui::library::ShareBackend;
 
 fn harness(engine: Engine) -> Harness<'static, Studio> {
-    let mut h = Harness::builder()
+    let mut h = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
         // egui 0.37 styles a widget from its previous-pass state, so a widget that appears
         // asks for one more frame; closing a modal can take six.
         .with_max_steps(8)
@@ -95,7 +95,14 @@ fn share_search_download_and_import() {
     let mut h = harness(Engine::new());
     h.state_mut().ui.library.set_backend(Box::new(Mock));
     // The Share tab, then typing into the search field and pressing the button.
-    h.get_by_label("GDTF Share").click();
+    // Five browser tabs do not fit the right dock: GDTF Share is behind "More tabs".
+    if h.query_by_role_and_label(egui::accesskit::Role::Tab, "GDTF Share").is_none() {
+        h.get_by_label("More tabs").click();
+        h.run();
+        h.get_by_label("GDTF Share").click();
+    } else {
+        h.get_by_role_and_label(egui::accesskit::Role::Tab, "GDTF Share").click();
+    }
     h.run();
     h.get_by_label("Search GDTF Share").click();
     h.run_steps(4);

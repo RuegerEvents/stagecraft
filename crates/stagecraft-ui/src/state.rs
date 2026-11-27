@@ -460,7 +460,7 @@ pub struct UiState {
     pub fit_pending: bool,
     pub theme: ThemePref,
     /// Where the panels are (docks, tabs, floating windows); saved per user.
-    pub layout: craft_ui::docking::Workspace<PanelKind>,
+    pub layout: craft_behavior::dock::Workspace<PanelKind>,
     pub hidden_tags: BTreeSet<Id>,
     /// New objects without a parent go here.
     pub active_layer: Option<Id>,

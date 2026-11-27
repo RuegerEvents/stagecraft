@@ -1,14 +1,12 @@
 //! Toolbar icons: Lucide (ISC, `assets/icons/lucide/`) for the generic tools, StageCraft's
 //! own stage icons in the same 24 × 24 grid, 2 px round stroke (`assets/icons/stage/`).
 //!
-//! The SVGs are prepared once in a `craft_ui::icons::SvgIconSet` (stroke in white, so the
-//! texture tints to any colour), rasterised with resvg at the size and pixel density they are
+//! The SVGs are prepared once (stroke in white, so the texture tints to any colour), rasterised with resvg at the size and pixel density they are
 //! drawn at, and kept as textures in the egui context.
 
 use std::sync::OnceLock;
 
-use craft_ui::icons::{SvgIconSet, SvgStyle};
-use egui::{Color32, ColorImage, Rect, TextureHandle, TextureOptions, Ui, load::Bytes};
+use egui::{Color32, ColorImage, Rect, TextureHandle, TextureOptions, Ui};
 
 use crate::state::Tool;
 
@@ -119,16 +117,16 @@ static ICONS: &[(&str, &[u8])] = icons![
     "clock" => "lucide/clock.svg",
 ];
 
-fn set() -> &'static SvgIconSet {
-    static SET: OnceLock<SvgIconSet> = OnceLock::new();
-    SET.get_or_init(|| {
-        SvgIconSet::new(
-            ICONS,
-            SvgStyle { current_color: "#ffffff", stroke_width: None },
-            "bytes://stagecraft/icons/",
-            "select",
-        )
-    })
+/// The SVG of `name` with `currentColor` in white; `select` for an unknown name.
+fn svg(name: &str) -> &'static [u8] {
+    static SET: OnceLock<std::collections::HashMap<&'static str, Vec<u8>>> = OnceLock::new();
+    let set = SET.get_or_init(|| {
+        ICONS
+            .iter()
+            .map(|(n, bytes)| (*n, String::from_utf8_lossy(bytes).replace("currentColor", "#ffffff").into_bytes()))
+            .collect()
+    });
+    set.get(name).or_else(|| set.get("select")).map_or(&[], Vec::as_slice)
 }
 
 /// Every icon name, for tests.
@@ -177,11 +175,7 @@ pub fn rasterise(name: &str, px: u32) -> Option<ColorImage> {
     use resvg::tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
     use resvg::usvg::{Group, Node};
 
-    let egui::ImageSource::Bytes { bytes, .. } = set().source(name) else { return None };
-    let data: &[u8] = match &bytes {
-        Bytes::Static(b) => b,
-        Bytes::Shared(b) => b,
-    };
+    let data = svg(name);
     let tree = resvg::usvg::Tree::from_data(data, &resvg::usvg::Options::default()).ok()?;
     let mut pixmap = Pixmap::new(px, px)?;
     let scale = px as f32 / tree.size().width().max(tree.size().height());
@@ -314,8 +308,7 @@ mod tests {
 
     /// resvg without grid fitting, to compare.
     fn rasterise_plain(name: &str, px: u32) -> ColorImage {
-        let egui::ImageSource::Bytes { bytes, .. } = set().source(name) else { panic!() };
-        let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default()).unwrap();
+        let tree = resvg::usvg::Tree::from_data(svg(name), &resvg::usvg::Options::default()).unwrap();
         let mut pixmap = resvg::tiny_skia::Pixmap::new(px, px).unwrap();
         let s = px as f32 / 24.0;
         resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(s, s), &mut pixmap.as_mut());

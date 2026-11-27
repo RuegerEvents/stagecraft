@@ -44,11 +44,34 @@ fn title_left(left: f32, width: f32, text_w: f32) -> f32 {
     (left + (width - text_w) / 2.0).max(left + MAC_CONTENT_LEFT)
 }
 
+/// Empty window chrome that moves the window: a drag starts the OS move, a double click
+/// zooms. Laid out first, so the controls drawn over it later take their own presses. While
+/// the pointer is on one of those controls or on a panel over the strip, AppKit may not move
+/// the window from the title band (the runtime sets `NSWindow.movable` from it).
+pub fn move_area(ui: &mut Ui, rect: egui::Rect) -> Response {
+    let resp = ui.interact(rect, ui.scope_id().with("move_area"), egui::Sense::CLICK | egui::Sense::DRAG);
+    let top = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p)).and_then(|p| ui.ctx().layer_id_at(p));
+    let covered = top.is_some_and(|top| if top == ui.layer_id() { !resp.hovered() } else { top.order == egui::Order::Middle });
+    if covered {
+        craft_ui::shell::title_bar::set_window_movable(ui.ctx(), false);
+    }
+    if ui.input(|i| i.viewport().fullscreen).unwrap_or(false) {
+        return resp;
+    }
+    if resp.double_clicked() {
+        let maximized = ui.input(|i| i.viewport().maximized).unwrap_or(false);
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+    } else if resp.drag_started() {
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+    resp
+}
+
 /// The macOS title row: a window drag area with the title in the middle.
 pub fn title_row(ui: &mut Ui, s: &Studio) {
     let c = theme::of(ui);
     let r = ui.max_rect();
-    craft_window::title_bar::empty_area(ui, r);
+    move_area(ui, r);
     let galley = ui.painter().layout_no_wrap(s.window_title(), theme::proportional(12.5), c.text2);
     let x = title_left(r.left(), r.width(), galley.size().x);
     ui.painter().galley(pos2(x, r.center().y - galley.size().y / 2.0), galley, c.text2);
@@ -97,20 +120,9 @@ fn tip(ui: &Ui, label: &str, keys: Option<&str>) -> String {
     }
 }
 
-pub fn icon_style(c: &Tokens) -> craft_ui::buttons::IconButtonStyle {
-    use craft_ui::buttons::{ButtonVisuals, IconButtonStyle};
-    let v = |fill, icon| ButtonVisuals { fill, stroke: Stroke::NONE, icon };
-    IconButtonStyle {
-        normal: v(egui::Color32::TRANSPARENT, c.icon),
-        hovered: v(c.hover.gamma_multiply(0.7), c.text),
-        pressed: Some(v(c.pressed, c.text)),
-        selected: v(c.accent, c.on_accent),
-        corner_radius: egui::CornerRadius::same(3),
-        focus_stroke: Stroke::new(1.5, c.accent),
-    }
-}
-
-/// An icon button with an accessible name and a tooltip.
+/// An icon button with an accessible name and a tooltip: transparent, the hover tint, the
+/// pressed fill, the accent while selected and an accent ring inside it while it has the
+/// keyboard.
 pub fn icon(
     ui: &mut Ui,
     name: &str,
@@ -121,14 +133,46 @@ pub fn icon(
     tip: &str,
 ) -> Response {
     let c = theme::of(ui);
-    let style = icon_style(&c);
-    let r = craft_ui::buttons::IconButton::new(name, vec2(size, size), &style)
-        .selected(selected)
-        .show(ui, |ui, rect, colour| crate::icons::paint(ui, rect, icon, icon_size, colour));
+    let radius = egui::CornerRadius::same(3);
+    let (rect, r) = ui.allocate_exact_size(vec2(size, size), egui::Sense::click());
+    r.widget_info(|| egui::WidgetInfo::selected(Role::Button, ui.is_enabled(), selected, name));
+    let (fill, colour) = if selected {
+        (c.accent, c.on_accent)
+    } else if r.is_pointer_button_down_on() {
+        (c.pressed, c.text)
+    } else if r.hovered() {
+        (c.hover.gamma_multiply(0.7), c.text)
+    } else {
+        (egui::Color32::TRANSPARENT, c.icon)
+    };
+    if fill != egui::Color32::TRANSPARENT {
+        ui.painter().rect_filled(rect, radius, fill);
+    }
+    crate::icons::paint(ui, rect, icon, icon_size, colour);
+    if r.has_focus() {
+        ui.painter().rect_stroke(rect.shrink(2.0), radius, Stroke::new(1.5, c.accent), egui::StrokeKind::Inside);
+    }
     if crate::tutorial::mark(ui.ctx(), name, r.rect) {
         crate::tutorial::reveal(&r, name);
     }
     r.on_hover_text(tip)
+}
+
+/// The leading tool bar groups that fit in `available` beside the ⋯ button (`more` wide),
+/// and the rest. Groups are never split; with no room for ⋯ every group goes into it.
+fn fit_groups(widths: &[f32], available: f32, more: f32) -> (Vec<usize>, Vec<usize>) {
+    if widths.iter().sum::<f32>() <= available {
+        return ((0..widths.len()).collect(), Vec::new());
+    }
+    let mut used = more;
+    let shown = widths
+        .iter()
+        .take_while(|w| {
+            used += **w;
+            used <= available
+        })
+        .count();
+    ((0..shown).collect(), (shown..widths.len()).collect())
 }
 
 fn enabled(s: &Studio, run: &str) -> bool {
@@ -173,7 +217,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
     let bar = ui.max_rect();
     if s.ui.inset_title_bar {
         // Below the title row, but still window chrome: empty parts move the window.
-        craft_window::title_bar::empty_area(ui, bar);
+        move_area(ui, bar);
     }
     ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, c.separator));
     ui.horizontal_centered(|ui| {
@@ -183,10 +227,8 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
         let avail = (ui.available_width() - right).max(0.0);
         let widths: Vec<f32> =
             TOOLBAR.iter().map(|g| g.len() as f32 * (BUTTON + BUTTON_GAP) - BUTTON_GAP + GROUP_GAP).collect();
-        let fit = craft_ui::layout::fit_toolbar(&widths, avail, 0.0, BUTTON + GROUP_GAP).unwrap_or_else(|| {
-            craft_ui::layout::ToolbarFit { overflow: (0..TOOLBAR.len()).collect(), ..Default::default() }
-        });
-        for (n, (i, _)) in fit.shown.iter().enumerate() {
+        let (shown, overflow) = fit_groups(&widths, avail, BUTTON + GROUP_GAP);
+        for (n, i) in shown.iter().enumerate() {
             if n > 0 {
                 separator(ui, &c);
             }
@@ -205,13 +247,13 @@ pub fn toolbar(ui: &mut Ui, s: &mut Studio) {
                 }
             }
         }
-        if !fit.overflow.is_empty() {
-            if !fit.shown.is_empty() {
+        if !overflow.is_empty() {
+            if !shown.is_empty() {
                 separator(ui, &c);
             }
             let r = icon(ui, "More commands", "ellipsis", BUTTON, ICON, false, t("toolbar.more_commands"));
             egui::Popup::menu(&r).show(|ui| {
-                for (n, i) in fit.overflow.iter().enumerate() {
+                for (n, i) in overflow.iter().enumerate() {
                     if n > 0 {
                         ui.separator();
                     }

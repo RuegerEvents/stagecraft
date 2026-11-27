@@ -396,7 +396,7 @@ pub fn ready(ctx: &egui::Context) -> bool {
 }
 
 pub fn apply(ctx: &egui::Context) {
-    ctx.set_fonts(fonts());
+    craft_ui::fonts::load(ctx, fonts());
     ctx.style_mut_of(Theme::Light, |s| style(s, false));
     ctx.style_mut_of(Theme::Dark, |s| style(s, true));
 }
@@ -435,14 +435,18 @@ fn style(style: &mut egui::Style, dark: bool) {
     let shadow = Color32::from_black_alpha(if dark { 90 } else { 40 });
     v.window_shadow = egui::epaint::Shadow { offset: [0, 6], blur: 18, spread: 0, color: shadow };
     v.popup_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 12, spread: 0, color: shadow };
-    craft_ui::theme::WidgetPalette {
-        noninteractive: c.panel,
-        inactive: c.control,
-        hovered: c.hover,
-        active: c.pressed,
-        open: c.hover,
+    for (w, fill) in [
+        (&mut v.widgets.noninteractive, c.panel),
+        (&mut v.widgets.inactive, c.control),
+        (&mut v.widgets.hovered, c.hover),
+        (&mut v.widgets.active, c.pressed),
+        (&mut v.widgets.open, c.hover),
+    ] {
+        w.bg_fill = fill;
+        w.weak_bg_fill = fill;
+        w.corner_radius = egui::CornerRadius::same(3);
+        w.fg_stroke = Stroke::new(1.0, c.text);
     }
-    .apply_to(&mut v.widgets, egui::CornerRadius::same(3), Stroke::new(1.0, c.text));
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, c.separator);
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, c.text);
     v.widgets.inactive.fg_stroke = Stroke::new(1.0, c.text);
@@ -477,27 +481,6 @@ fn style(style: &mut egui::Style, dark: bool) {
         (TextStyle::Monospace, FontId::new(11.0, FontFamily::Monospace)),
     ]
     .into();
-}
-
-/// Colours and sizes of the docking chrome: tab strips in the bar colour, the active tab
-/// raised, 1 pt separator gaps between groups.
-pub fn dock_style(style: &mut craft_ui::docking::DockStyle, dark: bool) {
-    let c = tokens(dark);
-    style.accent = c.accent;
-    style.tab_height = 26.0;
-    style.gap = 1.0;
-    style.background = c.separator;
-    style.tab_background = c.bar;
-    style.active_background = c.tab_active;
-    style.text = c.text;
-    style.inactive_text = c.text2;
-    style.border = Stroke::NONE;
-    style.font = proportional(BODY);
-    style.floating_background = c.panel;
-    style.floating_stroke = Stroke::new(1.0, c.separator);
-    style.title_height = 24.0;
-    style.column_bar_height = 0.0;
-    style.icon_size = 16.0;
 }
 
 #[cfg(test)]

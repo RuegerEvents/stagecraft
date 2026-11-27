@@ -13,7 +13,7 @@ use stagecraft_ui::{Studio, ThemePref};
 fn harness(gpu: bool) -> Harness<'static, Studio> {
     let mut studio = Studio::new(Engine::new());
     studio.ui.theme = ThemePref::Dark;
-    let mut b = Harness::builder()
+    let mut b = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
         .with_max_steps(8)
         .with_size(vec2(1400.0, 900.0))
         // Real frame times, so separate clicks are not double clicks.

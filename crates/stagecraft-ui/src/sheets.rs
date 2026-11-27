@@ -9,7 +9,7 @@
 
 use egui::epaint::{Mesh, TextShape, Vertex, WHITE_UV};
 use egui::{
-    Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, RichText, Sense, Shape, Stroke, Ui,
+    Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, RichText, Shape, Stroke, Ui,
     vec2,
 };
 use serde_json::{Value, json};
@@ -548,7 +548,7 @@ fn dragged_rect(drag: &SheetDrag, min: P2, max: P2, to: P2) -> (P2, P2) {
 }
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
-    let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+    let (rect, resp) = crate::framework::canvas_widget(ui, true);
     widgets::name(&resp, egui::Role::Unknown, "Sheet canvas");
     let dark = ui.visuals().dark_mode;
     let painter = ui.painter_at(rect);

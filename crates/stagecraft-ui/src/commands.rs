@@ -202,7 +202,7 @@ fn state(c: &mut UiCtx, _: NoArgs) -> CmdResult {
         "section_hatch": ui.view3d.hatch,
         "theme": ui.theme,
         "tool_columns": ui.tool_columns,
-        "panels": crate::dock::PANELS.iter().map(|p| (p, ui.layout.layout.contains(p))).collect::<std::collections::BTreeMap<_, _>>(),
+        "panels": crate::dock::PANELS.iter().map(|p| (p, ui.layout.layout().contains(p))).collect::<std::collections::BTreeMap<_, _>>(),
         "hidden_tags": ui.hidden_tags,
         "active_layer": ui.active_layer,
         "snap": ui.snap,
@@ -796,7 +796,7 @@ fn tool_columns(c: &mut UiCtx, a: ToolColumnsArgs) -> CmdResult {
     // A floating or closed palette keeps its size.
     let docked = crate::dock::apply(
         &mut c.ui.layout,
-        vec![craft_ui::docking::Action::ResizeColumn { panel: PanelKind::Tools, width }],
+        vec![craft_behavior::dock::Action::resize_column(PanelKind::Tools, width)],
     )
     .is_ok();
     Ok(json!({ "columns": a.columns, "width": docked.then_some(width) }))
@@ -811,9 +811,9 @@ struct PanelArgs {
 
 fn toggle_panel(c: &mut UiCtx, a: PanelArgs) -> CmdResult {
     let ws = &mut c.ui.layout;
-    let visible = a.visible.unwrap_or(!ws.layout.contains(&a.panel));
+    let visible = a.visible.unwrap_or(!ws.layout().contains(&a.panel));
     crate::dock::set_visible(ws, a.panel, visible).map_err(CmdError::invalid_args)?;
-    Ok(json!({ "panel": a.panel, "visible": ws.layout.contains(&a.panel) }))
+    Ok(json!({ "panel": a.panel, "visible": ws.layout().contains(&a.panel) }))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -831,7 +831,7 @@ fn layout(c: &mut UiCtx, a: LayoutArgs) -> CmdResult {
         .actions
         .into_iter()
         .map(serde_json::from_value)
-        .collect::<Result<Vec<craft_ui::docking::Action<PanelKind>>, _>>()
+        .collect::<Result<Vec<craft_behavior::dock::Action<PanelKind>>, _>>()
         .map_err(|e| CmdError::invalid_args(format!("ui.layout: {e}")))?;
     if !actions.is_empty() {
         crate::dock::apply(&mut c.ui.layout, actions).map_err(CmdError::invalid_args)?;
@@ -871,17 +871,17 @@ fn default_float_h() -> f32 {
 
 fn float_panel(c: &mut UiCtx, a: FloatArgs) -> CmdResult {
     let ws = &mut c.ui.layout;
-    if !ws.layout.contains(&a.panel) {
+    if !ws.layout().contains(&a.panel) {
         crate::dock::set_visible(ws, a.panel, true).map_err(CmdError::invalid_args)?;
     }
-    let rect = [a.x, a.y, a.width, a.height];
-    crate::dock::apply(ws, vec![craft_ui::docking::Action::Float { panel: a.panel, rect }])
+    let rect = egui::Rect::from_min_size(egui::pos2(a.x, a.y), egui::vec2(a.width, a.height));
+    crate::dock::apply(ws, vec![craft_behavior::dock::Action::float(a.panel, rect)])
         .map_err(CmdError::invalid_args)?;
-    Ok(json!({ "panel": a.panel, "rect": rect }))
+    Ok(json!({ "panel": a.panel, "rect": [a.x, a.y, a.width, a.height] }))
 }
 
 fn reset_layout(c: &mut UiCtx, _: NoArgs) -> CmdResult {
-    c.ui.layout.reset(&crate::dock::default_layout());
+    crate::dock::reset(&mut c.ui.layout);
     // The tutorial's place is above the inspector; it stays open only while it runs.
     if !c.ui.tutorial.active {
         crate::dock::set_visible(&mut c.ui.layout, PanelKind::Tutorial, false).map_err(CmdError::invalid)?;

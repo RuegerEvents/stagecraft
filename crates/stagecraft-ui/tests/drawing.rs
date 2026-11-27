@@ -22,7 +22,7 @@ fn harness(engine: Engine) -> Harness<'static, Studio> {
 fn harness_in(engine: Engine, unit: &str) -> Harness<'static, Studio> {
     let mut engine = engine;
     engine.execute("doc.set_units", json!({ "length_unit": unit })).unwrap();
-    let mut h = Harness::builder()
+    let mut h = Harness::builder().with_context_setup(stagecraft_ui::framework::install_headless)
         .with_max_steps(8)
         .with_size(vec2(1400.0, 900.0))
         // Real frame times, so separate clicks are not double clicks.

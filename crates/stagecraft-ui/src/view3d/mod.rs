@@ -14,7 +14,7 @@ pub mod gpu;
 pub mod offscreen;
 pub mod scene;
 
-use egui::{Align2, Color32, Event, MouseWheelUnit, PointerButton, Rgba, RichText, Role, Sense, Ui, UiBuilder};
+use egui::{Align2, Color32, Event, MouseWheelUnit, PointerButton, Rgba, RichText, Role, Ui, UiBuilder};
 use glam::DVec3;
 use serde::Serialize;
 use serde_json::json;
@@ -189,7 +189,8 @@ pub(crate) fn uniforms(v: &View3d, pal: &Palette3d, ppp: f32) -> gpu::Uniforms {
 }
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
-    let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+    let main = s.ui.view != crate::state::View::Split;
+    let (rect, resp) = crate::framework::canvas_widget(ui, main);
     widgets::name(&resp, Role::Unknown, t("view3d.name"));
     let v = &mut s.ui.view3d;
     v.camera.rect = rect;

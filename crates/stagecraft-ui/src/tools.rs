@@ -382,7 +382,7 @@ pub fn typing_now(ui: &Ui, s: &Studio) -> bool {
 /// Typed dimensions (the heads-up boxes), Tab, Enter, Escape, Backspace while a tool
 /// draws. Only when no text field has focus, so typing in the inspector is left alone.
 fn keyboard(ui: &mut Ui, s: &mut Studio) {
-    if ui.ctx().memory(|m| m.focused().is_some()) || s.ui.palette.open || s.ui.table.focused {
+    if crate::framework::other_focus(ui.ctx()) || s.ui.palette.open || s.ui.table.focused {
         return;
     }
     let kind = crate::hud::kind(s);

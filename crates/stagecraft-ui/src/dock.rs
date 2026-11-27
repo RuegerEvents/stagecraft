@@ -1,17 +1,22 @@
-//! Dockable panels through `craft_ui::docking`: the plan/3D/split/sheets canvas is a
-//! protected centre, every other panel (layers, tags, sheets, library, GDTF Share,
-//! inspector, table) is a tab that moves between docks, splits and floating windows.
+//! Dockable panels through craft-ui's `DockArea` (`craft_ui::patterns::dock`) over the
+//! `craft_behavior::dock` model: the plan/3D/split/sheets canvas is a protected centre, every
+//! other panel (layers, tags, sheets, library, GDTF Share, inspector, table) is a tab that
+//! moves between docks, splits and floating windows.
 //!
-//! The layout lives in [`UiState::layout`](crate::state::UiState) as a
-//! [`Workspace`]; the renderer only reports [`Action`]s, which go through
-//! [`apply`] like the `ui.*` layout commands do. [`Prefs`] saves it per user with
-//! `craft-settings`.
+//! The layout lives in [`UiState::layout`](crate::state::UiState) as a [`Workspace`]; the dock
+//! shows a copy of it ([`Live`]) and only reports [`Action`]s, which go through [`apply`] like
+//! the `ui.*` layout commands do. [`Prefs`] saves it per user with `craft-settings`. Every body
+//! is StageCraft's own egui code (`PanelSpec::host_body`).
 
-use craft_ui::docking::{
-    Action, Column, DockArea, DockContent, DockHeights, DockStyle, Group, Layout, Node, PanelLimits, Permissions, Side,
-    Workspace,
-};
-use craft_ui::layout::{SplitAxis, SplitSize};
+use std::sync::Arc;
+
+use craft_behavior::dock::{Action, Column, DockEdge, Group, Layout, Node, Permissions, SplitSize, Workspace};
+use craft_behavior::flow::Axis;
+use craft_ui::contract::{Bind, BodyCx, MemoKey, MemoProps, PlainData, SizeLimits, Tracked};
+use craft_ui::docking::{DockConfig, DockHeights, DockPanels, GroupAt, PanelSpec, PanelSpecs};
+use craft_ui::patterns::dock::DockArea;
+use craft_ui::primitives::{Glyph, IconSpec};
+use craft_ui::style::UiTokens;
 use egui::Ui;
 use serde::{Deserialize, Serialize};
 
@@ -39,45 +44,38 @@ pub const LEFT_WIDTH: f32 = 204.0;
 const RIGHT_WIDTH: f32 = 300.0;
 const TABLE_HEIGHT: f32 = 210.0;
 
+fn dock_column(side: DockEdge, width: f32, groups: Vec<Group<PanelKind>>) -> Node<PanelKind> {
+    Node::dock(side, vec![Column::new(groups).with_width(width)])
+}
+
 /// The arrangement of a new user and of View > Reset Layout, as in CADCraft: the tool
-/// palette on the left; on the right the browsers (Layers, Tags, Sheets, Library, GDTF
-/// Share as icon tabs) above the Inspector, the tutorial above both when shown; the table
+/// palette on the left; on the right the browsers (Layers, Tags, Sheets as tabs, Library
+/// and GDTF Share in a group below them) above the Inspector, the tutorial above both when shown; the table
 /// under the canvas.
 pub fn default_layout() -> Layout<PanelKind> {
     use PanelKind::*;
-    let left =
-        Node::Dock { side: Side::Start, columns: vec![Column::new(vec![Group::new(vec![Tools], 0)], LEFT_WIDTH)] };
-    let right = Node::Dock {
-        side: Side::End,
-        columns: vec![Column::new(
-            vec![
-                Group::new(vec![Tutorial], 0),
-                Group::new(vec![Layers, Tags, Sheets, Library, Share], 0),
-                Group::new(vec![Inspector], 0),
-            ],
-            RIGHT_WIDTH,
-        )],
-    };
-    let centre = Node::Split {
-        axis: SplitAxis::Vertical,
-        size: SplitSize::FixedSecond(TABLE_HEIGHT),
-        first: Box::new(Node::Tabs { panels: vec![Canvas], active: 0 }),
-        second: Box::new(Node::Tabs { panels: vec![Table], active: 0 }),
-    };
-    Layout {
-        root: Some(Node::Split {
-            axis: SplitAxis::Horizontal,
-            size: SplitSize::FixedFirst(LEFT_WIDTH),
-            first: Box::new(left),
-            second: Box::new(Node::Split {
-                axis: SplitAxis::Horizontal,
-                size: SplitSize::FixedSecond(RIGHT_WIDTH),
-                first: Box::new(centre),
-                second: Box::new(right),
-            }),
-        }),
-        floating: Vec::new(),
-    }
+    let left = dock_column(DockEdge::Start, LEFT_WIDTH, vec![Group::new(vec![Tools], 0)]);
+    let right = dock_column(
+        DockEdge::End,
+        RIGHT_WIDTH,
+        vec![
+            Group::new(vec![Tutorial], 0),
+            Group::new(vec![Layers, Tags, Sheets], 0),
+            Group::new(vec![Library, Share], 0),
+            Group::new(vec![Inspector], 0),
+        ],
+    );
+    let centre =
+        Node::split(Axis::Y, SplitSize::FixedSecond(TABLE_HEIGHT), Node::tabs(vec![Canvas], 0), Node::tabs(vec![Table], 0));
+    Layout::new(
+        Some(Node::split(
+            Axis::X,
+            SplitSize::FixedFirst(LEFT_WIDTH),
+            left,
+            Node::split(Axis::X, SplitSize::FixedSecond(RIGHT_WIDTH), centre, right),
+        )),
+        Vec::new(),
+    )
 }
 
 /// The default layout with the tutorial hidden; it opens above the inspector.
@@ -89,27 +87,32 @@ pub fn default_workspace() -> Workspace<PanelKind> {
 
 pub fn permissions(p: &PanelKind) -> Permissions {
     match p {
-        PanelKind::Canvas => Permissions { accepts_splits: true, ..Permissions::PROTECTED },
+        PanelKind::Canvas => Permissions::PROTECTED.accepts_splits(true),
         _ => Permissions::default(),
     }
 }
 
 /// Apply layout actions all or none, as the renderer and the `ui.*` commands do.
 pub fn apply(ws: &mut Workspace<PanelKind>, actions: Vec<Action<PanelKind>>) -> Result<(), String> {
-    ws.apply_all(actions, permissions).map(drop).map_err(|e| format!("{e:?}"))
+    ws.apply_all(actions, false, permissions).map(drop).map_err(|e| format!("{e:?}"))
 }
 
 /// Show or hide a panel; a panel shown again goes back where it was.
 pub fn set_visible(ws: &mut Workspace<PanelKind>, panel: PanelKind, visible: bool) -> Result<(), String> {
-    ws.set_visible(panel, visible, None, permissions).map_err(|e| format!("{e:?}"))
+    ws.set_visible(panel, visible, None, false, permissions).map_err(|e| format!("{e:?}"))
 }
 
 /// Show a panel and make it the active tab of its group.
 pub fn bring_forward(ws: &mut Workspace<PanelKind>, panel: PanelKind) {
-    if !ws.layout.contains(&panel) {
+    if !ws.layout().contains(&panel) {
         let _ = set_visible(ws, panel, true);
     }
-    let _ = apply(ws, vec![Action::Activate { panel }]);
+    let _ = apply(ws, vec![Action::activate(panel)]);
+}
+
+/// Back to the default arrangement (View > Reset Layout).
+pub fn reset(ws: &mut Workspace<PanelKind>) {
+    ws.replace(Workspace::new(default_layout()));
 }
 
 /// A saved layout fitted to the panels of this build; the default if it does not validate.
@@ -124,17 +127,20 @@ pub fn load(saved: Option<Workspace<PanelKind>>) -> Workspace<PanelKind> {
 }
 
 /// What the window shows: the user's layout, except that the Sheets mode brings the sheet
-/// list to the front and leaves out the table, so the page has room. Actions the renderer
+/// list to the front and leaves out the table (so the page has room) and the fixture
+/// library (so the Inspector has room for the viewport's settings). Actions the renderer
 /// reports against it are panel-anchored and apply to the real layout as well.
-fn display(ws: &Workspace<PanelKind>, view: View) -> Layout<PanelKind> {
-    let mut layout = ws.layout.clone();
+fn display(ws: &Workspace<PanelKind>, view: View) -> Workspace<PanelKind> {
+    let mut shown = ws.clone();
     if view == View::Sheets {
-        let _ = layout.apply_with_permissions(Action::Close { panel: PanelKind::Table }, permissions);
-        if layout.contains(&PanelKind::Sheets) {
-            let _ = layout.apply(Action::Activate { panel: PanelKind::Sheets });
+        for p in [PanelKind::Table, PanelKind::Library, PanelKind::Share] {
+            let _ = shown.apply(Action::close(p), false, permissions);
+        }
+        if shown.layout().contains(&PanelKind::Sheets) {
+            let _ = shown.apply(Action::activate(PanelKind::Sheets), false, permissions);
         }
     }
-    layout
+    shown
 }
 
 pub fn label(p: PanelKind) -> &'static str {
@@ -152,89 +158,137 @@ pub fn label(p: PanelKind) -> &'static str {
     })
 }
 
-/// The icon of a panel's tab (the right dock's panels show icons, the name in the body's
-/// title row); `None` keeps a text tab.
-pub fn icon(p: PanelKind) -> Option<&'static str> {
-    Some(match p {
+/// The icon of a panel collapsed to icons and of its flyout cell.
+fn icon(p: PanelKind) -> &'static str {
+    match p {
         PanelKind::Layers => "layers",
         PanelKind::Tags => "tags",
         PanelKind::Sheets => "sheet",
         PanelKind::Library => "library",
         PanelKind::Share => "cloud-download",
-        PanelKind::Canvas | PanelKind::Inspector | PanelKind::Tutorial | PanelKind::Table | PanelKind::Tools => {
-            return None;
-        }
-    })
-}
-
-/// The icon of a panel collapsed to icons.
-fn iconic(p: PanelKind) -> &'static str {
-    icon(p).unwrap_or(match p {
         PanelKind::Inspector => "sliders",
         PanelKind::Tutorial => "graduation-cap",
         PanelKind::Table => "table",
-        _ => "box",
-    })
+        PanelKind::Tools | PanelKind::Canvas => "box",
+    }
+}
+
+/// A panel's icon, painted by StageCraft's own icon rasteriser in the dock's ink.
+#[derive(Debug, PartialEq)]
+struct PanelIcon(&'static str);
+
+impl MemoProps for PanelIcon {
+    fn key(&self, key: &mut MemoKey) {
+        key.write(self.0.as_bytes());
+    }
+}
+
+impl Glyph for PanelIcon {
+    fn paint(&self, painter: &egui::Painter, _tokens: &UiTokens, rect: egui::Rect, color: egui::Color32, _mirrored: bool) {
+        let size = if rect.height() >= 16.0 { 16.0 } else { 12.0 };
+        let rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
+        crate::icons::paint_with(painter, painter.ctx(), rect, self.0, size, color);
+    }
+}
+
+fn panel_icon(p: PanelKind) -> &'static PanelIcon {
+    static ICONS: std::sync::OnceLock<Vec<(PanelKind, PanelIcon)>> = std::sync::OnceLock::new();
+    let icons = ICONS.get_or_init(|| PANELS.iter().map(|p| (*p, PanelIcon(icon(*p)))).collect());
+    &icons.iter().find(|(k, _)| *k == p).expect("every panel has an icon").1
+}
+
+/// What the dock reads of the panels. Their names, limits and heights do not change while
+/// StageCraft runs, so the specs never move their revision.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Specs;
+
+impl PlainData for Specs {}
+
+impl PanelSpecs<PanelKind> for Specs {
+    fn spec(&self, panel: &PanelKind) -> PanelSpec {
+        let mut spec = PanelSpec::new(label(*panel).to_owned())
+            .limits(limits(*panel))
+            .host_body()
+            .allow_native(false)
+            .icon(IconSpec::glyph(panel_icon(*panel)));
+        if let Some(h) = dock_heights(*panel) {
+            spec = spec.heights(h);
+        }
+        spec = spec.float_size(floating_size(*panel));
+        if *panel == PanelKind::Canvas { spec.canvas() } else { spec }
+    }
+
+    fn permissions(&self, panel: &PanelKind) -> Permissions {
+        permissions(panel)
+    }
+}
+
+fn limits(panel: PanelKind) -> SizeLimits {
+    let min = match panel {
+        PanelKind::Inspector | PanelKind::Layers | PanelKind::Library => egui::vec2(220.0, 80.0),
+        PanelKind::Tools => egui::vec2(crate::toolsets::width_for(1), 120.0),
+        PanelKind::Table => egui::vec2(320.0, 100.0),
+        _ => egui::vec2(160.0, 60.0),
+    };
+    SizeLimits::at_least(min)
+}
+
+fn dock_heights(panel: PanelKind) -> Option<DockHeights> {
+    match panel {
+        PanelKind::Layers | PanelKind::Tags | PanelKind::Sheets => Some(DockHeights::new(190.0).compact(120.0)),
+        // Below the browsers: lower, so the Inspector keeps its room.
+        PanelKind::Library | PanelKind::Share => Some(DockHeights::new(150.0).compact(90.0)),
+        PanelKind::Tutorial => Some(DockHeights::new(230.0).compact(150.0)),
+        _ => None,
+    }
+}
+
+fn floating_size(panel: PanelKind) -> egui::Vec2 {
+    match panel {
+        PanelKind::Table => egui::vec2(720.0, 320.0),
+        PanelKind::Inspector => egui::vec2(300.0, 520.0),
+        PanelKind::Tools => egui::vec2(190.0, 420.0),
+        _ => egui::vec2(280.0, 400.0),
+    }
+}
+
+/// The workspace the dock shows and the panels' specs, kept across frames: the dock reads
+/// the specs again only when the shown workspace's revision moves, so an unchanged layout
+/// keeps its `Arc`.
+#[derive(Default)]
+pub struct Live {
+    shown: Option<Arc<Workspace<PanelKind>>>,
+    specs: Tracked<Specs>,
+}
+
+impl Live {
+    fn shown(&mut self, ws: Workspace<PanelKind>) -> Arc<Workspace<PanelKind>> {
+        if let Some(shown) = self.shown.as_ref().filter(|s| ***s == ws) {
+            return Arc::clone(shown);
+        }
+        let shown = Arc::new(ws);
+        self.shown = Some(Arc::clone(&shown));
+        shown
+    }
 }
 
 pub const DOCK_ID: &str = "dock";
 
 /// The dock area: everything below the toolbar and above the status bar.
 pub fn show(ui: &mut Ui, s: &mut Studio) {
-    let layout = display(&s.ui.layout, s.ui.view);
-    let mut style = DockStyle::from_ui(ui);
-    crate::theme::dock_style(&mut style, ui.visuals().dark_mode);
-    let id = egui::Id::unique(DOCK_ID);
-    let out = DockArea::new(id).show_content(ui, &layout, &style, &mut Bodies { s });
-    tab_icons(ui, id, &layout);
-    if !out.actions.is_empty()
-        && let Err(e) = apply(&mut s.ui.layout, out.actions)
+    let shown = s.dock.shown(display(&s.ui.layout, s.ui.view));
+    let specs = std::mem::take(&mut s.dock.specs);
+    let config = DockConfig::default().native_windows(false);
+    let out = {
+        let mut bodies = Bodies { s: &mut *s };
+        DockArea::new(DOCK_ID, Bind::given(shown), &specs, &mut bodies, config).show(ui)
+    };
+    s.dock.specs = specs;
+    let actions: Vec<_> = out.actions.into_iter().chain(out.requested).collect();
+    if !actions.is_empty()
+        && let Err(e) = apply(&mut s.ui.layout, actions)
     {
         s.ui.error(e);
-    }
-}
-
-/// The active panel of every tab group.
-fn active_panels(layout: &Layout<PanelKind>) -> Vec<PanelKind> {
-    fn walk(n: &Node<PanelKind>, out: &mut Vec<PanelKind>) {
-        match n {
-            Node::Tabs { panels, active } => out.extend(panels.get(*active).copied()),
-            Node::Split { first, second, .. } => {
-                walk(first, out);
-                walk(second, out);
-            }
-            Node::Dock { columns, .. } => {
-                for g in columns.iter().flat_map(|c| &c.groups) {
-                    out.extend(g.active_panel().copied())
-                }
-            }
-            Node::Stack { entries } => out.extend(entries.iter().filter(|e| e.open).map(|e| e.panel)),
-            _ => {}
-        }
-    }
-    let mut active = Vec::new();
-    for n in layout.root.iter().chain(layout.floating.iter().map(|f| &f.root)) {
-        walk(n, &mut active);
-    }
-    active
-}
-
-/// Icons on the icon tabs, painted over craft-ui's tab (whose label is blank) on the tab's
-/// own layer; the tab keeps the panel's name for accessibility and gets it as a tooltip.
-fn tab_icons(ui: &Ui, id: egui::Id, layout: &Layout<PanelKind>) {
-    let c = crate::theme::of(ui);
-    let active = active_panels(layout);
-    for p in layout.panels() {
-        let Some(icon) = icon(*p) else { continue };
-        let Some(r) = ui.ctx().read_response(id.with(("tab", *p))) else { continue };
-        let on = active.contains(p);
-        let painter = ui.ctx().layer_painter(r.layer_id).with_clip_rect(r.interact_rect);
-        let colour = if on { c.text } else { c.text2 };
-        let rect = egui::Rect::from_center_size(r.rect.center(), egui::vec2(16.0, 16.0));
-        crate::icons::paint_with(&painter, ui.ctx(), rect, icon, 16.0, colour);
-        if r.hovered() {
-            r.on_hover_text(label(*p));
-        }
     }
 }
 
@@ -242,19 +296,9 @@ struct Bodies<'a> {
     s: &'a mut Studio,
 }
 
-impl DockContent<PanelKind> for Bodies<'_> {
-    fn body(&mut self, ui: &mut Ui, panel: &PanelKind) {
+impl DockPanels<PanelKind> for Bodies<'_> {
+    fn body(&mut self, panel: &PanelKind, ui: &mut Ui, _: &mut BodyCx<'_>) {
         let s = &mut *self.s;
-        if *panel != PanelKind::Canvas {
-            let c = crate::theme::of(ui);
-            let r = ui.max_rect();
-            ui.painter().rect_filled(r, 0.0, c.panel);
-            // The tab strip's bottom edge.
-            ui.painter().hline(r.x_range(), r.top() + 0.5, egui::Stroke::new(1.0, c.separator));
-        }
-        if icon(*panel).is_some() {
-            title_row(ui, s, *panel);
-        }
         let scroll = |ui: &mut Ui, s: &mut Studio, f: fn(&mut Ui, &mut Studio)| {
             egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 8, top: 4, bottom: 6 }).show(ui, |ui| {
                 egui::ScrollArea::vertical()
@@ -264,7 +308,8 @@ impl DockContent<PanelKind> for Bodies<'_> {
             });
         };
         match panel {
-            PanelKind::Canvas => canvas(ui, s),
+            // The canvas is its group's `group_view`.
+            PanelKind::Canvas => {}
             PanelKind::Tools => crate::toolsets::show(ui, s),
             PanelKind::Layers => scroll(ui, s, crate::panels::layers),
             PanelKind::Tags => scroll(ui, s, crate::panels::tags),
@@ -280,103 +325,31 @@ impl DockContent<PanelKind> for Bodies<'_> {
         }
     }
 
-    fn label(
+    /// The plan, 3D view or sheet: the window's document canvas, edge to edge.
+    fn group_view(
         &mut self,
-        ui: &Ui,
-        panel: &PanelKind,
-        logical: &str,
-        font: &egui::FontId,
-        color: egui::Color32,
-    ) -> egui::WidgetText {
-        let _ = (ui, color);
-        if icon(*panel).is_some() {
-            // Room for the icon `tab_icons` paints; the name stays the accessible label.
-            return egui::RichText::new("   ").font(font.clone()).into();
+        panels: &[PanelKind],
+        _: usize,
+        ui: &mut Ui,
+        at: GroupAt,
+        _: &mut BodyCx<'_>,
+    ) -> Option<f32> {
+        let GroupAt::Show(rect) = at else { return None };
+        if !panels.contains(&PanelKind::Canvas) {
+            return None;
         }
-        logical.into()
+        canvas(ui, self.s);
+        crate::framework::canvas_keys(ui.ctx(), crate::hud::kind(self.s).is_some());
+        Some(rect.height())
     }
 
-    fn paint_icon(
-        &mut self,
-        painter: &egui::Painter,
-        rect: egui::Rect,
-        panel: &PanelKind,
-        color: egui::Color32,
-    ) -> bool {
-        crate::icons::paint_with(
-            painter,
-            painter.ctx(),
-            rect,
-            iconic(*panel),
-            if rect.height() >= 16.0 { 16.0 } else { 12.0 },
-            color,
-        );
-        true
+    /// ≡ before the tab strip: float, close the panel, reset the layout.
+    fn group_header(&mut self, panels: &[PanelKind], active: usize, ui: &mut Ui, _: &mut BodyCx<'_>) {
+        let Some(panel) = panels.get(active).copied() else { return };
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(22.0, ui.available_height().max(20.0)), egui::Sense::hover());
+        let b = egui::Rect::from_center_size(rect.center(), egui::vec2(20.0, 20.0));
+        panel_menu_button(ui, self.s, panel, b);
     }
-
-    fn group_header_width(&self, _panels: &[PanelKind], active: &PanelKind, _floating: bool, _strip: f32) -> f32 {
-        if icon(*active).is_none() && *active != PanelKind::Canvas { 26.0 } else { 0.0 }
-    }
-
-    fn group_header(&mut self, ui: &mut Ui, _panels: &[PanelKind], active: &PanelKind, _floating: bool) {
-        let r = ui.max_rect();
-        let b = egui::Rect::from_center_size(r.center(), egui::vec2(20.0, 20.0));
-        panel_menu_button(ui, self.s, *active, b);
-    }
-
-    fn logical_label(&self, panel: &PanelKind) -> String {
-        label(*panel).to_owned()
-    }
-
-    fn permissions(&self, panel: &PanelKind) -> Permissions {
-        permissions(panel)
-    }
-
-    fn limits(&self, panel: &PanelKind) -> PanelLimits {
-        let min = match panel {
-            PanelKind::Inspector | PanelKind::Layers | PanelKind::Library => egui::vec2(220.0, 80.0),
-            PanelKind::Tools => egui::vec2(crate::toolsets::width_for(1), 120.0),
-            PanelKind::Table => egui::vec2(320.0, 100.0),
-            _ => egui::vec2(160.0, 60.0),
-        };
-        PanelLimits { min, ..Default::default() }
-    }
-
-    fn dock_heights(&self, panel: &PanelKind) -> Option<DockHeights> {
-        match panel {
-            PanelKind::Layers | PanelKind::Tags | PanelKind::Sheets | PanelKind::Library | PanelKind::Share => {
-                Some(DockHeights::new(190.0).compact(120.0))
-            }
-            PanelKind::Tutorial => Some(DockHeights::new(230.0).compact(150.0)),
-            _ => None,
-        }
-    }
-
-    fn floating_size(&self, panel: &PanelKind) -> Option<egui::Vec2> {
-        Some(match panel {
-            PanelKind::Table => egui::vec2(720.0, 320.0),
-            PanelKind::Inspector => egui::vec2(300.0, 520.0),
-            PanelKind::Tools => egui::vec2(190.0, 420.0),
-            _ => egui::vec2(280.0, 400.0),
-        })
-    }
-}
-
-/// The row at the top of an icon-tabbed panel: its name, and the ≡ panel menu.
-fn title_row(ui: &mut Ui, s: &mut Studio, panel: PanelKind) {
-    let c = crate::theme::of(ui);
-    let full = ui.max_rect();
-    let row = egui::Rect::from_min_size(full.min, egui::vec2(full.width(), 26.0));
-    ui.painter().text(
-        egui::pos2(row.left() + 10.0, row.center().y),
-        egui::Align2::LEFT_CENTER,
-        label(panel),
-        crate::theme::bold(12.5),
-        c.text,
-    );
-    let b = egui::Rect::from_center_size(egui::pos2(row.right() - 16.0, row.center().y), egui::vec2(20.0, 20.0));
-    panel_menu_button(ui, s, panel, b);
-    ui.advance_cursor_after_rect(row);
 }
 
 /// ≡: float, close the panel, reset the layout.
@@ -504,35 +477,29 @@ impl craft_settings::Settings for Prefs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use craft_ui::docking::Placement;
+    use craft_behavior::dock::DockPlacement;
 
     #[test]
     fn the_default_layout_is_valid_and_has_every_panel() {
         let ws = default_workspace();
         ws.validate().unwrap();
         for p in PANELS {
-            assert!(ws.layout.contains(&p) || ws.hidden.iter().any(|(h, _)| *h == p), "{p:?}");
+            assert!(ws.layout().contains(&p) || ws.hidden().iter().any(|(h, _)| *h == p), "{p:?}");
         }
-        assert!(!ws.layout.contains(&PanelKind::Tutorial), "the tutorial opens on demand");
+        assert!(!ws.layout().contains(&PanelKind::Tutorial), "the tutorial opens on demand");
         let mut shown = ws.clone();
         set_visible(&mut shown, PanelKind::Tutorial, true).unwrap();
-        assert!(shown.layout.contains(&PanelKind::Tutorial));
+        assert!(shown.layout().contains(&PanelKind::Tutorial));
     }
 
     #[test]
     fn layouts_survive_config_toml() {
         let mut ws = default_workspace();
-        apply(&mut ws, vec![Action::Float { panel: PanelKind::Library, rect: [300.0, 200.0, 280.0, 360.0] }]).unwrap();
+        let rect = egui::Rect::from_min_size(egui::pos2(300.0, 200.0), egui::vec2(280.0, 360.0));
+        apply(&mut ws, vec![Action::float(PanelKind::Library, rect)]).unwrap();
         set_visible(&mut ws, PanelKind::Tags, false).unwrap();
-        apply(
-            &mut ws,
-            vec![Action::Move {
-                panel: PanelKind::Share,
-                anchor: PanelKind::Inspector,
-                placement: Placement::Tab { before: None },
-            }],
-        )
-        .unwrap();
+        apply(&mut ws, vec![Action::move_beside(PanelKind::Share, PanelKind::Inspector, DockPlacement::tab(None))])
+            .unwrap();
         let tools = crate::state::ToolOptions { floor_z: 1000.0, floor_thickness: 200.0, ..Default::default() };
         let prefs = Prefs {
             appearance: Appearance { theme: ThemePref::Dark },
@@ -559,11 +526,13 @@ mod tests {
     fn an_old_layout_gets_new_panels_and_a_broken_one_the_default() {
         let mut old = default_workspace();
         set_visible(&mut old, PanelKind::Share, false).unwrap();
-        old.hidden.clear();
+        old.forget_hidden(|_| true);
         let ws = load(Some(old));
-        assert!(ws.layout.contains(&PanelKind::Share) || ws.hidden.iter().any(|(p, _)| *p == PanelKind::Share));
-        let mut broken = default_workspace();
-        broken.version = 99;
-        assert_eq!(load(Some(broken)), default_workspace());
+        assert!(ws.layout().contains(&PanelKind::Share) || ws.hidden().iter().any(|(p, _)| *p == PanelKind::Share));
+        // A layout from a newer StageCraft (a format version this build does not know).
+        let mut newer = serde_json::to_value(default_workspace()).unwrap();
+        newer["version"] = serde_json::json!(99);
+        let newer: Workspace<PanelKind> = serde_json::from_value(newer).unwrap();
+        assert_eq!(load(Some(newer)), default_workspace());
     }
 }

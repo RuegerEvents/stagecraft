@@ -273,14 +273,14 @@ fn enter(s: &mut Studio, i: usize) {
     s.ui.tutorial.step = i;
     s.ui.tutorial.entered_done = STEPS.get(i).is_some_and(|st| (st.done)(s));
     // Panels the step works in come to the front of their tab group (the Library shares
-    // one with Layers).
+    // one with GDTF Share).
     let panels: Vec<PanelKind> = STEPS
         .get(i)
         .map(|st| (st.targets)(s))
         .unwrap_or_default()
         .into_iter()
         .filter_map(|t| match t {
-            Target::Panel(p) if s.ui.layout.layout.contains(&p) => Some(p),
+            Target::Panel(p) if s.ui.layout.layout().contains(&p) => Some(p),
             _ => None,
         })
         .collect();
@@ -533,7 +533,7 @@ mod tests {
         s.run("ui.tutorial", json!({ "action": "start" })).unwrap();
         update(&mut s);
         assert_eq!(s.ui.tutorial.step, 0);
-        assert!(s.ui.layout.layout.contains(&PanelKind::Tutorial), "the panel opens");
+        assert!(s.ui.layout.layout().contains(&PanelKind::Tutorial), "the panel opens");
         s.run("layer.create", json!({ "name": "House" })).unwrap();
         update(&mut s);
         assert_eq!(s.ui.tutorial.step, 1, "Stage and House exist");

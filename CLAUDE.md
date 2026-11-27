@@ -117,7 +117,14 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
 - All visible text goes through `i18n::t("key")`; the catalog is
   `assets/i18n/en.json`, and a test fails on keys used but missing.
 - egui 0.37 comes from storytold's fork (root `[patch.crates-io]`, same revision as
-  craft-libs); widgets name themselves with `egui::Role` (kittest fails on unnamed inputs
+  craft-libs). The craft-ui runtime is installed on the context (`framework.rs`: `install`
+  in `run`, `install_headless` in tests through kittest's `with_context_setup`; an egui
+  plugin hands it the frame input with the theme mode before each pass and collects the
+  in-window menu bar's picks). It takes Tab, Escape and the clipboard unless a widget has
+  the keyboard, so the canvas is a focusable widget (`framework::canvas_widget`, id
+  `canvas_id`) that holds egui focus whenever nothing else does (`canvas_keys`, keeping
+  Tab while a tool takes typed dimensions); "something has focus" checks use
+  `framework::other_focus`; widgets name themselves with `egui::Role` (kittest fails on unnamed inputs
   and on missing glyphs, so give every combo box and checkbox a name).
 - Look (Craft suite, like CADCraft): `theme.rs` holds `Tokens::DARK` / `Tokens::LIGHT`
   (chrome, `plan` canvas palette, `scene` 3D palette, axis colours); every widget reads
@@ -128,15 +135,19 @@ must stay watertight; `tests/geom.rs` checks all kinds at all levels.
 - Window layout (`chrome.rs`): on macOS the 28 pt title row (`chrome::title_row`, the band
   AppKit centres the traffic lights in, centred title "StageCraft — file •"); then the tool
   bar (file/edit/import/export commands as icons, ⋯ overflow, Plan/3D/Split/Sheets switch,
-  palette search), the options row (active tool + its options), the dock area (`dock.rs`,
-  craft-ui docking) and the status bar (Model and sheet tabs, coordinates,
+  palette search), the options row (active tool + its options), the dock area (`dock.rs`:
+  craft-ui's `DockArea` over the `craft_behavior::dock` model, every body StageCraft's own
+  egui code via `PanelSpec::host_body`, the canvas the group's `group_view`) and the status
+  bar (Model and sheet tabs, coordinates,
   the active tool's prompt and the last message, grid/object/truss snap, sketch, constraint
   colours and theme toggles). No menu row on
   macOS (`menu.rs` is the native menu bar through craft-menu). Default docks: the tool
   palette (`PanelKind::Tools`, `toolsets.rs`) left; right the browsers Layers, Tags,
-  Sheets, Library, GDTF Share as icon tabs (`dock::icon`, painted by `tab_icons`, with a
-  title row and ≡ panel menu in the body) above the Inspector; the tutorial opens above
-  them; the table under the canvas. Layout and theme are saved per user by craft-settings
+  Sheets as one tab group, Library and GDTF Share as a second (what does not fit a strip
+  goes behind "More tabs"; tests find tabs by `Role::Tab`, since the panel body carries
+  the name too)
+  above the Inspector, each group with our ≡ panel menu before its tabs; the tutorial opens
+  above them; the table under the canvas. Layout and theme are saved per user by craft-settings
   (memory-only in tests). `ui.toggle_panel`, `ui.layout`, `ui.float_panel`,
   `ui.reset_layout` drive the docks. ⌘ keys from the native menu come back as key presses
   into `app.rs`'s `shortcuts`.

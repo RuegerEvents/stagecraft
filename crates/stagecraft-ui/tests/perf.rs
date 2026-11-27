@@ -56,7 +56,9 @@ impl Window {
             ),
             Err(_) => Studio::new(engine),
         };
-        let mut w = Self { ctx: egui::Context::default(), studio, time: 0.0, pointer: Pos2::ZERO };
+        let ctx = egui::Context::default();
+        stagecraft_ui::framework::install_headless(&ctx);
+        let mut w = Self { ctx, studio, time: 0.0, pointer: Pos2::ZERO };
         for _ in 0..6 {
             w.frame(Vec::new());
         }

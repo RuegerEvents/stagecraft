@@ -2,7 +2,7 @@
 
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{
-    Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, Sense, Shape, Stroke, Ui, vec2,
+    Align2, Color32, Event, MouseWheelUnit, Painter, PointerButton, Pos2, Rect, Shape, Stroke, Ui, vec2,
 };
 use stagecraft_core::{Document, Id};
 use stagecraft_geom::{Detail, LineClass, PlanPrim, PlanStyle, math};
@@ -96,7 +96,7 @@ pub fn tolerance(cam: &Camera) -> f64 {
 }
 
 pub fn show(ui: &mut Ui, s: &mut Studio) {
-    let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+    let (rect, resp) = crate::framework::canvas_widget(ui, true);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, t("canvas.name")));
     s.ui.camera.rect = rect;
     if s.ui.fit_pending {
