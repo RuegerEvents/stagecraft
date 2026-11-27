@@ -467,9 +467,16 @@ pub struct SavedLayout {
 
 impl craft_settings::Settings for Prefs {
     const APP_ID: &'static str = "stagecraft";
-    const SCHEMA_VERSION: u32 = 1;
+    /// 2: the panel layout is craft-behavior's dock model (craft-libs after the framework
+    /// merge); a layout saved by version 1 cannot be read and gives way to the default.
+    const SCHEMA_VERSION: u32 = 2;
 
-    fn migrate(_from: u32, _doc: &mut craft_settings::DocumentMut) -> Result<(), craft_settings::MigrateError> {
+    fn migrate(from: u32, doc: &mut craft_settings::DocumentMut) -> Result<(), craft_settings::MigrateError> {
+        if from == 1
+            && let Some(layout) = doc.get_mut("layout").and_then(|l| l.as_table_like_mut())
+        {
+            layout.remove("workspace");
+        }
         Ok(())
     }
 }
@@ -520,6 +527,20 @@ mod tests {
         assert_eq!(store.get(), &prefs);
         let back = load(store.get().layout.workspace.clone());
         assert_eq!(Some(&back), prefs.layout.workspace.as_ref());
+    }
+
+    #[test]
+    fn a_layout_from_before_the_framework_is_dropped_and_the_rest_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "schema_version = 1\n[appearance]\ntheme = \"dark\"\n[layout.workspace.layout.root.Split]\naxis = \"Horizontal\"\n",
+        )
+        .unwrap();
+        let (store, report) = craft_settings::SettingsStore::<Prefs>::open_at(dir.path());
+        assert!(!report.has_problems(), "{report:?}");
+        assert_eq!(store.get().appearance.theme, ThemePref::Dark);
+        assert!(store.get().layout.workspace.is_none());
     }
 
     #[test]
