@@ -5,26 +5,40 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Build the artifacts again for an existing tag (the release is reused).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build, e.g. v0.2.0"
+        required: true
+      all:
+        description: "Also rebuild the Windows and Linux archives (otherwise only the macOS DMG)"
+        type: boolean
+        default: false
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  CARGO_TERM_COLOR: always
 
 permissions:
   contents: write
-
-env:
-  CARGO_TERM_COLOR: always
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create the release
-        run: gh release create "$GITHUB_REF_NAME" --title "StageCraft $GITHUB_REF_NAME" --generate-notes --verify-tag
+        with:
+          ref: ${{ env.TAG }}
+      - name: Create the release (unless it exists)
+        run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "StageCraft $TAG" --generate-notes --verify-tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   binaries:
     name: ${{ matrix.target }}
     needs: create-release
+    if: github.event_name == 'push' || inputs.all
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +48,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -47,7 +63,8 @@ jobs:
         with:
           bin: stagecraft
           target: ${{ matrix.target }}
-          archive: StageCraft-$tag-$target
+          archive: StageCraft-${{ env.TAG }}-$target
+          ref: refs/tags/${{ env.TAG }}
           include: README.md,THIRD_PARTY.md
           locked: true
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -57,12 +74,19 @@ jobs:
     needs: create-release
     runs-on: macos-latest
     steps:
+      # The release build fills most of the runner's disk; hdiutil needs room for the image.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf ~/Library/Android /usr/local/share/dotnet ~/.dotnet /Library/Developer/CoreSimulator /Users/runner/Library/Developer/CoreSimulator || true
+          df -h /
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-      - run: scripts/macos-dmg.sh "$GITHUB_REF_NAME"
-      - run: gh release upload "$GITHUB_REF_NAME" dist/*.dmg --clobber
+      - run: scripts/macos-dmg.sh "$TAG"
+      - run: gh release upload "$TAG" dist/*.dmg --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
