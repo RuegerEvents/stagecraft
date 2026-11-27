@@ -501,8 +501,8 @@ fn gdtf_shots(h: &mut Harness<'static, Studio>, dir: &str, tn: &str) {
 #[test]
 fn imported_mvr() {
     let Ok(dir) = std::env::var("STAGECRAFT_SCREENSHOTS") else { return };
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../testdata/private/vectorworks/sample_show.mvr");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/private/vectorworks/sample_show.mvr");
     if !path.exists() {
         return;
     }
