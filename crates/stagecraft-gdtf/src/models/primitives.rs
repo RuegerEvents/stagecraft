@@ -166,7 +166,7 @@ mod tests {
             // Outward normals: the sum of (centroid − centre)·normal is positive.
             let centre = (lo + hi) * 0.5;
             let mut dot = 0.0;
-            for t in m.indices.chunks_exact(3) {
+            for t in m.indices.as_chunks::<3>().0 {
                 let ps: Vec<Vec3> = t.iter().map(|i| Vec3::from_array(m.positions[*i as usize])).collect();
                 let n = (ps[1] - ps[0]).cross(ps[2] - ps[0]);
                 dot += ((ps[0] + ps[1] + ps[2]) / 3.0 - centre).dot(n);

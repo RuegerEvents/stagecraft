@@ -246,7 +246,7 @@ fn regions(loops: &[Vec<DVec3>], plane: &ViewPlane, tol: f64) -> Vec<CutRegion> 
             }
         }
         let caps = earcutr::earcut(&coords, &hole_idx, 2)
-            .map(|idx| idx.chunks_exact(3).map(|c| [verts[c[0]], verts[c[1]], verts[c[2]]]).collect())
+            .map(|idx| idx.as_chunks::<3>().0.iter().map(|c| [verts[c[0]], verts[c[1]], verts[c[2]]]).collect())
             .unwrap_or_default();
         out.push(CutRegion { outer, holes, caps });
     }

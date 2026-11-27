@@ -139,7 +139,7 @@ fn local_plan(doc: &Document, obj: &Object) -> Lines {
             object: stagecraft_hlr::ObjectId(0),
             material: stagecraft_hlr::Material(0),
             positions: m.positions.iter().map(|p| Vec3::from_array(*p).as_dvec3()).collect(),
-            triangles: m.indices.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect(),
+            triangles: m.indices.as_chunks::<3>().0.iter().map(|t| [t[0], t[1], t[2]]).collect(),
         }],
         lines: Vec::new(),
     };
@@ -174,7 +174,7 @@ fn local_plan(doc: &Document, obj: &Object) -> Lines {
 fn edge_on(m: &Mesh) -> Vec<Vec<P2>> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
-    for t in m.indices.chunks_exact(3) {
+    for t in m.indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|i| Vec3::from_array(m.positions[t[i] as usize]).as_dvec3());
         let n = (b - a).cross(c - a);
         let len = n.length();

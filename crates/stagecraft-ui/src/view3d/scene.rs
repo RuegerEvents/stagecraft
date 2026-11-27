@@ -263,7 +263,7 @@ impl Scene {
                 continue;
             }
             let m = &e.mesh;
-            for tri in m.indices.chunks_exact(3) {
+            for tri in m.indices.as_chunks::<3>().0 {
                 let p = |i: u32| Vec3::from_array(m.positions[i as usize]).as_dvec3();
                 if let Some(t) = ray_triangle(ray, p(tri[0]), p(tri[1]), p(tri[2]))
                     && best.is_none_or(|(b, _)| t < b)

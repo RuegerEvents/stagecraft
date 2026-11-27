@@ -39,7 +39,7 @@ impl RawMesh {
             }
         }
         if m.determinant() < 0.0 {
-            for t in self.indices.chunks_exact_mut(3) {
+            for t in self.indices.as_chunks_mut::<3>().0 {
                 t.swap(1, 2);
             }
         }
@@ -55,7 +55,7 @@ impl RawMesh {
                 m.indices = self.indices;
             }
             _ => {
-                for t in self.indices.chunks_exact(3) {
+                for t in self.indices.as_chunks::<3>().0 {
                     let [a, b, c] = [0, 1, 2].map(|i| self.positions[t[i] as usize]);
                     let n = (b - a).cross(c - a).normalize_or_zero();
                     let base = m.positions.len() as u32;

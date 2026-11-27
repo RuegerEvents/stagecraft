@@ -186,7 +186,7 @@ pub fn scene(doc: &Document, ids: &[Id], scale: f64) -> hlr::Scene {
             let mut positions = Vec::new();
             let mut triangles = Vec::new();
             let range = g.start as usize..(g.start + g.count) as usize;
-            for t in mesh.indices[range].chunks_exact(3) {
+            for t in mesh.indices[range].as_chunks::<3>().0 {
                 let mut tri = [0u32; 3];
                 for (k, &vi) in t.iter().enumerate() {
                     let r = &mut remap[vi as usize];

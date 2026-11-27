@@ -295,8 +295,8 @@ fn orient(pos: &[DVec3], tris: &mut [[u32; 3]], edges: &[EdgeRec]) -> (Vec<bool>
     let mut tri_edges = vec![[u32::MAX; 3]; n];
     let mut fill = vec![0u8; n];
     for (ei, e) in edges.iter().enumerate() {
-        for s in 0..(e.count.min(2) as usize) {
-            let f = e.faces[s] as usize;
+        for &face in e.faces.iter().take(e.count.min(2) as usize) {
+            let f = face as usize;
             if (fill[f] as usize) < 3 {
                 tri_edges[f][fill[f] as usize] = ei as u32;
                 fill[f] += 1;

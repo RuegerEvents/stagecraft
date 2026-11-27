@@ -296,7 +296,7 @@ impl Mesh {
             p.map(|c| (c as f64 * 1000.0).round() as i64)
         };
         let mut edges: HashMap<([i64; 3], [i64; 3]), i32> = HashMap::new();
-        for t in self.indices.chunks_exact(3) {
+        for t in self.indices.as_chunks::<3>().0 {
             for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
                 let (ka, kb) = (key(a), key(b));
                 if ka == kb {
@@ -312,7 +312,9 @@ impl Mesh {
     /// a watertight mesh.
     pub fn volume(&self) -> f64 {
         self.indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|t| {
                 let p = |i: u32| Vec3::from_array(self.positions[i as usize]).as_dvec3();
                 p(t[0]).dot(p(t[1]).cross(p(t[2]))) / 6.0
@@ -336,7 +338,7 @@ mod tests {
         assert!((m.volume() - 6e9).abs() < 1e3, "{}", m.volume());
         assert_eq!(m.groups, vec![Group { start: 0, count: 36, material: MaterialClass::Wall }]);
         // Every face normal agrees with its winding.
-        for t in m.indices.chunks_exact(3) {
+        for t in m.indices.as_chunks::<3>().0 {
             let p = |i: u32| Vec3::from_array(m.positions[i as usize]);
             let face = (p(t[1]) - p(t[0])).cross(p(t[2]) - p(t[0])).normalize();
             assert!(face.dot(Vec3::from_array(m.normals[t[0] as usize])) > 0.99);

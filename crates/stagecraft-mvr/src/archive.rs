@@ -203,7 +203,9 @@ fn decode_xml(bytes: &[u8], warnings: &mut Vec<Warning>) -> String {
     if bytes.starts_with(b"\xFF\xFE") || bytes.starts_with(b"\xFE\xFF") {
         let le = bytes[0] == 0xFF;
         let units: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) })
             .collect();
         warnings.push(Warning::new(SCENE_FILE, "UTF-16 encoded; spec requires UTF-8"));

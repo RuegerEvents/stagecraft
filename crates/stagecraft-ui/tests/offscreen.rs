@@ -28,7 +28,7 @@ fn rendered_viewports_get_images_and_are_cached() {
     // 180 × 120 mm at 200 dpi, as cropped: 160 × 110 mm.
     assert_eq!((*width, *height), (1260, 866));
     // Not blank: the model is drawn on white.
-    let dark = pixels.chunks_exact(4).filter(|p| p[0] < 200).count();
+    let dark = pixels.as_chunks::<4>().0.iter().filter(|p| p[0] < 200).count();
     assert!(dark > 10_000, "{dark} dark pixels");
     assert_eq!(off.renders, 1);
     off.render(&doc, &vp).unwrap();

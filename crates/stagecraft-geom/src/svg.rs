@@ -141,7 +141,7 @@ fn walk(n: roxmltree::Node, m: &Affine, parent: &Style, out: &mut Vec<Shape>) {
             "line" => vec![(vec![[f("x1"), f("y1")], [f("x2"), f("y2")]], false)],
             "polyline" | "polygon" => {
                 let n = numbers(c.attribute("points").unwrap_or_default());
-                vec![(n.chunks_exact(2).map(|p| [p[0], p[1]]).collect(), tag == "polygon")]
+                vec![(n.as_chunks::<2>().0.iter().map(|p| [p[0], p[1]]).collect(), tag == "polygon")]
             }
             _ => continue,
         };

@@ -53,7 +53,7 @@ impl Mesh {
         self.positions.extend(other.positions.iter().map(|p| m.transform_point3(Vec3::from_array(*p)).to_array()));
         self.normals.extend(other.normals.iter().map(|n| (nm * Vec3::from_array(*n)).normalize_or_zero().to_array()));
         let flip = m.determinant() < 0.0;
-        for t in other.indices.chunks_exact(3) {
+        for t in other.indices.as_chunks::<3>().0 {
             if flip {
                 self.indices.extend([base + t[0], base + t[2], base + t[1]]);
             } else {

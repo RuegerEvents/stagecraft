@@ -164,7 +164,7 @@ fn add_mesh(m: &gltf::Mesh, world: Mat4, blob: &[Option<Vec<u8>>], out: &mut Raw
             _ => out.normals = None,
         }
         out.positions.extend(pos);
-        for t in tris.chunks_exact(3) {
+        for t in tris.as_chunks::<3>().0 {
             if t.iter().all(|i| *i < n) {
                 out.indices.extend(t.iter().map(|i| base + i));
             }

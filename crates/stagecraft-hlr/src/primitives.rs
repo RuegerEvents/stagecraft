@@ -75,7 +75,7 @@ pub fn prism(object: ObjectId, material: Material, a: DVec3, b: DVec3, profile: 
         m.triangles.push([i, n + j, n + i]);
     }
     let flat: Vec<f64> = profile.iter().flat_map(|p| [p[0], p[1]]).collect();
-    for t in earcutr::earcut(&flat, &[], 2).unwrap_or_default().chunks_exact(3) {
+    for t in earcutr::earcut(&flat, &[], 2).unwrap_or_default().as_chunks::<3>().0 {
         let [i, j, k] = [t[0] as u32, t[1] as u32, t[2] as u32];
         m.triangles.push([i, k, j]);
         m.triangles.push([n + i, n + j, n + k]);

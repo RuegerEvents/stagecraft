@@ -193,7 +193,7 @@ fn outline_edges(mesh: &Mesh, w: &DAffine3, toward: DVec3, plane: Option<&Plane>
     let pos: Vec<DVec3> = mesh.positions.iter().map(|p| w.transform_point3(Vec3::from_array(*p).as_dvec3())).collect();
     type Key = (i64, i64, i64);
     let mut edges: HashMap<(Key, Key), (DVec3, DVec3, Vec<DVec3>)> = HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]];
         let n = (b - a).cross(c - a);
         if n.length_squared() < 1e-12 {

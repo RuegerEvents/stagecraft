@@ -181,7 +181,7 @@ fn views() {
             -hi.z - pad
         );
         // Front view: looking along +y, x right, z up (SVG y down → −z).
-        for t in flat.indices.chunks_exact(3) {
+        for t in flat.indices.as_chunks::<3>().0 {
             let p: Vec<String> =
                 t.iter().map(|i| flat.positions[*i as usize]).map(|v| format!("{:.1},{:.1}", v[0], -v[2])).collect();
             svg += &format!(

@@ -109,7 +109,7 @@ pub fn cut_loops(mesh: &Mesh, to_world: &DAffine3, plane: &Plane) -> Vec<Loop> {
     let dist: Vec<f64> = world.iter().map(|p| (*p - o).dot(n)).collect();
     let side = |i: usize| dist[i] > 0.0;
     let mut segments: Vec<([f64; 2], [f64; 2])> = Vec::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [t[0] as usize, t[1] as usize, t[2] as usize];
         let hidden = [side(a), side(b), side(c)];
         let count = hidden.iter().filter(|h| **h).count();
@@ -254,7 +254,7 @@ pub fn triangulate(poly: &CutPolygon) -> (Vec<[f64; 2]>, Vec<[usize; 3]>) {
     }
     let flat: Vec<f64> = pts.iter().flat_map(|p| [p[0], p[1]]).collect();
     let tris = match earcutr::earcut(&flat, &holes, 2) {
-        Ok(idx) => idx.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect(),
+        Ok(idx) => idx.as_chunks::<3>().0.iter().map(|t| [t[0], t[1], t[2]]).collect(),
         Err(_) => Vec::new(),
     };
     // Keep the winding counter-clockwise in plane coordinates.
@@ -337,7 +337,7 @@ mod tests {
         let mut m = cube();
         let mut inner = Mesh::empty();
         inner.cuboid(DVec3::new(200.0, 200.0, -10.0), DVec3::new(800.0, 800.0, 1010.0));
-        for t in inner.indices.chunks_exact_mut(3) {
+        for t in inner.indices.as_chunks_mut::<3>().0 {
             t.swap(1, 2);
         }
         m.append(&inner);

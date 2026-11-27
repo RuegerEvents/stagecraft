@@ -232,7 +232,7 @@ pub fn hatch(rings: &[Vec<P2>], angle: f64, spacing: f64) -> Vec<[P2; 2]> {
             }
         }
         xs.sort_by(f64::total_cmp);
-        for pair in xs.chunks_exact(2) {
+        for pair in xs.as_chunks::<2>().0 {
             if pair[1] - pair[0] > 1e-6 {
                 out.push([back([pair[0], y]), back([pair[1], y])]);
             }

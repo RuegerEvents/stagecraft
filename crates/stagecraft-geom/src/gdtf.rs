@@ -145,7 +145,7 @@ pub(crate) fn append(out: &mut Mesh, m: &stagecraft_gdtf::Mesh, t: Mat4) {
         out.normals.extend(std::iter::repeat_n([0.0, 0.0, 1.0], m.positions.len()));
     }
     let flip = t.determinant() < 0.0;
-    for tri in m.indices.chunks_exact(3) {
+    for tri in m.indices.as_chunks::<3>().0 {
         if flip {
             out.indices.extend([base + tri[0], base + tri[2], base + tri[1]]);
         } else {
